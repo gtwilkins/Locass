@@ -15,6 +15,8 @@ Locass can be installed with the following commands:
 
 	make
 	sudo make install
+## Requirements
+* gcc
 
 ## Use
 Locass assembly requires three steps. The first two steps are preprocessing steps that must be performed once for a given read dataset. Once preprocessing is complete, assembly can be repeated without the first two steps.
