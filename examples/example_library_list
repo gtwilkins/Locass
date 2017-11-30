@@ -1,0 +1,8 @@
+# The following denotes a paired library that is separated into two files
+paired /home/me/my_seq_data/paired_reads-1.fa /home/me/my_seq_data/paired_reads-2.fa
+
+# The following denotes a paired library that is interleaved in one file
+paired /home/me/my_seq_data/paried_reads.fa
+
+# The following denotes an unpaired library
+single /home/me/my_seq_data/unpaired_reads.fa

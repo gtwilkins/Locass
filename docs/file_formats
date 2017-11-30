@@ -1,0 +1,45 @@
+Binary sequence data file
+Suffix = "-seq.dat"
+
+[0] Byte length of header
+[1-8] ID number for transform
+[9] Length of reads
+[10] Number of transformation cycles completed ( should be length + 1 if complete )
+[11] Is calibrated flag
+[12-15] Estimated coverage * 100,000
+[16-19] Number of sequences total (32bit uint)
+[20] Number of paired libraries
+[21+]for each library:
+	[0-4] Number of sequences in the libray (32bit uint)
+	[4-6] Median insert size (16bit uint)
+	[6-8] Minimum insert size (16bit uint)
+	[8-10] Maximum insert size (16bit uint)
+
+
+
+Burrow-Wheeler Transform data file
+Suffix = "-bwt.dat"
+[0] Byte length of header
+[1-8] Shared session ID
+[9-16] Number of BWT character runs
+[17-24] Number of Sequences
+[25-32] Number of 'A'
+[33-40] Number of 'C'
+[41-48] Number of 'G'
+[49-56] Number of 'T'
+
+
+
+FM-index data file
+Suffix = "-idx.dat"
+[0] Byte length of header
+[1-8] Shared session ID
+[9-12] Number of BWT bytes per index
+[13-16] Number of BWT characters per mark
+
+
+
+Sequence ID data file
+Suffix = "-ids.dat"
+[0] Byte length of header
+[1-8] Shared session ID
