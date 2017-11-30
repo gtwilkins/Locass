@@ -33,7 +33,7 @@ An example `index` command would be:
 
 	locass index -i /path/to/sequence_file_list -p /path/to/project_prefix
 
-* Step 2: Library calibration
+### Step 2: Library calibration
 
 The orientation and insert size of paired read libraries, as well as overall sequencing coverage must be detected before assembly with the `calibrate` command.
 
@@ -41,7 +41,7 @@ An example `calibration` command would be:
 
 	locass calibration -p /path/to/project_prefix
 
-* Step 3: Assembly
+### Step 3: Assembly
 
 Targeted locus assembly can be performed once the sequence read dataset has been indexed and calibrated with the `assemble` command.
 
