@@ -1,4 +1,6 @@
 # Locass
+
+## Overview
 Locass is an application for the assembly of targeted genomic loci and their genomic neighbourhood. From a dataset unassembled sequence reads, locass will find and assemble genomic regions that are similar to a user's query sequence. Locass will extend the assembled loci into flanking genomic regions as desired. Locass can be run with minimal memory requirements even with large eukaryotic genomes.
 
 ## Limitations
@@ -17,7 +19,7 @@ Locass can be installed with the following commands:
 ## Use
 Locass assembly requires three steps. The first two steps are preprocessing steps that must be performed once for a given read dataset. Once preprocessing is complete, assembly can be repeated without the first two steps.
 
-* Step 1: Read indexing
+### Step 1: Read indexing
 
 The sequence read dataset must be indexed to allow for rapid assembly with the `index` command.
 
