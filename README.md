@@ -6,8 +6,11 @@ Locass is designed for use with short read sequence data, namely those produced 
 
 ## Installation
 The install directory can be specified with the following command (if this omitted, Locass is installed to /usr/local/bin/):
+
 	./configure --prefix=/path/to/directory/
+
 Locass be can installed with the following commands:
+
 	make
 	sudo make install
 
