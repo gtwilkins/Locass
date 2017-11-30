@@ -20,7 +20,15 @@ Locass can be installed with the following commands:
 	sudo make install
 
 ## Use
-Locass assembly requires three steps. The first two steps are preprocessing steps that must be performed once for a given read dataset. Once preprocessing is complete, assembly can be repeated without the first two steps.
+Locass assembly requires three steps. The first two steps are preprocessing steps that must be performed once for a given read dataset. Once preprocessing is complete, assembly can be repeated without the first two steps. The commands for these three steps are as follows:
+
+	locass index
+	locass calibrate
+	locass assemble
+
+To full usage of a command can be viewed with:
+
+	locasss <command> -h
 
 ### Step 1: Read indexing
 The sequence read dataset must be indexed to allow for rapid assembly with the `index` command.
@@ -50,7 +58,3 @@ The input for `assemble should be a single file containing one or more query seq
 An example `assemble` command would be:
 
 	locass assemble -i /path/to/seed_file.fa -p /path/to/project_prefix -o /path/to/output_file.fa
-
-Additional assembly options can be viewed with:
-
-	locass assemble -h
