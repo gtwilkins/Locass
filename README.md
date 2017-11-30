@@ -9,7 +9,7 @@ The install directory can be specified with the following command (if this omitt
 
 	./configure --prefix=/path/to/directory/
 
-Locass be can installed with the following commands:
+Locass can be installed with the following commands:
 
 	make
 	sudo make install
