@@ -30,6 +30,9 @@ To full usage of a command can be viewed with:
 
 	locasss <command> -h
 
+## Quick guide
+The following is a quick guide for using locass.
+
 ### Step 1: Read indexing
 The sequence read dataset must be indexed to allow for rapid assembly with the `index` command.
 
