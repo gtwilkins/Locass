@@ -111,6 +111,7 @@ void BinaryReader::read()
         }
         pFwd = 1 + ( buff[pBuff] - 1 - cycle ) / 4;
         iFwd = ( buff[pBuff] - 1 - cycle ) & 0x3;
+        
         chars[pChar] += intToByte[iChar++][ byteToInt[iFwd][ buff[ pBuff + pFwd ] ] ];
         chars[pChar] += intToByte[iChar][ complement[ byteToInt[iRev][ buff[ pBuff + pRev ] ] ] ];
         iter( pChar, iChar );
@@ -143,7 +144,7 @@ BinaryWriter::BinaryWriter( PreprocessFiles* filenames, uint8_t inLibCount, uint
             ^ (CharId)( rand() & randMask );
     
     memset( &charCounts, 0, 40 );
-    fns->setBinaryWrite( bin, bwt, ends, pos, sap, ids );
+    fns->setBinaryWrite( bin, bwt, ends, ins, ids );
     lineLen = 1 + ( readLen + 3 ) / 4;
     buffSize = 16777216 - ( 16777216 % lineLen );
     binBuff = new uint8_t[buffSize];
@@ -220,8 +221,7 @@ void BinaryWriter::close()
     // Write BWT, POS and SAP, fill in counts for BWT, POS, SAP and IDS
     writeBwt();
     writeEnd();
-    writePos();
-    writeSap();
+    writeIns();
     writeIds();
 }
 
@@ -328,37 +328,68 @@ void BinaryWriter::writeIds()
     }
 }
 
-void BinaryWriter::writePos()
+void BinaryWriter::writeIns()
 {
-    CharId posMask = (CharId)1 << 63;
     for ( int i ( 0 ); i < 4; i++ )
     {
-        ReadId posCount = ReadId( charCounts[i] > 0 );
-        fwrite( &posCount, 4, 1, pos[i] );
-        if ( posCount )
+        CharId maxCount = max( idsCounts[i][0], max( idsCounts[i][1], max( idsCounts[i][2], idsCounts[i][3] ) ) );
+        CharId thisMax = 255;
+        uint8_t sapByte = 0;
+        while ( maxCount > thisMax )
         {
-            fwrite( &posMask, 8, 1, pos[i] );
+            thisMax <<= 8;
+            sapByte++;
         }
         
-        fclose( pos[i] );
+        CharId insCount = 2 + ( ( sapByte + 1 ) * 4 );
+        fwrite( &insCount, 8, 1, ins[i] );
+        uint8_t writeBuff[ insCount ];
+        writeBuff[0] = 128 ^ sapByte;
+        writeBuff[1] = 0;
+        uint8_t p = 2;
+        for ( int j = 0; j < 4; j++ )
+        {
+            for ( uint8_t k = sapByte + 1; k--; )
+            {
+                writeBuff[p++] = ( idsCounts[i][j] >> ( 8 * k ) ) & uint8_t(255);
+            }
+        }
+        fwrite( &writeBuff, 1, insCount, ins[i] );
+        fclose( ins[i] );
     }
 }
 
-void BinaryWriter::writeSap()
-{
-    uint8_t stacksPerSap = 4;
-    ReadId sapCount;
-    
-    for ( int i ( 0 ); i < 4; i++ )
-    {
-        sapCount = ReadId( charCounts[i] > 1 );
-        fwrite( &stacksPerSap, 1, 1, sap[i] );
-        fwrite( &sapCount, 4, 1, sap[i] );
-        if ( sapCount )
-        {
-            fwrite( &idsCounts[i], 4, 4, sap[i] );
-        }
-        
-        fclose( sap[i] );
-    }
-}
+//void BinaryWriter::writePos()
+//{
+//    CharId posMask = (CharId)1 << 63;
+//    for ( int i ( 0 ); i < 4; i++ )
+//    {
+//        ReadId posCount = ReadId( charCounts[i] > 0 );
+//        fwrite( &posCount, 4, 1, pos[i] );
+//        if ( posCount )
+//        {
+//            fwrite( &posMask, 8, 1, pos[i] );
+//        }
+//        
+//        fclose( pos[i] );
+//    }
+//}
+//
+//void BinaryWriter::writeSap()
+//{
+//    uint8_t stacksPerSap = 4;
+//    ReadId sapCount;
+//    
+//    for ( int i ( 0 ); i < 4; i++ )
+//    {
+//        sapCount = ReadId( charCounts[i] > 1 );
+//        fwrite( &stacksPerSap, 1, 1, sap[i] );
+//        fwrite( &sapCount, 4, 1, sap[i] );
+//        if ( sapCount )
+//        {
+//            fwrite( &idsCounts[i], 4, 4, sap[i] );
+//        }
+//        
+//        fclose( sap[i] );
+//    }
+//}

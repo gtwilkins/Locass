@@ -62,12 +62,13 @@ struct BinaryWriter
     void writeBwt();
     void writeEnd();
     void writeIds();
-    void writePos();
-    void writeSap();
+    void writeIns();
+//    void writePos();
+//    void writeSap();
     
     // File pointers
     PreprocessFiles* fns;
-    FILE* bin,* bwt,* ends,* pos[4],* sap[4],* ids[4][4];
+    FILE* bin,* bwt,* ends,* ins[4],* ids[4][4];
     
     // Buffers
     uint8_t* binBuff;

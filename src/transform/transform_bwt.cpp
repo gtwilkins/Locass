@@ -30,24 +30,19 @@ BwtCycler::BwtCycler( PreprocessFiles* filenames )
     // Create buffers
     inBwtBuff = new uint8_t[BWT_BUFFER];
     outBwtBuff = new uint8_t[BWT_BUFFER];
-    inSapBuff = new ReadId[SAP_BUFFER];
-    inPosBuff = new CharId[IDS_BUFFER];
+    inInsBuff = new uint8_t[BWT_BUFFER];
     inEndBuff = new ReadId[IDS_BUFFER];
     outEndBuff = new ReadId[IDS_BUFFER];
     for ( int i ( 0 ); i < 4; i++ )
     {
         inIdsBuff[i] = new ReadId[IDS_BUFFER];
-        outSapBuff[i] = new ReadId[SAP_BUFFER];
-        outPosBuff[i] = new CharId[IDS_BUFFER];
+        outInsBuff[i] = new uint8_t[BWT_BUFFER];
         for ( int j ( 0 ); j < 5; j++ )
         {
             outIdsBuff[i][j] = new ReadId[IDS_BUFFER];
         }
     }
     inIdsBuff[4] = new ReadId[IDS_BUFFER];
-    
-    inStacksPerSap = outStacksPerSap = 4;
-    inSapBytes = outSapBytes = 16;
     
     samePosFlag = (CharId)1 << 63;
     samePosMask = ~samePosFlag;
@@ -67,7 +62,12 @@ BwtCycler::BwtCycler( PreprocessFiles* filenames )
     memset( &readArray[64], 1, 64 );
     memset( &readArray[128], 2, 64 );
     memset( &readArray[192], 3, 64 );
-    
+    insMax1 = 256;
+    insMax2 = insMax1 * insMax1;
+    insMax4 = insMax2 * insMax2;
+    sapMax1 = 256;
+    sapMax2 = sapMax1 * 256;
+    sapMax3 = sapMax2 * 256;
     for ( int i ( 0 ); i < 4; i++ )
     {
         for ( int j ( 0 ); j < 64; j++ )
@@ -90,15 +90,13 @@ BwtCycler::~BwtCycler()
 {
     if ( inBwtBuff ) delete[] inBwtBuff;
     if ( outBwtBuff ) delete[] outBwtBuff;
-    if ( inSapBuff ) delete[] inSapBuff;
-    if ( inPosBuff ) delete[] inPosBuff;
+    if ( inInsBuff ) delete[] inInsBuff;
     if ( inEndBuff ) delete[] inEndBuff;
     if ( outEndBuff ) delete[] outEndBuff;
     for ( int i ( 0 ); i < 4; i++ )
     {
         if ( inIdsBuff[i] ) delete[] inIdsBuff[i];
-        if ( outSapBuff[i] ) delete[] outSapBuff[i];
-        if ( outPosBuff[i] ) delete[] outPosBuff[i];
+        if ( outInsBuff[i] ) delete[] outInsBuff[i];
         for ( int j ( 0 ); j < 5; j++ )
         {
             if ( outIdsBuff[i][j] ) delete[] outIdsBuff[i][j];
@@ -115,7 +113,7 @@ void BwtCycler::finish( uint8_t cycle )
     
     for ( int i ( 0 ); i < 4; i++ )
     {
-        fns->setCyclerFinalIter( inPos, inSap, inIds[4], cycle, i );
+        fns->setCyclerFinalIter( inIns, inIds[4], cycle, i );
         prepIter();
         finishIter( i );
     }
@@ -136,23 +134,29 @@ void BwtCycler::finish( uint8_t cycle )
     fwrite( &charCounts, 8, 4, outBwt );
     fclose( outBwt );
 }
-
+//
 void BwtCycler::finishIter( uint8_t i )
 {
-    ++posLeft;
-    readNextPos();
+    if ( insLeft ) readNextPos();
     
-    while( posLeft )
+    while( insLeft )
     {
         if ( currPos == nextPos )
         {
             writeEnd();
-            readNextPos();
+            if ( --insLeft ) readNextPos();
         }
         else
         {
             writeBwt();
         }
+    }
+    
+    nextPos = -1;
+    if ( currSplit )
+    {
+        writeRun( splitChar, splitRun );
+        currSplit = false;
     }
     
     while ( currPos < charSizes[i] )
@@ -162,8 +166,7 @@ void BwtCycler::finishIter( uint8_t i )
     assert( currPos >= charSizes[i] );
     currPos -= charSizes[i];
     
-    fclose( inPos );
-    fclose( inSap );
+    fclose( inIns );
     fclose( inIds[4] );
 }
 
@@ -178,10 +181,8 @@ void BwtCycler::flush( uint8_t cycle )
     
     for ( int i ( 0 ); i < 4; i++ )
     {
-        fwrite( outPosBuff[i], 8, pOutPos[i], outPos[i] );
-        fclose( outPos[i] );
-        fwrite( outSapBuff[i], 4, pOutSap[i], outSap[i] );
-        fclose( outSap[i] );
+        writeInsBuff( i );
+        fclose( outIns[i] );
         for ( int j ( 0 ); j < 5; j++ )
         {
             fwrite( outIdsBuff[i][j], 4, pOutIds[i][j], outIds[i][j] );
@@ -190,7 +191,7 @@ void BwtCycler::flush( uint8_t cycle )
     }
     
     // Edit in counts
-    fns->setCyclerUpdate( outBwt, outEnd, outPos, outSap, outIds, cycle );
+    fns->setCyclerUpdate( outBwt, outEnd, outIns, outIds, cycle );
     fseek( outBwt, 9, SEEK_SET );
     fwrite( &bwtCount, 8, 1, outBwt );
     fwrite( &charCounts, 8, 4, outBwt );
@@ -200,11 +201,8 @@ void BwtCycler::flush( uint8_t cycle )
     
     for ( int i ( 0 ); i < 4; i++ )
     {
-        fwrite( &posCounts[i], 4, 1, outPos[i] );
-        fclose( outPos[i] );
-        fseek( outSap[i], 1, SEEK_SET );
-        fwrite( &sapCounts[i], 4, 1, outSap[i] );
-        fclose( outSap[i] );
+        fwrite( &insCounts[i], 8, 1, outIns[i] );
+        fclose( outIns[i] );
         for ( int j ( 0 ); j < 5; j++ )
         {
             fwrite( &idsCounts[i][j], 4, 1, outIds[i][j] );
@@ -248,36 +246,23 @@ void BwtCycler::prepIn()
         charCounts[i] = basePos[i];
     }
     charCounts[4] = 0;
+    memset( lastIns, 0, 32 );
     memset( inSapCount, 0, 20 );
     memset( outSapCount, 0, 20 );
 }
 
 void BwtCycler::prepIter()
 {
-    fread( &posLeft, 4, 1, inPos );
-    fread( &inStacksPerSap, 1, 1, inSap );
-    fread( &sapLeft, 4, 1, inSap );
-    pInPos = IDS_BUFFER - 1;
-    pInSap = SAP_BUFFER;
-    inSapBytes = inStacksPerSap * 4;
-    sapLeft *= inStacksPerSap;
-    readEndIds = inStacksPerSap != 4;
+    fread( &insLeft, 8, 1, inIns );
+    pInIns = BWT_BUFFER;
+    nextPos = insLeft ? 0 : -1;
     
-    if ( !isFinal )
+    for ( int j ( 0 ); j < 5; j++ )
     {
-        for ( int j ( 0 ); j < 4; j++ )
-        {
-            fread( &idsLeft[j], 4, 1, inIds[j] );
-            pInIds[j] = IDS_BUFFER;
-        }
+        if ( isFinal && j < 4 ) continue;
+        fread( &idsLeft[j], 4, 1, inIds[j] );
+        pInIds[j] = IDS_BUFFER;
     }
-    
-    if ( readEndIds )
-    {
-        fread( &idsLeft[4], 4, 1, inIds[4] );
-        pInIds[4] = IDS_BUFFER;
-    }
-
 }
 
 void BwtCycler::prepOut()
@@ -285,31 +270,22 @@ void BwtCycler::prepOut()
     anyEnds = false;
     if ( !chars )
     {
-        outStacksPerSap = 1;
         isPenultimate = true;
         nextChar = 4;
     }
     else if ( ends )
     {
         anyEnds = true;
-        outStacksPerSap = 5;
         writeEndIds = true;
         if ( !writeEndBwt ) setWriteEnds();
     }
-    else
-    {
-        outStacksPerSap = 4;
-    }
-    outSapBytes = outStacksPerSap * 4;
     endCount = 0;
     
     for ( int i ( 0 ); i < 4; i++ )
     {
-        posCounts[i] = sapCounts[i] = 0;
-        pOutPos[i] = pOutSap[i] = 0;
-        fwrite( &posCounts[i], 4, 1, outPos[i] );
-        fwrite( &outStacksPerSap, 1, 1, outSap[i] );
-        fwrite( &sapCounts[i], 4, 1, outSap[i] );
+        insCounts[i] = 0;
+        pOutIns[i] = 0;
+        fwrite( &insCounts[i], 8, 1, outIns[i] );
         
         for ( int j ( 0 ); j < 5; j++ )
         {
@@ -361,6 +337,21 @@ void BwtCycler::readBwtIn()
     pInBwt = 0;
 }
 
+void BwtCycler::readInsertBuff()
+{
+    if ( pInIns < BWT_BUFFER )
+    {
+        CharId diff = BWT_BUFFER - pInIns;
+        memcpy( inInsBuff, &inInsBuff[pInIns], diff );
+        fread( &inInsBuff[diff], 1, min( insLeft - 1, BWT_BUFFER ) - diff, inIns );
+    }
+    else
+    {
+        fread( inInsBuff, 1, min( insLeft - 1, BWT_BUFFER ), inIns );
+    }
+    pInIns = 0;
+}
+
 void BwtCycler::readNextId()
 {
     // Refresh IDs buffer if necessary
@@ -385,52 +376,30 @@ void BwtCycler::readNextId()
 
 void BwtCycler::readNextPos()
 {
-    // Refresh positions buffer if necessary
-    if ( --posLeft && ++pInPos == IDS_BUFFER )
+    // Refresh inserts buffer if necessary
+    if ( pInIns == BWT_BUFFER )
     {
-        fread( inPosBuff, 8, min( posLeft, IDS_BUFFER ), inPos );
-        pInPos = 0;
+        fread( inInsBuff, 1, min( insLeft, BWT_BUFFER ), inIns );
+        pInIns = 0;
     }
     
-    if ( !posLeft )
+    thisChar = inInsBuff[pInIns++];
+    nextSame = thisChar & uint8_t(128);
+    uint8_t posBytes = ( thisChar >> 3 ) & 0x7;
+    if ( pInIns == BWT_BUFFER ) readInsertBuff();
+    --insLeft;
+    CharId thisPos = inInsBuff[pInIns++];
+    while ( posBytes-- )
     {
-        nextPos = -1;
+        if ( pInIns == BWT_BUFFER ) readInsertBuff();
+        --insLeft;
+        thisPos = ( thisPos << 8 ) ^ inInsBuff[pInIns++];
     }
+    nextPos += thisPos;
     
-    // Next position include multiple characters with the same suffix
-    else if ( inPosBuff[pInPos] & samePosFlag )
+    if ( !nextSame )
     {
-        nextSame = true;
-        nextPos = inPosBuff[pInPos] & samePosMask;
-        
-        // Refresh same buffer if necessary
-        if ( pInSap == SAP_BUFFER )
-        {
-            fread( inSapBuff, 4, min( sapLeft, SAP_BUFFER ), inSap );
-            pInSap = 0;
-        }
-        
-        // Load same counts
-        if ( isFinal )
-        {
-            inSapCount[4] = inSapBuff[ pInSap++ ];
-        }
-        else
-        {
-            memcpy( &inSapCount, &inSapBuff[pInSap], inSapBytes );
-            pInSap += inStacksPerSap;
-        }
-    }
-    
-    // Next position does not share its suffix with any other character
-    else
-    {
-        // Set which stack and position
-        thisChar = inPosBuff[pInPos] & 0x7;
-        nextPos = inPosBuff[pInPos] >> 3;
-        nextSame = false;
-        
-        // Set id and next character
+        thisChar &= 0x7;
         if ( !isFinal ) readNextId();
     }
     
@@ -452,7 +421,7 @@ void BwtCycler::readNextPos()
 
 void BwtCycler::run( uint8_t* inChars, uint8_t* inEnds, uint8_t cycle )
 {
-    fns->setCycler( inBwt, outBwt, inEnd, outEnd, outPos, outSap, outIds, cycle );
+    fns->setCycler( inBwt, outBwt, inEnd, outEnd, outIns, outIds, cycle );
     chars = inChars;
     ends = inEnds;
     prepIn();
@@ -460,20 +429,20 @@ void BwtCycler::run( uint8_t* inChars, uint8_t* inEnds, uint8_t cycle )
     
     for ( int i ( 0 ); i < 4; i++ )
     {
-        fns->setCyclerIter( inPos, inSap, inIds, cycle, i );
+        fns->setCyclerIter( inIns, inIds, cycle, i );
         prepIter();
         runIter( i );
     }
     
+    assert( !bwtLeft );
     flush( cycle );
 }
 
 void BwtCycler::runIter( uint8_t i )
 {
-    ++posLeft;
-    readNextPos();
+    if ( insLeft ) readNextPos();
     
-    while ( posLeft )
+    while ( insLeft )
     {
         if ( currPos == nextPos )
         {
@@ -486,13 +455,19 @@ void BwtCycler::runIter( uint8_t i )
                 writeNext();
             }
             
-            readNextPos();
+            if ( --insLeft ) readNextPos();
         }
         else
         {
             writeBwt();
         }
-        
+    }
+    
+    nextPos = -1;
+    if ( currSplit )
+    {
+        writeRun( splitChar, splitRun );
+        currSplit = false;
     }
     
     while ( currPos < charSizes[i] )
@@ -502,8 +477,7 @@ void BwtCycler::runIter( uint8_t i )
     assert( currPos >= charSizes[i] );
     currPos -= charSizes[i];
     
-    fclose( inPos );
-    fclose( inSap );
+    fclose( inIns );
     for ( int j ( 0 ); j < 4; j++ )
     {
         fclose( inIds[j] );
@@ -622,14 +596,23 @@ void BwtCycler::writeBwtByte( uint8_t c )
 
 void BwtCycler::writeEnd()
 {
-    if ( !nextSame )
+    ReadId thisSap = 1;
+    if ( nextSame )
     {
-        inSapCount[4] = 1;
+        if ( pInIns == BWT_BUFFER ) readInsertBuff();
+        --insLeft;
+        thisSap = inInsBuff[pInIns++];
+        for ( uint8_t j = thisChar & 0x3; j--; )
+        {
+            if ( pInIns == BWT_BUFFER ) readInsertBuff();
+            --insLeft;
+            thisSap = ( thisSap << 8 ) ^ inInsBuff[pInIns++];
+        }
     }
     
-    writeRun( 4, inSapCount[4] );
+    writeRun( 4, thisSap );
     
-    while ( inSapCount[4]-- )
+    while ( thisSap-- )
     {
         if ( pInIds[4] == IDS_BUFFER )
         {
@@ -643,6 +626,42 @@ void BwtCycler::writeEnd()
         }
         
         outEndBuff[ pOutEnd++ ] = inIdsBuff[4][ pInIds[4]++ ];
+    }
+}
+
+void BwtCycler::writeInsBuff( uint8_t i )
+{
+    fwrite( outInsBuff[i], 1, pOutIns[i], outIns[i] );
+    insCounts[i] += pOutIns[i];
+    pOutIns[i] = 0;
+}
+
+void BwtCycler::writeInsBytes()
+{
+    CharId ins = charCounts[thisChar] - lastIns[thisChar];
+    lastIns[thisChar] = charCounts[thisChar];
+    
+    uint8_t posBytes = ins > 255;
+    if ( posBytes )
+    {
+        ReadId insRemain = ins >> 16;
+        while ( insRemain )
+        {
+            posBytes++;
+            insRemain >>= 8;
+        }
+        
+        outInsBuff[thisChar][ pOutIns[thisChar]++ ] ^= ( posBytes << 3 );
+        for ( int i = posBytes + 1; i--; )
+        {
+            if ( pOutIns[thisChar] == BWT_BUFFER ) writeInsBuff( thisChar );
+            outInsBuff[thisChar][ pOutIns[thisChar]++ ] = ins >> ( 8 * i );
+        }
+    }
+    else
+    {
+        if ( ++pOutIns[thisChar] == BWT_BUFFER ) writeInsBuff( thisChar );
+        outInsBuff[thisChar][ pOutIns[thisChar]++ ] = ins;
     }
 }
 
@@ -677,16 +696,10 @@ void BwtCycler::writeNext()
 {
     if ( thisChar != 4 )
     {
-        // Write positions buffer to file if full
-        if ( pOutPos[thisChar] == IDS_BUFFER )
-        {
-            fwrite( outPosBuff[thisChar], 8, IDS_BUFFER, outPos[thisChar] );
-            pOutPos[thisChar] = 0;
-        }
-
-        // Write position to buffer
-        outPosBuff[thisChar][ pOutPos[thisChar]++ ] = ( charCounts[thisChar] << 3 ) + nextChar;
-        ++posCounts[thisChar];
+        // Write Insert buffer to file if full
+        if ( pOutIns[thisChar] == BWT_BUFFER ) writeInsBuff( thisChar );
+        outInsBuff[thisChar][ pOutIns[thisChar] ] = nextChar;
+        writeInsBytes();
     }
     
     // Write id to IDs stack
@@ -741,81 +754,160 @@ void BwtCycler::writeRun( uint8_t c, ReadId runLen )
 
 void BwtCycler::writeSame()
 {
-    if ( inSapCount[4] )
+    uint8_t baseBytes = ( thisChar & 0x3 );
+    if ( thisChar & 0x4 )
     {
+        if ( pInIns + 1 + baseBytes > BWT_BUFFER ) readInsertBuff();
+        insLeft -= 1 + baseBytes;
         thisChar = 4;
-        writeRun( thisChar, inSapCount[4] );
-        while ( inSapCount[4]-- )
+        ReadId thisSap = inInsBuff[pInIns++];
+        for ( uint8_t j = baseBytes; j--; )
+        {
+            thisSap = ( thisSap << 8 ) ^ inInsBuff[pInIns++];
+        }
+        writeRun( thisChar, thisSap );
+        while ( thisSap-- )
         {
             readNextId();
             writeNextId();
         }
     }
     
-    for ( int i ( 0 ); i < 4; i++ )
+    if ( pInIns + ( 1 + baseBytes ) * 4 > BWT_BUFFER ) readInsertBuff();
+    insLeft -= ( 1 + baseBytes ) * 4;
+    for ( int i = 0; i < 4; i++ )
     {
-        if ( inSapCount[i] )
+        thisChar = i;
+        ReadId thisSap = inInsBuff[pInIns++];
+        for ( uint8_t j = baseBytes; j--; )
         {
-            thisChar = i;
-            
-            // Write positions buffer to file if full
-            if ( pOutPos[i] == IDS_BUFFER )
-            {
-                fwrite( outPosBuff[i], 8, IDS_BUFFER, outPos[i] );
-                pOutPos[i] = 0;
-            }
-            
-            // Write same run buffer to file if full
-            if ( pOutSap[i] == SAP_BUFFER )
-            {
-                fwrite( outSapBuff[i], 4, SAP_BUFFER, outSap[i] );
-                pOutSap[i] = 0;
-            }
-            
-            // Next char is part of a run
-            if ( inSapCount[i] > 1 )
-            {
-                // Write this run and position
-                outPosBuff[i][ pOutPos[i]++ ] = samePosFlag ^ charCounts[i];
-                posCounts[i]++;
-                writeRun( thisChar, inSapCount[i] );
-                
-                // Write IDs and count same runs
-                memset( &outSapCount, (uint8_t)0, 20 );
-                while ( inSapCount[i]-- )
-                {
-                    readNextId();
-                    writeNextId();
-                    outSapCount[nextChar]++;
-                }
-                
-                // Write same run to buffer
-                if ( isPenultimate )
-                {
-                    outSapBuff[i][ pOutSap[i]++ ] = outSapCount[4];
-                }
-                else
-                {
-                    memcpy( &outSapBuff[i][ pOutSap[i] ], &outSapCount, outSapBytes );
-                    pOutSap[i] += outStacksPerSap;
-                }
-                
-                ++sapCounts[i];
-            }
-            
-            // Next char is not part of a run
-            else
+            thisSap = ( thisSap << 8 ) ^ inInsBuff[pInIns++];
+        }
+        
+        if ( thisSap > 1 )
+        {
+            // Write IDs and count same runs
+            memset( &outSapCount, 0, 20 );
+            for ( ReadId j = 0; j < thisSap; j++ )
             {
                 readNextId();
                 writeNextId();
-                
-                outPosBuff[i][ pOutPos[i]++ ] = ( charCounts[i] << 3 ) ^ nextChar;
-                posCounts[i]++;
-                writeRun( thisChar, 1 );
+                outSapCount[nextChar]++;
+            }
+            ReadId maxCount = max( outSapCount[0], max( outSapCount[1], max( outSapCount[2], max( outSapCount[3], outSapCount[4] ) ) ) );
+            uint8_t thisBytes = maxCount < sapMax1 ? 0 : ( maxCount < sapMax2 ? 1 : ( maxCount < sapMax3 ? 2 : 3 ) );
+            
+            if ( pOutIns[i] == BWT_BUFFER ) writeInsBuff( i );
+            outInsBuff[i][ pOutIns[i] ] = 128 ^ ( outSapCount[4] ? 4 : 0 ) ^ thisBytes;
+            writeInsBytes();
+            writeRun( thisChar, thisSap );
+            
+            // Write end runs to insert buffer
+            if ( isPenultimate || outSapCount[4] )
+            {
+                for ( uint8_t j = thisBytes + 1; j--; )
+                {
+                    if ( pOutIns[i] == BWT_BUFFER ) writeInsBuff( i );
+                    outInsBuff[i][ pOutIns[i]++ ] = outSapCount[4] >> ( 8 * j );
+                }
+            }
+            
+            // Write same runs to insert buffer
+            if ( !isPenultimate )
+            {
+                for ( int j = 0; j < 4; j++ )
+                {
+                    for ( uint8_t k = thisBytes + 1; k--; )
+                    {
+                        if ( pOutIns[i] == BWT_BUFFER ) writeInsBuff( i );
+                        outInsBuff[i][ pOutIns[i]++ ] = outSapCount[j] >> ( 8 * k );
+                    }
+                }
             }
         }
+        else if ( thisSap )
+        {
+            readNextId();
+            writeNext();
+        }
     }
-    
-    sapLeft -= inStacksPerSap;
 }
+
+//void BwtCycler::writeSame()
+//{
+//    if ( inSapCount[4] )
+//    {
+//        thisChar = 4;
+//        writeRun( thisChar, inSapCount[4] );
+//        while ( inSapCount[4]-- )
+//        {
+//            readNextId();
+//            writeNextId();
+//        }
+//    }
+//    
+//    for ( int i ( 0 ); i < 4; i++ )
+//    {
+//        if ( inSapCount[i] )
+//        {
+//            thisChar = i;
+//            
+//            // Next char is part of a run
+//            if ( inSapCount[i] > 1 )
+//            {
+//                // Write IDs and count same runs
+//                memset( &outSapCount, (uint8_t)0, 20 );
+//                for ( ReadId j = 0; j < inSapCount[i]; j++ )
+//                {
+//                    readNextId();
+//                    writeNextId();
+//                    outSapCount[nextChar]++;
+//                }
+//                
+//                // Determine how many bytes should be used per sap count
+//                ReadId maxCount = max( outSapCount[0], max( outSapCount[1], max( outSapCount[2], max( outSapCount[3], outSapCount[4] ) ) ) );
+//                CharId thisMax = 255;
+//                uint8_t sapBytes = 0;
+//                while ( maxCount > thisMax )
+//                {
+//                    thisMax <<= 8;
+//                    ++sapBytes;
+//                }
+//                
+//                if ( pOutIns[i] == BWT_BUFFER ) writeInsBuff( i );
+//                outInsBuff[i][ pOutIns[i] ] = 128 ^ ( outSapCount[4] ? 64 : 0 ) ^ sapBytes;
+//                writeInsBytes();
+//                writeRun( thisChar, inSapCount[i] );
+//                
+//                // Write same runs to insert buffer
+//                if ( pOutIns[i] + ( 4 * ( 1 + sapBytes ) ) > BWT_BUFFER ) writeInsBuff( i );
+//                if ( !isPenultimate )
+//                {
+//                    for ( int j = 0; j < 4; j++ )
+//                    {
+//                        for ( uint8_t k = sapBytes + 1; k--; )
+//                        {
+//                            outInsBuff[i][ pOutIns[i]++ ] = ( outSapCount[j] >> ( 8 * k ) ) & uint8_t(255);
+//                        }
+//                    }
+//                }
+//                
+//                if ( isPenultimate || outSapCount[4] )
+//                {
+//                    for ( uint8_t k = sapBytes + 1; k--; )
+//                    {
+//                        outInsBuff[i][ pOutIns[i]++ ] = ( outSapCount[4] >> ( 8 * k ) ) & uint8_t(255);
+//                    }
+//                }
+//            }
+//            
+//            // Next char is not part of a run
+//            else
+//            {
+//                readNextId();
+//                writeNext();
+//            }
+//        }
+//    }
+//}
 

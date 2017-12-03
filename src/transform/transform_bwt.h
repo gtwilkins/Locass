@@ -44,6 +44,7 @@ private:
     void prepOutFinal();
     void readIds();
     void readBwtIn();
+    void readInsertBuff();
     void readNextId();
     void readNextPos();
     void readNextSap();
@@ -54,6 +55,8 @@ private:
     void writeBwt();
     void writeBwtByte( uint8_t c );
     void writeEnd();
+    void writeInsBuff( uint8_t i );
+    void writeInsBytes();
     void writeLast();
     void writeNext();
     void writeNextId();
@@ -64,8 +67,7 @@ private:
     // Files
     PreprocessFiles* fns;
     FILE* inBwt,* outBwt;
-    FILE* inPos,* outPos[4];
-    FILE* inSap,* outSap[4];
+    FILE* inIns,* outIns[4];
     FILE* inIds[5],* outIds[4][5];
     FILE* inEnd,* outEnd;
     CharId id;
@@ -73,27 +75,31 @@ private:
     // Buffers
     uint8_t* chars,* ends;
     uint8_t* inBwtBuff,* outBwtBuff;
-    CharId* inPosBuff,* outPosBuff[4];
-    ReadId* inSapBuff,* outSapBuff[4];
+    uint8_t* inInsBuff,* outInsBuff[4];
     ReadId* inIdsBuff[5],* outIdsBuff[4][5];
     ReadId* inEndBuff,* outEndBuff;
     
     // Buffer pointers
     ReadId pInBwt, pOutBwt;
-    ReadId pInPos, pOutPos[4];
-    ReadId pInSap, pOutSap[4];
+    ReadId pInIns, pOutIns[4];
     ReadId pInIds[5], pOutIds[4][5];
     ReadId pInEnd, pOutEnd;
     
     // Counts
     CharId bwtCount, bwtLeft;
     CharId charCounts[5], charSizes[5];
-    ReadId endLeft, posLeft, sapLeft, idsLeft[5];
+    CharId insLeft, lastIns[4], insCounts[4];
+    ReadId endLeft, idsLeft[5];
     ReadId inSapCount[5], outSapCount[5];
-    ReadId endCount, posCounts[4], sapCounts[4], idsCounts[4][5];
+    ReadId endCount;
+    CharId idsCounts[4][5];
     
-    uint8_t inSapBytes, outSapBytes;
-    uint8_t inStacksPerSap, outStacksPerSap;
+    uint64_t inSap8[5], outSap8[5];
+    uint32_t inSap4[5], outSap4[5];
+    uint16_t inSap2[5], outSap2[5];
+    uint8_t inSap1[5], outSap1[5];
+    
+    uint8_t sapSize;
     
     bool nextSame, bwtFirst, currSplit;
     uint8_t thisChar, nextChar, lastChar, splitChar;
@@ -103,6 +109,8 @@ private:
     
     uint8_t sameByteFlag, sameByteMask;
     CharId samePosFlag, samePosMask;
+    CharId insMax1, insMax2, insMax4;
+    ReadId sapMax1, sapMax2, sapMax3;
     
     // Variables defining whether ends are currently being input/output
     bool anyEnds, isPenultimate, isFinal;
