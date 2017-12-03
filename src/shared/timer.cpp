@@ -25,7 +25,7 @@ string getDuration( double startTime )
 {
     double totalDuration = ( clock() - startTime ) / CLOCKS_PER_SEC;
     int hrs = totalDuration / 3600;
-    int mins = int( totalDuration / 60 ) % 3600;
+    int mins = int( totalDuration / 60 ) % 60;
     int secs = int(max( 1.0, totalDuration ) ) % 60;
     return ( ( hrs > 0 ? to_string( hrs ) + " hr " : "" )
             + ( mins > 0 ? to_string( mins ) + " min " : "" )

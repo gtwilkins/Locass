@@ -49,18 +49,17 @@ struct PreprocessFiles : public Filenames
     PreprocessFiles( string inPrefix );
     
     void clean();
-    void setBinaryWrite( FILE* &outBin, FILE* &outBwt, FILE* &outEnd, FILE* (&outPos)[4], FILE* (&outSap)[4], FILE* (&outIds)[4][4] );
-    void setCycler( FILE* &inBwt, FILE* &outBwt, FILE* &inEnd, FILE* &outEnd, FILE* (&outPos)[4], FILE* (&outSap)[4], FILE* (&outIds)[4][5], uint8_t cycle );
-    void setCyclerIter( FILE* &inPos, FILE* &inSap, FILE* (&inIds)[5], uint8_t cycle, uint8_t i );
+    void setBinaryWrite( FILE* &outBin, FILE* &outBwt, FILE* &outEnd, FILE* (&outIns)[4], FILE* (&outIds)[4][4] );
+    void setCycler( FILE* &inBwt, FILE* &outBwt, FILE* &inEnd, FILE* &outEnd, FILE* (&outIns)[4], FILE* (&outIds)[4][5], uint8_t cycle );
+    void setCyclerIter( FILE* &inIns, FILE* (&inIds)[5], uint8_t cycle, uint8_t i );
     void setCyclerFinal( FILE* &inBwt, FILE* &outBwt, FILE* &inEnd, FILE* &outEnd, uint8_t cycle );
-    void setCyclerFinalIter( FILE* &inPos, FILE* &inSap, FILE* &inIds, uint8_t cycle, uint8_t i );
-    void setCyclerUpdate( FILE* &outBwt,  FILE* &outEnd, FILE* (&outPos)[4], FILE* (&outSap)[4], FILE* (&outIds)[4][5], uint8_t cycle );
+    void setCyclerFinalIter( FILE* &inIns, FILE* &inIds, uint8_t cycle, uint8_t i );
+    void setCyclerUpdate( FILE* &outBwt,  FILE* &outEnd, FILE* (&outIns)[4], FILE* (&outIds)[4][5], uint8_t cycle );
     void setIndexWrite( FILE* &inBwt, FILE* &outIdx );
     
     string tmpBwt[2];
     string tmpEnd[2];
-    string tmpPos[2][4];
-    string tmpSap[2][4];
+    string tmpIns[2][4];
     string tmpIds[2][4][5];
     string tmpSingles;
 };
