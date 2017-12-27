@@ -225,7 +225,7 @@ bool Node::reviewOffset( int32_t diffOffset, NodeSet* offsetSets, int& hitsCount
         {
             for ( Node* fwd : fwdSet )
             {
-                auto it = fwd->reads_.find( mark.readId );
+                auto it = fwd->reads_.find( mark.id );
                 if ( it != fwd->reads_.end() )
                 {
                     onlyScores[0] += offsetSets[0].find( t ) != offsetSets[0].end() 
@@ -251,7 +251,7 @@ bool Node::reviewOffset( int32_t diffOffset, NodeSet* offsetSets, int& hitsCount
                 {
                     if ( offsetSets[i].find( t ) == offsetSets[i].end() )
                     {
-                        auto it = t->reads_.find( mark.readId );
+                        auto it = t->reads_.find( mark.id );
                         onlyScores[i] += ( it != t->reads_.end() && mark.isValid( it->second ) );
                     }
                 }
@@ -297,7 +297,7 @@ bool Node::reviewOffset( NodeSet* offsetSets, bool drxn )
             {
                 for ( Node* t : tNodes )
                 {
-                    if ( t->reads_.find( mark.readId ) != t->reads_.end() )
+                    if ( t->reads_.find( mark.id ) != t->reads_.end() )
                     {
                         hits[i]++;
                         reliable[i] += t->reliable_;

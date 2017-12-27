@@ -26,6 +26,8 @@
 #include "query.h"
 #include "node.h"
 #include "locus_pathing_structs.h"
+#include "path_review.h"
+
 extern struct Parameters params;
 
 using namespace std;
@@ -39,6 +41,7 @@ public:
     Locus( Querier &bwt, ifstream &fh );
     virtual ~Locus();
     
+    void locusTest();
     void addNode( Node* node, int drxn );
     void deleteNodes( NodeSet &delSet, bool drxn );
     void deleteNodes( NodeSet &delSet, NodeSet &goodSet, bool drxn );
@@ -51,6 +54,7 @@ public:
     NodeSet getValidSet();
     NodeList getValidNodes();
     int getWeakestEdge( Node* begin, Node* end, NodeSet &fwdSet, bool drxn );
+    void setForkLimits();
     void setHeader( string &header );
     void setOriginEnds();
     
@@ -140,16 +144,17 @@ private:
     bool plot();
     bool plotPath( Path &path, bool drxn );
     bool plotPathAdd( PathVars &pv, PathBranch &best, BranchList &branches, Path &path );
-    bool plotPathConverge( PathVars &pv, Node* convEnd, Path &path, bool drxn );
-    bool plotPathConverge( PathVars &pv, PathBranch &convBranch, Node* convEnd, BranchList &newDiv, NodeSet &convSet, Path &path, bool drxn );
-    bool plotPathConvergeClones( PathScore* scores, bool drxn );
-    bool plotPathConvergeClonesAnyBetter( Node* origBgn, NodeSet &origSet, bool drxn );
-    bool plotPathConvergeCompare( PathScore* scores, Path &path, bool drxn );
-    void plotPathConvergeCompareReliable( PathScore* scores, Path &path, bool* onlyReliable, bool* moreReliable, bool drxn );
-    bool plotPathConvergeConflict( PathScore &prime, PathScore &alt, Path &path, bool drxn );
-    bool plotPathConvergePath( PathVars pv, PathBranch &convBranch, Node* convEnd, BranchList &newDiv, Path &path, NodeList &convPath, NodeSet &convSet, bool drxn );
-    bool plotPathConvergeRedundant( PathScore &alt, Path &path, bool drxn );
-    void plotPathConvergeScore( PathVars &pv, int32_t bgnCoord, Node* postFork, PathScore &score, bool drxn );
+    bool plotPathConverge( PathVars &pv, PathBranch &convFork, Path &path, bool drxn );
+//    bool plotPathConverge( PathVars &pv, Node* convEnd, Path &path, bool drxn );
+//    bool plotPathConverge( PathVars &pv, PathBranch &convBranch, Node* convEnd, BranchList &newDiv, NodeSet &convSet, Path &path, bool drxn );
+//    bool plotPathConvergeClones( PathScore* scores, bool drxn );
+//    bool plotPathConvergeClonesAnyBetter( Node* origBgn, NodeSet &origSet, bool drxn );
+//    bool plotPathConvergeCompare( PathScore* scores, Path &path, bool drxn );
+//    void plotPathConvergeCompareReliable( PathScore* scores, Path &path, bool* onlyReliable, bool* moreReliable, bool drxn );
+//    bool plotPathConvergeConflict( PathScore &prime, PathScore &alt, Path &path, bool drxn );
+//    bool plotPathConvergePath( PathVars pv, PathBranch &convBranch, Node* convEnd, BranchList &newDiv, Path &path, NodeList &convPath, NodeSet &convSet, bool drxn );
+//    bool plotPathConvergeRedundant( PathScore &alt, Path &path, bool drxn );
+//    void plotPathConvergeScore( PathVars &pv, int32_t bgnCoord, int32_t bestOls[2], Node* postFork, PathScore &score, bool drxn );
     PathBranch plotPathGetBestNext( BranchList &branches, bool isFirst );
     PathBranch plotPathGetBestNext( PathBranch &convBranch, Node* convEnd, BranchList &branches, BranchList &newDiv, NodeSet &convSet, Path &path, NodeSet &delSet, bool drxn );
     BranchList plotPathGetBranches( PathVars &pv, bool drxn );
@@ -157,13 +162,14 @@ private:
     void plotPathGetFirst( PathVars &pv, PathBranch &best, Path &path, BranchList &branches, bool drxn );
     void plotPathGetNext( PathVars &pv, PathBranch &best, PathBranch &last, Path &path, BranchList &branches, bool drxn );
     void plotPathSetEnds( PathVars &pv, PathBranch &best, PathBranch &last, Path &path, bool drxn );
-    bool plotPathSetForks( PathVars &pv, Path &path, NodeSet &goodSet, NodeList &notReliableNodes, bool drxn );
+//    bool plotPathSetForks( PathVars &pv, Path &path, NodeSet &goodSet, NodeList &notReliableNodes, bool drxn );
     void plotPathSetSpans( bool drxn );
     void plotPathTrimBranch( PathVars &pv, PathBranch &branch, NodeSet &goodSet, NodeSet &delSet, bool isEnd, bool drxn );
     void plotPathTrimDivergent( PathVars &pv, Path &path, NodeSet &goodSet, NodeSet &delSet, bool drxn );
     void plotPathTrimEnds( PathVars &pv, PathBranch &best, BranchList &branches, NodeSet &goodSet, NodeSet &delSet, bool drxn );
     void plotPathTrimPrep( PathVars &pv, Path &path, bool drxn );
-    void plotPathUpdateMultiplicity( PathBranch &best, PathBranch &last, Path &path, NodeList &notReliableNodes, bool drxn );
+    void plotPathUpdateFork( PathVars &pv, Path &path, bool drxn );
+    void plotPathUpdateMultiplicity( PathBranch &best, Path &path, NodeList &notReliableNodes, bool drxn );
     void plotPathUpdateReliability( PathBranch &best, Path &path, NodeList &notReliableNodes, bool drxn );
     void plotPathUpdateSpans( PathBranch &best, Path &path, bool drxn );
     void plotPrep( bool drxn );
@@ -174,7 +180,7 @@ private:
 public:
     uint8_t stopCodes_[2]; // 1: Couldn't extend, 2: Bad node, 3: Bad branches, 4: Excess coverage, 5: Hit limit, 6: Problematic
     string header_;
-    double duration_;
+    double duration_, leapTime_, revTime_;
     int32_t ends_[2];
     uint desperation_[2], multiplicity_, forkCount_[2], loopCount_[2];
     ofstream* debugLog_, *export_;
@@ -182,9 +188,10 @@ private:
     NodeList originEnds_[2], toExtend_[2], endNodes_[2], sideNodes_[2], forkNodes_[2];
     NodeList nodes_[5];
     IslandVars* ivs_[2];
-    unordered_set<SeqNum> leptReads_[2];
+    DrxnVars* dvs_[2];
+    unordered_set<SeqNum> leptReads_[2], remappedReads_[2];
     vector<Path> paths_[2];
-    int32_t limits_[2], validLimits_[2], reliable_[2];
+    int32_t limits_[2], validLimits_[2], reliable_[2], forkLimits_[2];
     bool completed_[2], harsh_[2], finished_[2], leapFar_[2], finalise_;
     Querier &bwt_;
 };

@@ -61,17 +61,25 @@ typedef std::vector< std::pair<Node*, Score> > ScoreList;
 
 struct PathVars
 {
-    PathVars( bool pathDrxn ): drxn( pathDrxn ), furthest( 0 ), invalid( NULL ), isInvalid( false ) {};
+    PathVars( Querier &inBwt, NodeList* inNodes, unordered_set<ReadId> &remappedReads, bool inFinal, bool pathDrxn )
+    : bwt( inBwt ), nds( inNodes ), usedIds( remappedReads )
+    , finalise( inFinal ), drxn( pathDrxn ), furthest( 0 ), weak( NULL )
+    , misassembled( NULL ), unspanned( NULL ), isInvalid( false ), rerun( false ) {};
     void addTarget( Node* t, NodeSet &fwdSet );
     void addTarget( NodeList &path );
     void resetPathReliable( NodeList &path );
     void setTarget( NodeSet &fwdSet, NodeList &islands );
+    Querier &bwt;
+//    NodeList &nodes, &islands;
+    NodeList* nds;
+    unordered_set<ReadId> &usedIds;
     NodeIntMap hits, reliable, islandHits;
     NodeFloatMap adjusted;
-    NodeSet tSet;
-    Node* invalid;
-    int32_t furthest, invalidCoord;
-    bool drxn, isInvalid;
+    NodeSet tSet, newSet;
+    Node* weak,* misassembled,* unspanned;
+    int32_t furthest, misassMark[2], misassEst[2];
+    int32_t* reliLimits;
+    bool drxn, isInvalid, rerun, finalise;
 };
 
 struct CloneTargetVars
@@ -108,7 +116,7 @@ struct ReadMark
 
     int32_t mark, estimate, coords[2];
 //    PairCoords coords;
-    SeqNum readId;
+    SeqNum id;
 //    uint8_t mode; // 0 = unknown direction and orientation, 1 = known orientation. 2 = both known
 //    bool extDrxn;
 };
@@ -145,7 +153,7 @@ struct LoopVars
 
 struct IslandVars
 {
-    IslandVars( ExtVars &ev, Querier &inBwt, bool drxn ) : ev( ev ), drxn( drxn ){}
+    IslandVars( ExtVars &ev, bool drxn ) : ev( ev ), drxn( drxn ){}
     
     Node* pathEnd;
     ExtVars ev;
@@ -154,6 +162,15 @@ struct IslandVars
     NodeList origin;
     NodeSet merged[2], ante;
     unordered_set<SeqNum> mpReads, peReadsReliable, peReads;
+    bool drxn;
+};
+
+struct DrxnVars
+{
+    DrxnVars( Querier &inBwt, NodeList &inNodes, NodeList &inIslands, bool inDrxn )
+    : bwt( inBwt ), nodes( inNodes ), islands( inIslands ), drxn( inDrxn ) {};
+    Querier &bwt;
+    NodeList &nodes, &islands;
     bool drxn;
 };
 
@@ -237,10 +254,80 @@ struct MapNode
     vector<ReadId> ids;
     vector<int32_t> coords[2];
     vector<MapNode*> edges[2];
-    vector<int> edgeOverlaps[2], bridgeOverlaps[2];
+    vector<int> edgeOverlaps[2], bridgeOverlaps[2], bridgeCoords[2];
     vector<Node*> bridges[2];
     int32_t estimate;
 };
+
+struct NodeMapRead
+{
+    NodeMapRead( ReadId inId ): id( inId ) { lens[0] = lens[1] = 0; nodes[0] = nodes[1] = NULL; };
+    bool checkDoubleHit();
+    bool checkHit( ReadMark &mark, bool markDrxn, bool drxn );
+    Node* nodes[2];
+    ReadId id;
+    string seq;
+    int32_t coords[2][2];
+    int lens[2];
+};
+
+
+struct NodeMapReadHits
+{
+    void add( NodeSet hitNodes, int32_t* hitCoords, bool doAdd, bool drxn );
+    NodeSetList nodes;
+    vector<int32_t> coords[2];
+    vector<int> hits[2];
+};
+
+struct MappedReadEnd
+{
+    MappedReadEnd(){};
+    MappedReadEnd( string inSeq, ReadId inId, int32_t* inCoords, int32_t offset, bool endDrxn, bool estDrxn );
+    bool checkMap( int score, bool overDrxn );
+    string getExtSeq( bool drxn );
+    int getMinOverlap( int minlen, bool overDrxn );
+    int getOverlap( bool overDrxn );
+    void set( MappedReadEnd &read );
+    bool withinLimits( int32_t* limits );
+    string seq;
+    ReadId id;
+    int32_t coords[3], offset;
+    int counts[2];
+    int ol;
+    bool drxn, doMap;
+};
+
+//struct PathSeq
+//{
+//    PathSeq( Node* node );
+////    void clearEdges();
+//    bool doMap( PathVars &pv, int score, unordered_set<ReadId> &usedIds, bool drxn );
+//    static int getBest( PathVars &pv, vector<PathSeq> &pss, int &bestCount, int &bestOffset, bool bothDrxn );
+//    void getBest( int &count, int &offset, int32_t* coords, bool weakSpot, bool drxn );
+//    static void map( PathVars &pv, vector<PathSeq> &pss, Node* node, bool fromDrxn );
+//    void map( string q, ReadMark &mark, bool fromDrxn );
+//    void remap( vector<MappedReadEnd> (&hitReads)[2], string q, ReadMark &mark, bool fromDrxn );
+//    void removeDubious( PathVars &pv );
+//    void setEdges();
+//    static bool setWeakspot( vector<PathSeq> &pss, int32_t estimate[2] );
+//    void sortReads();
+//    bool tryBridge( PathVars &pv, int mapCount, int mapOffset, bool drxn );
+//    bool tryComplete( PathVars &pv, unordered_set<ReadId> &usedIds );
+//    bool tryMap( PathVars &pv, unordered_set<ReadId> &usedIds, bool remap, bool drxn );
+//    bool tryRemap( PathVars &pv, unordered_set<ReadId> &usedIds );
+//    
+//    vector<Coords> nodeCoords;
+//    vector<MappedReadEnd> reads[2];
+//    vector<MappedReadEnd> edges[2];
+//    unordered_set<ReadId> usedIds[2];
+//    NodeList nodes;
+//    NodeSet added;
+//    string seq;
+//    int32_t ends[2], highLimits[2], goodLimits[2], estimate, minCover;
+//    int dist;
+//    bool contMapping, allHigh, allGood, exhausted;
+//};
 
 #endif /* NODESTRUCTS_H */
 

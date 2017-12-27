@@ -90,8 +90,8 @@ void BinaryReader::read()
     fseek( bin, seqsBegin, SEEK_SET );
     CharId readsLeft = seqCount / 2, fileLeft = fileSize;
     CharId pBuff = buffSize, pChar = 0, pFwd, pRev = 1 + cycle / 4;
-    ReadId readCount = 0, pEnds;
-    uint8_t iChar = 0, iFwd, iRev = cycle & 0x3, iEnds;
+    ReadId readCount = 0;
+    uint8_t iChar = 0, iFwd, iRev = cycle & 0x3;
     
     while ( readsLeft )
     {
@@ -359,37 +359,3 @@ void BinaryWriter::writeIns()
     }
 }
 
-//void BinaryWriter::writePos()
-//{
-//    CharId posMask = (CharId)1 << 63;
-//    for ( int i ( 0 ); i < 4; i++ )
-//    {
-//        ReadId posCount = ReadId( charCounts[i] > 0 );
-//        fwrite( &posCount, 4, 1, pos[i] );
-//        if ( posCount )
-//        {
-//            fwrite( &posMask, 8, 1, pos[i] );
-//        }
-//        
-//        fclose( pos[i] );
-//    }
-//}
-//
-//void BinaryWriter::writeSap()
-//{
-//    uint8_t stacksPerSap = 4;
-//    ReadId sapCount;
-//    
-//    for ( int i ( 0 ); i < 4; i++ )
-//    {
-//        sapCount = ReadId( charCounts[i] > 1 );
-//        fwrite( &stacksPerSap, 1, 1, sap[i] );
-//        fwrite( &sapCount, 4, 1, sap[i] );
-//        if ( sapCount )
-//        {
-//            fwrite( &idsCounts[i], 4, 4, sap[i] );
-//        }
-//        
-//        fclose( sap[i] );
-//    }
-//}

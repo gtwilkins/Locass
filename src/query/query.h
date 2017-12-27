@@ -34,6 +34,7 @@ public:
     ~Querier();
     
     string getSequence( ReadId id );
+    ReadId isExtendable( string &seq, uint16_t minLen, bool drxn );
     vector<Extension> mapExtensions( bool &noMatches, string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, unordered_set<SeqNum> &seeds, uint16_t minOver=1 );

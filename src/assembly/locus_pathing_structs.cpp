@@ -23,13 +23,8 @@
 #include "locus_pathing_structs.h"
 
 Span::Span( Node* bgn )
-: begin( bgn ), end( NULL ), spanned( false )
+: node( bgn ), spanned( false ), complete( false ), ended( false )
 {}
-
-void Span::setEnd( Node* nd, bool drxn )
-{
-    end = nd;
-}
 
 PathBranch::PathBranch()
 {
@@ -106,6 +101,7 @@ void PathBranch::setScores( PathVars &pv, BranchList &branches, vector<Span> &sp
         float spanMod = sqrt( float( 1 + maxSpans ) / float( 1 + branch.spanned ) );
         float reliMod = 0.3 + ( sqrt( ( branch.reliable + 1.0 ) / ( maxReliable + 1.0 ) ) * 0.9 ); 
         float totalMod = max( reliMod * farMod * spanMod, float( 10 ) / float( 10 + branch.reads ) );
+        if ( totalMod < 1 && branch.farNodes[0] && branch.farNodes[0]->drxn_ != branch.branch->drxn_ ) totalMod = 1;
         branch.score[1] = branch.adjusted * totalMod + branch.islands;
         branch.score[0] = max( (float)0, ( branch.reads - branch.score[1] ) ) / totalMod;
     }
@@ -182,7 +178,7 @@ void PathBranch::setSpans( vector<Span> &spans, bool drxn )
         NodeSet farFwdSet = farNodes[0]->getDrxnNodesNotInSet( fwdSet, drxn );
         for ( Span &span : spans )
         {
-            if ( farFwdSet.find( span.begin ) != farFwdSet.end() )
+            if ( farFwdSet.find( span.node ) != farFwdSet.end() )
             {
                 spanned++;
             }
@@ -223,31 +219,72 @@ void Allele::anyInSet( NodeSet &nodes, bool* found )
     }
 }
 
-void Path::addSpan( Node* bgn, Node* nd, bool drxn )
+//void Path::addSpan( Node* bgn, Node* nd, bool drxn )
+//{
+//    bool doAdd = true;
+//    for ( auto it = spans.begin(); it != spans.end(); )
+//    {
+//        if ( bgn->isFurther( (*it).begin->ends_[!drxn], !drxn, !drxn ) )
+//        {
+//            spans.erase( it, spans.end() );
+//            break;
+//        }
+//        if ( !(*it).end || bgn->isFurther( (*it).end->ends_[!drxn], !drxn, !drxn ) )
+//        {
+//            doAdd = false;
+//            if ( (*it).end && nd->isFurther( (*it).end->ends_[drxn], drxn, drxn ) )
+//            {
+//                (*it).end = NULL;
+//            }
+//            break;
+//        }
+//        it++;
+//    }
+//    if ( doAdd )
+//    {
+//        spans.push_back( Span( bgn ) );
+//    }
+//}
+
+void Path::completeSpan( Node* node, bool drxn )
 {
-    bool doAdd = true;
-    for ( auto it = spans.begin(); it != spans.end(); )
+    bool doEnd = node->ends_[1] - node->ends_[0] > params.readLen * 2;
+    NodeSet reliSet, reliFwd;
+    while ( node )
     {
-        if ( bgn->isFurther( (*it).begin->ends_[!drxn], !drxn, !drxn ) )
+        if ( !node->getReliability() && ( reliSet.empty() || node->coverage_ > params.cover * 1.1 ) ) break;
+        reliSet.insert( node );
+        if ( node->edges_[drxn].size() == 1 ) node = node->edges_[drxn][0].node;
+        else
         {
-            spans.erase( it, spans.end() );
-            break;
-        }
-        if ( !(*it).end || bgn->isFurther( (*it).end->ends_[!drxn], !drxn, !drxn ) )
-        {
-            doAdd = false;
-            if ( (*it).end && nd->isFurther( (*it).end->ends_[drxn], drxn, drxn ) )
+            for ( Node* nxt : node->getNextNodes( drxn ) )
             {
-                (*it).end = NULL;
+                if ( nxt->getReliability() ) reliSet.insert( node );
             }
-            break;
+            node = NULL;
         }
-        it++;
     }
-    if ( doAdd )
+    
+    if ( reliSet.empty() ) return;
+    
+    for ( Node* reli : reliSet )
     {
-        spans.push_back( Span( bgn ) );
+        if ( reli->farPairNodes_[0] ) reli->farPairNodes_[0]->getDrxnNodes( reliFwd, drxn );
     }
+    
+    if ( reliFwd.empty() ) return;
+    
+    bool allEnded = true;
+    for ( Span &span : spans )
+    {
+        if ( span.ended && span.spanned ) continue;
+        if ( reliFwd.find( span.node ) != reliFwd.end() ) span.spanned = true;
+        if ( span.spanned ) span.ended = true;
+        if ( !span.ended ) span.ended = doEnd;
+        allEnded = allEnded && span.ended;
+    }
+    
+    if ( allEnded ) isMulti = false;
 }
 
 void Path::getAllelesInSet( vector<Allele> &rAlleles, NodeSet &nodes )
@@ -263,10 +300,20 @@ void Path::getAllelesInSet( vector<Allele> &rAlleles, NodeSet &nodes )
     }
 }
 
-void Path::reset()
+void Path::reset( NodeList &nodes )
 {
     fork = NULL;
     convergents.clear();
+    convFork.clear();
     divergent.clear();
     path.clear();
+    
+    for ( int i = 0; i < spans.size(); )
+    {
+        if ( find( nodes.begin(), nodes.end(), spans[i].node ) == nodes.end() )
+        {
+            spans.erase( spans.begin() + i );
+        }
+        else i++;
+    }
 }

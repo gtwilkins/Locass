@@ -30,8 +30,9 @@ Seed::Seed( string &header, string &seq, Querier &bwt, int errorCount )
     tether_[1] = 0;
     ends_[0] = seq.length();
     ends_[1] = 0;
-    assert( errorCount <= 20 );
+    assert( errorCount <= 15 );
     MappedSeqs ms = bwt_.mapSeed( seq, errorCount, true );
+    readCount_ = ms.reads.size();
     
     for ( ReadStruct &read : ms.reads )
     {
@@ -347,6 +348,8 @@ vector<Locus*> Seed::getLoci()
         node->dismantleNode();
         delete node;
     }
+    
+    nodes_.clear();
     
     return loci;
 }
@@ -858,11 +861,24 @@ void Seed::resolveBackForks()
     }
 }
 
+bool Seed::warning()
+{
+    if ( readCount_ > params.cover * 3 )
+    {
+        cout << "\tWarning: excessive reads mapped ( " << to_string( readCount_ ) << " )" << endl;
+        cout << "\tEstimated multiplicity of " << to_string( readCount_ / params.cover ) << "." << endl;
+        cout << "\tExtension will not be attempted. Please try a more refined query." << endl << endl;
+        return true;
+    }
+    return false;
+}
+
 Seed::~Seed()
 {
-//    for ( Node* node : nodes_ )
-//    {
-//        delete node;
-//    }
+    for ( Node* node : nodes_ )
+    {
+        delete node;
+    }
+    nodes_.clear();
 }
 

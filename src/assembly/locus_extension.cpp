@@ -41,7 +41,9 @@ void Locus::extendLocus()
                 if ( !updateExtension( drxn ) ) break;
             }
         }
+        locusTest();
         if ( !plot() ) leap();
+        locusTest();
     }
     
     duration_ = (double)( clock() - startTime ) / (double) CLOCKS_PER_SEC;
@@ -181,6 +183,7 @@ bool Locus::debriefExtend( ExtVars &ev, bool drxn, bool rePlot )
         if ( !ev.offset.empty() )
         {
             Node::resolveOffsets( ev, drxn );
+            locusTest();
             continue;
         }
         
@@ -241,6 +244,7 @@ bool Locus::extendNodes( bool drxn )
             ExtVars ev( nodes_[drxn], nodes_[drxn + 3], validLimits_, bwt_ );
             node->extendNode( ev, drxn );
             forkCount_[drxn] += node->edges_[drxn].size();
+            locusTest();
             if ( !debriefExtend( ev, drxn ) ) break;
         }
     }
@@ -378,12 +382,6 @@ bool Locus::setBestEnds( Node* bgn, ScoreMap &scores, NodeSet &extSet, NodeSet &
         for ( NodeList &endList : endLists )
         {
             float endScore = 10 * ( ( (float)getWeakestEdge( fork, endList[0], forkFwdSet, drxn ) / (float)params.readLen ) - (float)0.8 );
-//            if ( !setBestEndsSetEnd( endList, forkScore, endScore, scores, endScores, cutoff, delSet, drxn ) )
-//            {
-//                fork->deleteTest( endList, drxn );
-//                continue;
-//            }
-//            didAdd = true;
             didAdd = setBestEndsSetEnd( endList, forkScore, endScore, scores, endScores, cutoff, delSet, drxn ) || didAdd;
         }
     }

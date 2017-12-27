@@ -131,8 +131,8 @@ void IndexReader::setBaseOverlap( uint8_t i, uint8_t j, CharId &rank, CharId &co
 void IndexReader::setRank( uint8_t i, CharId rank, CharCount &ranks )
 {
     rank += charRanks[i];
-    ReadId rankMark = rank / indexPerMark;
-    ReadId rankIndex = marks_[rankMark];
+    CharId rankMark = rank / indexPerMark;
+    CharId rankIndex = marks_[rankMark];
     
     CharId totalCount = setRankIndex( rankIndex, ranks );
     assert( totalCount <= rank );
@@ -151,8 +151,8 @@ void IndexReader::setRank( uint8_t i, CharId rank, CharCount &ranks )
         }
     }
     
-    ReadId rankBwt = rankIndex * bwtPerIndex;
-    ReadId rankChunk = bwtPerIndex;
+    CharId rankBwt = rankIndex * bwtPerIndex;
+    CharId rankChunk = bwtPerIndex;
     uint8_t offset = index_[(rankIndex * sizePerIndex)+36];
     rankBwt -= offset;
     rankChunk += offset;
@@ -163,7 +163,7 @@ void IndexReader::setRank( uint8_t i, CharId rank, CharCount &ranks )
     fread( buff, 1, rankChunk, bwt );
     
     uint8_t c;
-    ReadId p = 0, thisRun, addRun;
+    CharId p = 0, thisRun, addRun;
     
     while ( rankLeft )
     {
@@ -193,7 +193,7 @@ void IndexReader::setRank( uint8_t i, CharId rank, CharCount &ranks )
     }
 }
 
-CharId IndexReader::setRankIndex( ReadId rankIndex, CharCount &ranks )
+CharId IndexReader::setRankIndex( CharId rankIndex, CharCount &ranks )
 {
     CharId indexBegin = rankIndex * sizePerIndex;
     memcpy( &ranks.counts, &index_[indexBegin], 32 );

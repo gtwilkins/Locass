@@ -64,6 +64,20 @@ void Node::addRead( SeqNum readId, int32_t bgn, int32_t nd, bool isRedundant )
     addMark( readId, coords );
 }
 
+void Node::addRead( NodeMapRead &mapRead, bool drxn )
+{
+    Coords coords( mapRead.coords[drxn][0]
+                 , mapRead.coords[drxn][1]
+                 , mapRead.seq.length() > mapRead.coords[drxn][1] - mapRead.coords[drxn][0] );
+    auto r = reads_.insert( make_pair( mapRead.id, coords ) );
+    if ( !r.second )
+    {
+        removeMark( mapRead.id );
+        r.first->second = coords;
+    }
+    addMark( mapRead.id, coords );
+}
+
 bool Node::anyReadBeyondCoord( int32_t coord, bool coordDrxn, bool drxn )
 {
     for ( auto &read : reads_ )
@@ -194,6 +208,21 @@ vector<ReadMark> Node::getMarksBase( int drxn )
     return marks;
 }
 
+void Node::getMarksCount( int counts[2] )
+{
+    for ( auto &read : reads_ )
+    {
+        SeqNum pairId = read.first;
+        Lib* lib = params.getLib( pairId );
+        int drxn;
+        int32_t dist;
+        if ( lib && (*lib).getPair( pairId, dist, drxn ) )
+        {
+            counts[drxn]++;
+        }
+    }
+}
+
 bool Node::offsetNode( bool drxn )
 {
     int32_t off = 0;
@@ -216,7 +245,7 @@ void Node::reAddMark( SeqNum readId, Coords &coords )
     if ( lib && (*lib).getPair( readId, dist, drxn ) )
     {
         if ( find_if( marks_[drxn].begin(), marks_[drxn].end(), [&readId]( const ReadMark &a ){ 
-            return a.readId == readId;
+            return a.id == readId;
         } ) == marks_[drxn].end() )
         {
             marks_[!drxn].push_back( ReadMark( readId, coords, lib, drxn ) );
@@ -246,7 +275,7 @@ void Node::removeMark( SeqNum &readId )
     {
         for ( auto it = marks_[drxn].begin(); it != marks_[drxn].end(); )
         {
-            if ( it->readId == pairId )
+            if ( it->id == pairId )
             {
                 it = marks_[drxn].erase( it );
                 return;
@@ -263,7 +292,7 @@ void Node::removeMarks( unordered_set<SeqNum> &readIds, bool pushLimits, bool is
         vector<ReadMark> newMarks;
         for ( ReadMark &mark : marks_[drxn] )
         {
-            SeqNum readId = isPair ? params.getPairId( mark.readId ) : mark.readId;
+            SeqNum readId = isPair ? params.getPairId( mark.id ) : mark.id;
             if ( readIds.find( readId ) == readIds.end() )
             {
                 newMarks.push_back( mark );
@@ -284,6 +313,19 @@ void Node::resetMarks()
 {
     marks_[0] = getMarksBase( 0 );
     marks_[1] = getMarksBase( 1 );
+}
+
+void Node::resetUnmarked( bool drxn )
+{
+    if ( getPairHitsTotal() < marks_[0].size() + marks_[1].size() )
+    {
+        unordered_set<ReadId> ids;
+        for ( ReadMark const &mark : marks_[drxn] ) ids.insert( mark.id );
+        for ( ReadMark const &mark : getMarksBase( drxn ) )
+            if ( ids.find( mark.id ) == ids.end() ) 
+                marks_[drxn].push_back( mark );
+        sortMarks( marks_[drxn], drxn );
+    }
 }
 
 void Node::sortMarks( vector<ReadMark> &marks, bool drxn )
@@ -364,9 +406,9 @@ void Node::trimReads( int32_t endCoord, bool drxn )
     {
         for ( ReadMark &mark : marks_[markDrxn] )
         {
-            if ( removeIds.find( mark.readId ) == removeIds.end() )
+            if ( removeIds.find( mark.id ) == removeIds.end() )
             {
-                marks[drxn].push_back( mark );
+                marks[markDrxn].push_back( mark );
             }
         }
     }

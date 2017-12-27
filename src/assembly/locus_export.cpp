@@ -28,6 +28,7 @@ void Locus::blankMismatchedEnds( vector< pair<Node*, int> > &nodePath )
     {
         if ( it->second > 0 )
         {
+            Node* node = it->first;
             int bgnCoord = it->first->seq_.length() - it->second;
             string seqEnd = it->first->seq_.substr( bgnCoord );
             string seqBgn = ( it + 1 )->first->seq_.substr( 0, it->second );

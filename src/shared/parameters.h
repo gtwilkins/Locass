@@ -46,7 +46,7 @@ struct Parameters {
     int32_t getFurthestPeMean( int32_t coord, bool drxn );
     Lib* getLib( const SeqNum &readId );
     int32_t getLibSize( SeqNum &readId );
-    SeqNum getPairId( const SeqNum &readId );
+    SeqNum getPairId( const SeqNum readId );
     void set();
     void setLimits( int32_t &limit );
     

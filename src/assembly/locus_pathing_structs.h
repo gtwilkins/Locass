@@ -26,10 +26,9 @@
 struct Span
 {
     Span( Node* bgn );
-    void setEnd( Node* nd, bool drxn );
     
-    Node *begin, *end;
-    bool spanned;
+    Node *node;
+    bool spanned, ended, complete;
 };
 
 struct PathBranch;
@@ -78,12 +77,12 @@ struct Allele
 
 struct Path
 {
-    void addSpan( Node* bgn, Node* nd, bool drxn );
+    void completeSpan( Node* node, bool drxn );
     void getAllelesInSet( vector<Allele> &rAlleles, NodeSet &nodes );
-    void reset();
+    void reset( NodeList &nodes );
     
     Node* fork;
-    NodeList path;
+    NodeList path, convFork;
     vector<Allele> alleles;
     vector<PathScore> convergents;
     BranchList divergent;

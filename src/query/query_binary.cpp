@@ -112,13 +112,14 @@ vector<ReadStruct> QueryBinaries::getReads( CharId rank, CharId count, bool drxn
     
     for ( const ReadId &id : readIds )
     {
-        ReadId seqNum = id / 2;
-        bool isRev = ( id & 0x1 ) == drxn;
-        fseek( bin_, binBegin_ + ( seqNum * lineLen_ ), SEEK_SET );
+        bool idRev = id & 0x1;
+        bool isRev = idRev == drxn;
+        CharId seekId = CharId( id / 2 ) * lineLen_ + binBegin_;
+        fseek( bin_, seekId, SEEK_SET );
         fread( &line, 1, lineLen_, bin_ );
         
         ReadStruct read;
-        read.readId = seqNum * 2 + isRev;
+        read.readId = id - idRev + isRev;
         decodeSequence( line, read.seq, line[0], isRev, drxn );
         reads.push_back( read );
     }
@@ -128,11 +129,11 @@ vector<ReadStruct> QueryBinaries::getReads( CharId rank, CharId count, bool drxn
 
 string QueryBinaries::getSequence( ReadId id )
 {
-    ReadId seqNum = id / 2;
     bool isRev = id & 0x1;
     string seq;
     uint8_t line[lineLen_];
-    fseek( bin_, binBegin_ + seqNum * lineLen_, SEEK_SET );
+    CharId seekId = CharId( id / 2 ) * lineLen_ + binBegin_;
+    fseek( bin_, seekId, SEEK_SET );
     fread( &line, 1, lineLen_, bin_ );
     decodeSequence( line, seq, line[0], isRev, 1 );
     return seq;
@@ -142,7 +143,8 @@ vector<ReadId> QueryBinaries::getIds( CharId rank, CharId count )
 {
     vector<ReadId> readIds( count );
     ReadId idBuff[count];
-    fseek( ids_, idsBegin_ + 4 * rank, SEEK_SET );
+    CharId seekId = rank * 4 + idsBegin_;
+    fseek( ids_, seekId, SEEK_SET );
     fread( &idBuff, 4, count, ids_ );
     for ( int i ( 0 ); i < count; i++ )
     {
@@ -158,14 +160,16 @@ void QueryBinaries::getOverlaps( vector<Overlap> &overlaps, CharId rank, CharId 
     
     for ( const ReadId &id : readIds )
     {
-        ReadId seqNum = id / 2;
-        bool isRev = ( id & 0x1 ) == drxn;
-        fseek( bin_, binBegin_ + ( seqNum * lineLen_ ), SEEK_SET );
+        bool idRev = id & 0x1;
+        bool isRev = idRev == drxn;
+        CharId seekId = CharId( id / 2 ) * lineLen_ + binBegin_;
+        fseek( bin_, seekId, SEEK_SET );
         fread( &line, 1, lineLen_, bin_ );
         int extLen = line[0] - overlap;
+        assert( extLen < 70 );
         if ( extLen > 0 )
         {
-            Overlap ol( ( seqNum * 2 + isRev ), overlap, extLen );
+            Overlap ol( ( id - idRev + isRev ), overlap, extLen );
             decodeSequence( line, ol.seq, extLen, isRev, drxn );
             overlaps.push_back( ol );
         }

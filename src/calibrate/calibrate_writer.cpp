@@ -32,7 +32,8 @@ void CalibrateWriter::coverage()
     srand( time(NULL) );
     
     vector<string> seqs;
-    while ( seqs.size() < 1000 )
+    int attempted = 0;
+    while ( seqs.size() < 1000 && attempted < 10000 )
     {
         ReadId id = ( ( rand() & 65535 ) << 16 | ( rand() & 65535 ) ) % params.seqCount;
         string seq = bwt_.getSequence( id );
@@ -53,6 +54,7 @@ void CalibrateWriter::coverage()
             totalCounts.push_back( counts[1] );
             seqs.push_back( seq );
         }
+        ++attempted;
     }
     
     vector<int> sortCounts = { totalCounts.begin(), totalCounts.end() };

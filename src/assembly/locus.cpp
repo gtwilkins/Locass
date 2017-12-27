@@ -25,7 +25,7 @@ extern struct Parameters params;
 Locus::Locus( Querier &bwt )
 : finalise_( false ), bwt_( bwt )
 {
-    duration_ = 0;
+    duration_ = leapTime_ = revTime_ =  0;
     multiplicity_ = 1;
     debugLog_ = NULL;
     for ( int drxn : { 0, 1 } )
@@ -40,10 +40,12 @@ Locus::Locus( Querier &bwt )
         leapFar_[drxn] = false;
         harsh_[drxn] = false;
         validLimits_[drxn] = 0;
+        forkLimits_[drxn] = 0;
         desperation_[drxn] = 0;
         completed_[drxn] = false;
         finished_[drxn] = false;
         paths_[drxn].push_back( Path() );
+        dvs_[drxn] = new DrxnVars( bwt_, nodes_[drxn], nodes_[3+drxn], drxn );
     }
 }
 
@@ -121,6 +123,82 @@ Locus::~Locus()
         {
             delete ivs_[i];
             ivs_[i] = NULL;
+        }
+        if ( dvs_[i] )
+        {
+            delete dvs_[i];
+        }
+    }
+}
+
+void Locus::locusTest()
+{
+    for ( int i = 0; i < 2; i++ )
+    {
+        for ( Node* node : forkNodes_[i] )
+        {
+            assert( node->drxn_ == 2 || find( nodes_[i].begin(), nodes_[i].end(), node ) != nodes_[i].end() );
+        }
+        
+        for ( Path &path : paths_[i] )
+        {
+            for ( Span &span : path.spans )
+            {
+                assert( span.node->drxn_ == 2 || find( nodes_[i].begin(), nodes_[i].end(), span.node ) != nodes_[i].end() );
+            }
+        }
+    }
+    for ( int i = 0; i < 5; i++ )
+    {
+        for ( Node* node : nodes_[i] )
+        {
+//            assert( !node->unreliable_ );
+            assert( node->drxn_ == i );
+            float cover = node->coverage_;
+            node->setCoverage();
+            assert( cover * 2 > node->coverage_ || node->edges_[1].empty() || node->edges_[0].empty() );
+            bool ended[2] = { false, false };
+            for ( auto &read : node->reads_ )
+            {
+                if ( read.second[0] == node->ends_[0] ) ended[0] = true;
+                if ( read.second[1] == node->ends_[1] ) ended[1] = true;
+                assert( node->ends_[0] <= read.second[0] && read.second[1] <= node->ends_[1] );
+            }
+            assert( ended[0] && ended[1] );
+            if ( i == 0 ) assert( !node->edges_[1].empty() );
+            if ( i == 1 ) assert( !node->edges_[0].empty() );
+            for ( bool drxn : { 0, 1 } )
+            {
+                int j = 0;
+                for ( Edge &e : node->edges_[drxn] )
+                {
+//                    assert( drxn != node->drxn_ || node->drxn_ != 1 || e.node->drxn_ == 1 );
+//                    assert( drxn != node->drxn_ || node->drxn_ != 0 || e.node->drxn_ == 0 );
+                    bool found = false;
+                    int k = 0;
+                    for ( Edge &e2 : e.node->edges_[!drxn] )
+                    {
+                        if ( e2.node == node ) found = true;
+                        assert( k++ < 15 );
+                    }
+                    assert( j < 15 );
+                    assert( found );
+                    j++;
+                }
+            }
+            for ( bool drxn : { 0, 1 } )
+            {
+                for ( ReadMark &mark : node->marks_[drxn] )
+                {
+                    if ( drxn ) assert( mark.estimate < mark.mark );
+                    else ( assert( mark.mark < mark.estimate ) );
+                }
+                int seqLen = node->seq_.length();
+                for ( Edge &e : node->edges_[drxn] )
+                {
+                    assert( seqLen >= e.overlap );
+                }
+            }
         }
     }
 }
@@ -387,6 +465,13 @@ int Locus::getWeakestEdge( Node* begin, Node* end, NodeSet &fwdSet, bool drxn )
         weakest = min( weakest, thisBest );
     }
     return weakest;
+}
+
+void Locus::setForkLimits()
+{
+    forkLimits_[0] = forkLimits_[1] = 0;
+    for ( Node* node : forkNodes_[0] ) forkLimits_[0] = min( forkLimits_[0], node->ends_[0] );
+    for ( Node* node : forkNodes_[1] ) forkLimits_[1] = max( forkLimits_[1], node->ends_[1] );
 }
 
 void Locus::setHeader( string &header )

@@ -103,6 +103,21 @@ Node::Node( Node* toClone, ExtVars &ev, bool drxn )
     coverage_ = toClone->coverage_;
 }
 
+Node::Node( Node* toClone )
+: Node()
+{
+    seq_ = toClone->seq_;
+    reads_ = toClone->reads_;
+    drxn_ = toClone->drxn_;
+    ends_[0] = toClone->ends_[0];
+    ends_[1] = toClone->ends_[1];
+    edgeCount_[0] = toClone->edgeCount_[0];
+    edgeCount_[1] = toClone->edgeCount_[1];
+    toClone->addClone( this );
+    resetMarks();
+    coverage_ = toClone->coverage_;
+}
+
 // Seed island node
 Node::Node( string seq, ReadMark &mark, Extension &ext, bool extDrxn, bool islandDrxn )
 : Node( seq )
@@ -169,6 +184,48 @@ Node::Node( ReadStruct &read )
     validLimits_[0] = validLimits_[1] = read.tether[0];
     validLimits_[2] = validLimits_[3] = read.tether[1];
     reads_.insert( make_pair( read.readId, Coords( ends_[0], ends_[1], false ) ) );
+}
+
+Node::Node( NodeMapRead &mapRead, bool drxn )
+: Node( mapRead.seq )
+{
+    drxn_ = drxn;
+    ends_[!drxn] = mapRead.coords[!drxn][!drxn];
+    ends_[drxn] = drxn ? ends_[0] + seq_.length() : ends_[1] - seq_.length();
+    reads_.insert( make_pair( mapRead.id, Coords( ends_[0], ends_[1], false ) ) );
+    addEdge( mapRead.nodes[0], mapRead.coords[0][1] - mapRead.coords[0][0], 0 );
+    addEdge( mapRead.nodes[1], mapRead.coords[1][1] - mapRead.coords[1][0], 1 );
+    mapRead.nodes[0]->removeEdge( mapRead.nodes[1], 1 );
+    mapRead.nodes[1]->removeEdge( mapRead.nodes[0], 0 );
+}
+
+Node::Node( MapNode* mn, int i, int j, int drxn )
+: Node()
+{
+    drxn_ = drxn;
+    int limits[2] = { mn->coords[0][i], mn->coords[1][j] };
+    seq_ = mn->seq.substr( limits[0], limits[1] - limits[0] );
+    ends_[0] = mn->coords[0][i];
+    ends_[1] = ends_[0] + seq_.length();
+    while ( i <= j )
+    {
+        reads_.insert( make_pair( mn->ids[i], Coords( mn->coords[0][i], mn->coords[1][i], false ) ) );
+        i++;
+    }
+    resetMarks();
+    setCoverage();
+}
+
+Node::Node( string seq, ReadId id, int32_t estimate, int drxn )
+: Node( seq )
+{
+    drxn_ = drxn;
+    ends_[0] = ends_[1] = estimate;
+    if ( drxn == 1 || drxn == 4 ) ends_[1] = ends_[0] + seq.length();
+    else ends_[0] = ends_[1] -seq.length();
+    reads_.insert( make_pair( id, Coords( ends_[0], ends_[1], false ) ) );
+    resetMarks();
+    setCoverage();
 }
 
 //void Node::nodeTest()
@@ -285,6 +342,8 @@ void Node::addEdge( Node* node, int overlap, bool drxn, bool doOffset, bool isLe
     }
     edgeCount_[drxn] = max( edgeCount_[drxn], (int)edges_[drxn].size() );
     node->edgeCount_[!drxn] = max( node->edgeCount_[!drxn], (int)node->edges_[!drxn].size() );
+    setCoverage();
+    node->setCoverage();
 }
 
 void Node::blankEnd( int32_t len, bool drxn )
@@ -329,7 +388,7 @@ bool Node::deleteTest( bool drxn )
             {
                 for ( ReadMark &mark : fwd->marks_[drxn] )
                 {
-                    auto it = t->reads_.find( mark.readId );
+                    auto it = t->reads_.find( mark.id );
                     if ( it != t->reads_.end()
                             && !fwd->clones_
                             && mark.isValid( it->second )
@@ -356,7 +415,7 @@ bool Node::deleteTest( NodeList &tNodes, bool drxn )
         int hits = 0;
         for ( ReadMark &mark : marks_[drxn] )
         {
-            auto it = t->reads_.find( mark.readId );
+            auto it = t->reads_.find( mark.id );
             if ( it != t->reads_.end()
                     && !clones_
                     && mark.isValid( it->second )
@@ -385,11 +444,13 @@ int32_t Node::getBiggestOffset( bool drxn )
 int Node::getBestOverlap( bool drxn )
 {
     int overlap = 0;
+    bool isSet = false;
     for ( Edge &edge : edges_[drxn] )
     {
-        if ( edge.overlap > overlap )
+        if ( !isSet || edge.overlap > overlap )
         {
             overlap = edge.overlap;
+            isSet = true;
         }
     }
     return overlap;
@@ -440,6 +501,14 @@ string Node::getHeader( string header )
     return header;
 }
 
+int32_t Node::getLength()
+{
+    int32_t len = ends_[1] - ends_[0];
+    int seqLen = seq_.length();
+    assert( len == seq_.length() );
+    return len;
+}
+
 int Node::getOverlap( Node* node, bool drxn )
 {
     int overlap = 0;
@@ -483,6 +552,44 @@ NodeList Node::getTargetNodes( bool drxn, bool inclSelf, bool inclClones )
     }
     NodeList tNodes( tSet.begin(), tSet.end() );
     return tNodes;
+}
+
+bool Node::inheritEdges( bool drxn )
+{
+    if ( drxn_ >= 2 ) return false;
+    NodeSet nxtSet = getNextNodes( drxn );
+    NodeSet prvSet;
+    for ( Node* nxt : nxtSet ) nxt->getNextNodes( prvSet, !drxn );
+    if ( prvSet.size() <= 1 ) return false;
+    bool didEdge = false;
+    for ( Node* prv : prvSet )
+    {
+        if ( prv == this ) continue;
+        NodeSet prvNxtSet = prv->getNextNodes( drxn );
+        for ( Node* nxt : nxtSet )
+        {
+            if ( prvNxtSet.find( nxt ) == nxtSet.end() )
+            {
+                int ol = ( drxn ? mapSeqOverlap( prv->seq_, nxt->seq_, 23 ) 
+                                : mapSeqOverlap( nxt->seq_, prv->seq_, 23 ) );
+                if ( ol && ol < params.readLen )
+                {
+                    Node* bck = ( drxn_ == drxn ? prv : nxt );
+                    Node* fwd = ( drxn_ == drxn ? nxt : prv );
+                    NodeSet bckFwdSet = bck->getDrxnNodes( drxn_ );
+                    NodeSet fwdFwdSet = fwd->getDrxnNodes( drxn_ );
+                    if ( bckFwdSet.find( fwd ) != bckFwdSet.end() ) continue;
+                    if ( fwdFwdSet.find( bck ) != fwdFwdSet.end() ) continue;
+                    bck->addEdge( fwd, ol, drxn_ );
+                    NodeSet qSet = bck->getDrxnNodesNotInSet( bckFwdSet, drxn_ );
+                    for ( Node* q : qSet ) if ( q->validated_ ) q->updatePairs();
+                    didEdge = true;
+                }
+            }
+        }
+    }
+    
+    return didEdge;
 }
 
 bool Node::isBeyond( int32_t bgn, int32_t nd, bool drxn )
@@ -530,9 +637,9 @@ bool Node::isEdge( Node* node, bool drxn )
     return false;
 }
 
-bool Node::isEnded(bool drxn)
+bool Node::isEnded( bool drxn )
 {
-    return ( !edges_[drxn].empty() || stop_[drxn] > 0 );
+    return ( edges_[drxn].empty() && stop_[drxn] );
 }
 
 bool Node::isFurther( int32_t coord, bool endDrxn, bool drxn )
@@ -626,6 +733,13 @@ bool Node::removeEdges( NodeSet &removeSet, bool drxn )
     }
     
     return rVal;
+}
+
+void Node::sortEdges( bool drxn )
+{
+    sort( edges_[drxn].begin(), edges_[drxn].end(), []( const Edge &a, const Edge &b ){
+        return a.overlap > b.overlap;
+    }  );
 }
 
 void Node::stop( int stopCode, bool drxn )

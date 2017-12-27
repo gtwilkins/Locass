@@ -42,13 +42,14 @@ void Transform::load( PreprocessFiles* fns, vector< vector<ReadFile*> >& libs, u
             readLen = max( readLen, readFile->readLen );
         }
     }
-    uint8_t minLen = readLen * 0.8;
+    uint8_t minLen = readLen;
     assert( readLen >= 80 && readLen <= 250 );
     
     cout << "\tRead length set to " << to_string( readLen ) << "." << endl;
-    
+    cout << "\tMin length set to " << to_string( minLen ) << "." << endl;
+
     ofstream tmpSingles = fns->getWriteStream( fns->tmpSingles );
-    ReadId readCount = 0;
+    ReadId readCount = 0, discardCount = 0;
     uint8_t fileCount = 0;
     double readStartTime = clock();
     
@@ -69,16 +70,22 @@ void Transform::load( PreprocessFiles* fns, vector< vector<ReadFile*> >& libs, u
                 {
                     binWrite->write( reads[0] );
                     binWrite->write( reads[1] );
+                    thisReadCount += 2;
                 }
-                else if ( reads[0].length() >= minLen )
+                else
                 {
-                    tmpSingles << reads[0] << "\n";
+                    discardCount += 2;
+                    if ( reads[0].length() >= minLen )
+                    {
+                        tmpSingles << reads[0] << '\n';
+                        --discardCount;
+                    }
+                    if ( reads[1].length() >= minLen )
+                    {
+                        tmpSingles << reads[1] << '\n';
+                        --discardCount;
+                    }
                 }
-                else if ( reads[1].length() >= minLen )
-                {
-                    tmpSingles << reads[1] << "\n";
-                }
-                thisReadCount += 2;
             }
             
             binWrite->setNextLibrary();
@@ -108,11 +115,18 @@ void Transform::load( PreprocessFiles* fns, vector< vector<ReadFile*> >& libs, u
                 {
                     binWrite->write( read );
                 }
+                else
+                {
+                    discardCount++;
+                }
                 thisReadCount++;
             }
             delete libs[0][0];
             
-            cout << "\tRead " << to_string( thisReadCount ) << " single reads" << endl;
+            if ( thisReadCount )
+            {
+                cout << "\tRead " << to_string( thisReadCount ) << " single reads" << endl;
+            }
         }
         
         libs.erase( libs.begin() );
@@ -122,7 +136,7 @@ void Transform::load( PreprocessFiles* fns, vector< vector<ReadFile*> >& libs, u
     
     cout << endl <<"Reading inputs files... completed!" << endl << endl;
     cout << "Summary:" << endl;
-    cout << "Read in " << readCount << " sequence reads and discarded " << ( readCount - ( binWrite->seqCount / 2 ) ) << endl;
+    cout << "Read in " << to_string( readCount ) << " sequence reads and discarded " << to_string( discardCount ) << endl;
     cout << "Read from " << to_string( fileCount ) << " read files, including " << to_string( pairedLibCount ) << " paired libraries." << endl;
     cout << "Time taken: " << getDuration( readStartTime ) << endl << endl;
     delete binWrite;

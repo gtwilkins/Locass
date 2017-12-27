@@ -218,6 +218,25 @@ bool Querier::isVector( Extension &ext )
     return false;
 }
 
+ReadId Querier::isExtendable( string &seq, uint16_t minLen, bool drxn )
+{
+    int seqLen = min( params.readLen, (int)seq.length() );
+    uint8_t query[seqLen];
+    setQuery( seq, query, seqLen, drxn );
+    QueryState q( query, seqLen, max( minLen, minOver_ ) );
+    CharId rank, count;
+    reader_->setBaseOverlap( query[0], query[1], rank, count );
+    mapReads( q, 1, rank, count );
+    
+    ReadId extCount = 0;
+    for ( int i ( 0 ); i < q.endOverlaps.size(); i++ )
+    {
+        extCount += q.endCounts[i];
+    }
+    
+    return extCount;
+}
+
 vector<Extension> Querier::mapExtensions( bool &noMatches, string &seq, bool drxn, uint16_t minOver )
 {
     vector<Overlap> overlaps = getOverlaps( seq, minOver, drxn );

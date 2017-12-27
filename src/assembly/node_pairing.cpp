@@ -137,10 +137,10 @@ void Node::clearPairsForward( bool drxn )
                 t->resetFurthest( fwd );
                 for ( ReadMark &mark : marks )
                 {
-                    if ( t->reads_.find( mark.readId ) != t->reads_.end() )
+                    if ( t->reads_.find( mark.id ) != t->reads_.end() )
                     {
-                        tReads.push_back( mark.readId );
-                        fwdReads.push_back( params.getPairId( mark.readId ) );
+                        tReads.push_back( mark.id );
+                        fwdReads.push_back( params.getPairId( mark.id ) );
                     }
                 }
                 t->reAddMarks( tReads );
@@ -160,7 +160,7 @@ void Node::clearPairsForward( bool drxn )
 
 PairHit Node::findReadPair( ReadMark &mark, bool &valid, bool drxn )
 {
-    auto hit = reads_.find( mark.readId );
+    auto hit = reads_.find( mark.id );
     if ( hit != reads_.end() )
     {
         valid = mark.isValid( hit->second );
@@ -171,7 +171,7 @@ PairHit Node::findReadPair( ReadMark &mark, bool &valid, bool drxn )
 
 PairHit Node::findReadPairBestClone( NodeList &tNodes, ReadMark &mark, bool &valid, bool drxn )
 {
-    auto hit = reads_.find( mark.readId );
+    auto hit = reads_.find( mark.id );
     if ( hit != reads_.end() )
     {
         int32_t diff = abs( mark.estimate - hit->second[!drxn] );
@@ -182,7 +182,7 @@ PairHit Node::findReadPairBestClone( NodeList &tNodes, ReadMark &mark, bool &val
         {
             for ( Node* clone : *clones_ )
             {
-                hit = clone->reads_.find( mark.readId );
+                hit = clone->reads_.find( mark.id );
                 if ( find( tNodes.begin(), tNodes.end(), clone ) != tNodes.end() && hit != clone->reads_.end() )
                 {
                     bool thisValid = mark.isValid( hit->second );
@@ -418,7 +418,7 @@ int Node::getPairHitsTmp( bool drxn )
     {
         for ( Node* t : tNodes )
         {
-            if ( t->reads_.find( mark.readId ) != t->reads_.end() )
+            if ( t->reads_.find( mark.id ) != t->reads_.end() )
             {
                 hits++;
                 break;
@@ -515,9 +515,9 @@ void Node::getUnpairedMarks( NodeList &nodes, vector<ReadMark> &peMarks, vector<
 {
     for ( ReadMark &mark : getMarksBase( !drxn ) )
     {
-        bool isPe = params.isReadPe( mark.readId );
+        bool isPe = params.isReadPe( mark.id );
         bool found = ( !inclMp && !isPe )
-                || ( usedIds.find( mark.readId ) != usedIds.end() ) 
+                || ( usedIds.find( mark.id ) != usedIds.end() ) 
                 || ( mark.estimate < limits[0] )
                 || ( limits[1] < mark.estimate );
         
@@ -525,7 +525,7 @@ void Node::getUnpairedMarks( NodeList &nodes, vector<ReadMark> &peMarks, vector<
         {
             for ( Node* node : nodes )
             {
-                if ( node->reads_.find( mark.readId ) != node->reads_.end() )
+                if ( node->reads_.find( mark.id ) != node->reads_.end() )
                 {
                     found = true;
                     break;
@@ -534,7 +534,7 @@ void Node::getUnpairedMarks( NodeList &nodes, vector<ReadMark> &peMarks, vector<
         }
         if ( !found )
         {
-            readIds.insert( mark.readId );
+            readIds.insert( mark.id );
             ( isPe ? peMarks : mpMarks ).push_back( mark );
         }
     }
@@ -565,6 +565,21 @@ void Node::limitScore( Score &score, bool inclNotValidSelf )
     
     score.misses = max( float( 0 ), expected[0] - score.hits );
     score.hits = score.hits <= expected[1] ? score.hits : max( 1, int( expected[1] ) );
+}
+
+void Node::updatePairs()
+{
+    bool drxn = drxn_ == 4 || drxn_ == 1;
+    if ( paired_ ) paired_->clear();
+    
+    NodeList tNodes = getTargetNodes( drxn, true );
+    setPairs( tNodes, drxn );
+
+    for ( Node* fwd : getDrxnNodes( drxn ) )
+    {
+        NodeList tSelf = { this };
+        fwd->setPairs( tSelf, drxn );
+    }
 }
 
 void Node::resetPairing( NodeSet &nodes )
@@ -638,7 +653,7 @@ CloneScore Node::setCloneScore( PairingVars &pv, CloneTargetVars &ctv, bool drxn
                 
                 if ( ( isGood || altGood ) && doRecord )
                 {
-                    pv.hitIds.insert( mark.readId );
+                    pv.hitIds.insert( mark.id );
                 }
                 
                 break;
@@ -696,7 +711,7 @@ CloneScore Node::setCloneScore( NodeIntMap &pairs, NodeList &tNodes, vector<int3
                 
                 if ( isGood || altGood )
                 {
-                    hitIds.insert( mark.readId );
+                    hitIds.insert( mark.id );
                 }
                 
                 break;
@@ -788,7 +803,7 @@ void Node::setPairs( PairingVars &pv, bool drxn )
                     {
                         result.first->second++;
                     }
-                    pv.hitIds.insert( mark.readId );
+                    pv.hitIds.insert( mark.id );
                 }
             }
         }
@@ -852,7 +867,7 @@ void Node::setPairs( Node* focus, Node* t, pair<int32_t, int32_t> &qOffset, pair
             if ( this != focus || ( drxn ? validLimits_[0] + params.readLen <= mark.mark 
                                          : mark.mark <= validLimits_[3] - params.readLen ) )
             {
-                if ( t->findRead( mark.readId, coords, true ) )
+                if ( t->findRead( mark.id, coords, true ) )
                 {
                     if ( ( t != focus || t->isValidHit( coords, drxn ) )
                             && mark.isValid( *coords, qOffset, tOffset, drxn ) )
@@ -870,7 +885,7 @@ void Node::setPairs( Node* focus, Node* t, pair<int32_t, int32_t> &qOffset, pair
                             r2.first->second++;
                         }
                         
-                        usedIds.insert( mark.readId );
+                        usedIds.insert( mark.id );
                     }
                     else
                     {

@@ -38,7 +38,7 @@ void Node::setFurthest( NodeSet &tSet, bool drxn )
         {
             for ( Node* t : tTmp )
             {
-                auto it = t->reads_.find( mark.readId );
+                auto it = t->reads_.find( mark.id );
                 if ( it != t->reads_.end() )
                 {
                     if ( !farPairNodes_[0] || ( drxn ? it->second[0] < farPairCoords_[0]

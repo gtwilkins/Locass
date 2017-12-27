@@ -90,250 +90,250 @@ bool Node::bridgeIsland( IslandVars &iv, NodeSetList &islandSets )
     return false;
 }
 
-void Node::bridgeIslandDump( IslandVars &iv, NodeSetList &islandSets, Querier &bwt )
-{
-    NodeList islandEnds;
-    NodeSet peSet;
-    NodeIntMap qLimits, tLimits;
-    
-    Node::bridgeIslandGetPairs( iv, islandSets, peSet, qLimits, tLimits );
-    
-    if ( peSet.empty() )
-    {
-        NodeList peNodes;
-        vector< vector<SeqNum> > peReadLists;
-        for ( NodeSet isl : islandSets )
-        {
-            for ( Node* node : isl )
-            {
-                vector<SeqNum> thisPe;
-                for ( const SeqNum &readId : iv.peReads )
-                {
-                    SeqNum pairId = params.getPairId( readId );
-                    if ( node->reads_.find( readId ) != node->reads_.end() )
-                    {
-                        thisPe.push_back( readId );
-                    }
-                    if ( node->reads_.find( pairId ) != node->reads_.end() )
-                    {
-                        thisPe.push_back( pairId );
-                    }
-                }
-                if ( !thisPe.empty() )
-                {
-                    peNodes.push_back( node );
-                    peReadLists.push_back( thisPe );
-                }
-            }
-        }
-    }
-    
-    for ( NodeSet &islandSet : islandSets )
-    {
-        Node::bridgeIslandGetIslandEnds( iv, peSet, islandEnds, qLimits, islandSet );
-    }
-    
-    NodeList mainEnds = Node::bridgeIslandGetMainEnds( iv, peSet, tLimits );
-    NodeList tNodes;
-    for ( auto &t : tLimits )
-    {
-        if ( iv.ev.del.find( t.first ) == iv.ev.del.end() )
-        {
-            tNodes.push_back( t.first );
-        }
-    }
-    Node::bridgeIslandSetOffsets( iv, islandEnds, tNodes );
-    NodeSet dumpSet, endSet;
-    int32_t coords[3] = { std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::max() };
-    for ( bool drxn : { 0, 1 } )
-    {
-        for ( Node* node : ( drxn == iv.drxn ? islandEnds : mainEnds ) )
-        {
-            coords[drxn] = drxn ? min( coords[1], node->ends_[0] ) : max( coords[0], node->ends_[1] );
-            dumpSet.insert( node );
-            node->getDrxnNodes( dumpSet, 0 );
-            node->getDrxnNodes( dumpSet, 1 );
-            for ( Node* nxt : node->getNextNodes( drxn ) )
-            {
-                nxt->getDrxnNodes( endSet, !drxn );
-            }
-            endSet.insert( node );
-            node->getDrxnNodes( endSet, !drxn );
-            node->offsetForward( !drxn, false, true );
-            coords[2] = min( coords[2], node->ends_[0] );
-        }
-    }
-    
-    coords[0] -= 500;
-    coords[1] += 500;
-    
-    vector< pair<SeqNum, int32_t> > readIds;
-    for ( Node* node : dumpSet )
-    {
-        for ( bool drxn : {0, 1} )
-        {
-            if ( drxn ? coords[0] < node->ends_[1] : node->ends_[0] < coords[1] )
-            {
-                for ( ReadMark &mark : node->marks_[drxn] )
-                {
-                    if ( coords[0] <= mark.estimate && mark.estimate <= coords[1] )
-//                    if ( coords[0] <= mark.estimate && mark.estimate <= coords[1] && params.isReadPe( mark.readId ) )
-                    {
-                        bool doAdd = true;
-                        for ( Node* a : dumpSet )
-                        {
-                            if ( a->reads_.find( mark.readId ) != a->reads_.end() )
-                            {
-                                doAdd = false;
-                                break;
-                            }
-                        }
-                        if ( doAdd )
-                        {
-                            readIds.push_back( make_pair( mark.readId, mark.estimate ) );
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    ofstream dump2( "/home/glen/PythonProjects/BioJunkyard/data/Export/dump2" );
-    int x = 0;
-    for ( Node* node : endSet )
-    {
-        if ( node->drxn_ > 2 )
-        {
-            node->id_ = to_string( x );
-            x++;
-        }
-        node->exportNodeDump( dump2 );
-    }
-    dump2.close();
-    
-    sort( readIds.begin(), readIds.end(), []( pair<SeqNum, int32_t> &a, pair<SeqNum, int32_t> &b ) {
-        return a.second < b.second;
-    });
-    
-    coords[2] = readIds[0].second;
-    
-    
-    if ( !readIds.empty() )
-    {
-        ofstream fh( ( iv.drxn ? "/home/glen/PythonProjects/BioJunkyard/data/Export/align1.fa" : "/home/glen/PythonProjects/BioJunkyard/data/Export/align0.fa" ) );
-        for ( int i(0); i < mainEnds.size(); i++ )
-        {
-            fh << ">Main" << i << endl;
-            fh << mainEnds[i]->seq_ << endl;
-        }
-        
-        for ( Node* node : mainEnds )
-        {
-            node->bridgeIslandDump( bwt, fh, iv.drxn );
-        }
-        
-        for ( int i(0); i < mainEnds.size(); i++ )
-        {
-            fh << ">Island" << i << endl;
-            fh << islandEnds[i]->seq_ << endl;
-        }
-        
-        for ( Node* node : islandEnds )
-        {
-            node->bridgeIslandDump( bwt, fh, !iv.drxn );
-        }
-        
-        for ( pair<SeqNum, int32_t> readId : readIds )
-        {
-            bool doAdd = false;
-            int32_t offset = max( 0, readId.second - readIds[0].second );
-            string seq = bwt.getSequence( readId.first );
-            vector<string> seqs;
-            vector<int> offsets;
-            size_t it = seq.find( "CTGTCTCTTATACACATCTAGATGTGTATAAGAGACAG" );
-            int hit = 0;
-            if ( it != seq.npos )
-            {
-                seqs.push_back( seq.substr( 0, it ) );
-                seqs.push_back( seq.substr( it + 38 ) );
-                offsets.push_back( 0 );
-                offsets.push_back( it );
-            }
-            else if ( params.isReadPe( readId.first ) )
-            {
-                int j = 0, len = 15;
-                while ( j < seq.length() )
-                {
-                    seqs.push_back( seq.substr( j, len ) );
-                    offsets.push_back( j );
-                    j += len;
-                }
-                seqs.push_back( seq.substr( seq.length() - len, len ) );
-                offsets.push_back( seq.length() - len );
-            }
-            
-            for ( Node* node : endSet )
-            {
-                for ( int k ( 0 ); k < seqs.size(); k++ )
-                {
-                    size_t it = node->seq_.find( seqs[k] );
-                    if ( it != node->seq_.npos && seqs[k].length() >= 15 )
-                    {
-                        offset = max( 0, node->ends_[0] + int32_t(it) - coords[2] - offsets[k] );
-                        doAdd = true;
-                        hit = k;
-                        break;
-                    }
-                }
-                if ( doAdd ) break;
-            }
-            
-            if ( doAdd || params.isReadPe( readId.first ) )
-            {
-                fh << ">" << readId.first << endl;
-                if ( params.isReadPe( readId.first ) )
-                {
-                    fh << string( offset, '-' ) << seq << endl;
-                }
-                else
-                {
-                    fh << string( offset, '-' ) << seqs[hit] << endl;
-                }
-            }
-        }
-        fh.close();
-    }
-    
-    int y = 0;
-}
+//void Node::bridgeIslandDump( IslandVars &iv, NodeSetList &islandSets, Querier &bwt )
+//{
+//    NodeList islandEnds;
+//    NodeSet peSet;
+//    NodeIntMap qLimits, tLimits;
+//    
+//    Node::bridgeIslandGetPairs( iv, islandSets, peSet, qLimits, tLimits );
+//    
+//    if ( peSet.empty() )
+//    {
+//        NodeList peNodes;
+//        vector< vector<SeqNum> > peReadLists;
+//        for ( NodeSet isl : islandSets )
+//        {
+//            for ( Node* node : isl )
+//            {
+//                vector<SeqNum> thisPe;
+//                for ( const SeqNum &readId : iv.peReads )
+//                {
+//                    SeqNum pairId = params.getPairId( readId );
+//                    if ( node->reads_.find( readId ) != node->reads_.end() )
+//                    {
+//                        thisPe.push_back( readId );
+//                    }
+//                    if ( node->reads_.find( pairId ) != node->reads_.end() )
+//                    {
+//                        thisPe.push_back( pairId );
+//                    }
+//                }
+//                if ( !thisPe.empty() )
+//                {
+//                    peNodes.push_back( node );
+//                    peReadLists.push_back( thisPe );
+//                }
+//            }
+//        }
+//    }
+//    
+//    for ( NodeSet &islandSet : islandSets )
+//    {
+//        Node::bridgeIslandGetIslandEnds( iv, peSet, islandEnds, qLimits, islandSet );
+//    }
+//    
+//    NodeList mainEnds = Node::bridgeIslandGetMainEnds( iv, peSet, tLimits );
+//    NodeList tNodes;
+//    for ( auto &t : tLimits )
+//    {
+//        if ( iv.ev.del.find( t.first ) == iv.ev.del.end() )
+//        {
+//            tNodes.push_back( t.first );
+//        }
+//    }
+//    Node::bridgeIslandSetOffsets( iv, islandEnds, tNodes );
+//    NodeSet dumpSet, endSet;
+//    int32_t coords[3] = { std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::max() };
+//    for ( bool drxn : { 0, 1 } )
+//    {
+//        for ( Node* node : ( drxn == iv.drxn ? islandEnds : mainEnds ) )
+//        {
+//            coords[drxn] = drxn ? min( coords[1], node->ends_[0] ) : max( coords[0], node->ends_[1] );
+//            dumpSet.insert( node );
+//            node->getDrxnNodes( dumpSet, 0 );
+//            node->getDrxnNodes( dumpSet, 1 );
+//            for ( Node* nxt : node->getNextNodes( drxn ) )
+//            {
+//                nxt->getDrxnNodes( endSet, !drxn );
+//            }
+//            endSet.insert( node );
+//            node->getDrxnNodes( endSet, !drxn );
+//            node->offsetForward( !drxn, false, true );
+//            coords[2] = min( coords[2], node->ends_[0] );
+//        }
+//    }
+//    
+//    coords[0] -= 500;
+//    coords[1] += 500;
+//    
+//    vector< pair<SeqNum, int32_t> > readIds;
+//    for ( Node* node : dumpSet )
+//    {
+//        for ( bool drxn : {0, 1} )
+//        {
+//            if ( drxn ? coords[0] < node->ends_[1] : node->ends_[0] < coords[1] )
+//            {
+//                for ( ReadMark &mark : node->marks_[drxn] )
+//                {
+//                    if ( coords[0] <= mark.estimate && mark.estimate <= coords[1] )
+////                    if ( coords[0] <= mark.estimate && mark.estimate <= coords[1] && params.isReadPe( mark.readId ) )
+//                    {
+//                        bool doAdd = true;
+//                        for ( Node* a : dumpSet )
+//                        {
+//                            if ( a->reads_.find( mark.id ) != a->reads_.end() )
+//                            {
+//                                doAdd = false;
+//                                break;
+//                            }
+//                        }
+//                        if ( doAdd )
+//                        {
+//                            readIds.push_back( make_pair( mark.id, mark.estimate ) );
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//    }
+//    
+//    ofstream dump2( "/home/glen/PythonProjects/BioJunkyard/data/Export/dump2" );
+//    int x = 0;
+//    for ( Node* node : endSet )
+//    {
+//        if ( node->drxn_ > 2 )
+//        {
+//            node->id_ = to_string( x );
+//            x++;
+//        }
+//        node->exportNodeDump( dump2 );
+//    }
+//    dump2.close();
+//    
+//    sort( readIds.begin(), readIds.end(), []( pair<SeqNum, int32_t> &a, pair<SeqNum, int32_t> &b ) {
+//        return a.second < b.second;
+//    });
+//    
+//    coords[2] = readIds[0].second;
+//    
+//    
+//    if ( !readIds.empty() )
+//    {
+//        ofstream fh( ( iv.drxn ? "/home/glen/PythonProjects/BioJunkyard/data/Export/align1.fa" : "/home/glen/PythonProjects/BioJunkyard/data/Export/align0.fa" ) );
+//        for ( int i(0); i < mainEnds.size(); i++ )
+//        {
+//            fh << ">Main" << i << endl;
+//            fh << mainEnds[i]->seq_ << endl;
+//        }
+//        
+//        for ( Node* node : mainEnds )
+//        {
+//            node->bridgeIslandDump( bwt, fh, iv.drxn );
+//        }
+//        
+//        for ( int i(0); i < mainEnds.size(); i++ )
+//        {
+//            fh << ">Island" << i << endl;
+//            fh << islandEnds[i]->seq_ << endl;
+//        }
+//        
+//        for ( Node* node : islandEnds )
+//        {
+//            node->bridgeIslandDump( bwt, fh, !iv.drxn );
+//        }
+//        
+//        for ( pair<SeqNum, int32_t> readId : readIds )
+//        {
+//            bool doAdd = false;
+//            int32_t offset = max( 0, readId.second - readIds[0].second );
+//            string seq = bwt.getSequence( readId.first );
+//            vector<string> seqs;
+//            vector<int> offsets;
+//            size_t it = seq.find( "CTGTCTCTTATACACATCTAGATGTGTATAAGAGACAG" );
+//            int hit = 0;
+//            if ( it != seq.npos )
+//            {
+//                seqs.push_back( seq.substr( 0, it ) );
+//                seqs.push_back( seq.substr( it + 38 ) );
+//                offsets.push_back( 0 );
+//                offsets.push_back( it );
+//            }
+//            else if ( params.isReadPe( readId.first ) )
+//            {
+//                int j = 0, len = 15;
+//                while ( j < seq.length() )
+//                {
+//                    seqs.push_back( seq.substr( j, len ) );
+//                    offsets.push_back( j );
+//                    j += len;
+//                }
+//                seqs.push_back( seq.substr( seq.length() - len, len ) );
+//                offsets.push_back( seq.length() - len );
+//            }
+//            
+//            for ( Node* node : endSet )
+//            {
+//                for ( int k ( 0 ); k < seqs.size(); k++ )
+//                {
+//                    size_t it = node->seq_.find( seqs[k] );
+//                    if ( it != node->seq_.npos && seqs[k].length() >= 15 )
+//                    {
+//                        offset = max( 0, node->ends_[0] + int32_t(it) - coords[2] - offsets[k] );
+//                        doAdd = true;
+//                        hit = k;
+//                        break;
+//                    }
+//                }
+//                if ( doAdd ) break;
+//            }
+//            
+//            if ( doAdd || params.isReadPe( readId.first ) )
+//            {
+//                fh << ">" << readId.first << endl;
+//                if ( params.isReadPe( readId.first ) )
+//                {
+//                    fh << string( offset, '-' ) << seq << endl;
+//                }
+//                else
+//                {
+//                    fh << string( offset, '-' ) << seqs[hit] << endl;
+//                }
+//            }
+//        }
+//        fh.close();
+//    }
+//    
+//    int y = 0;
+//}
 
-void Node::bridgeIslandDump( Querier &bwt, ofstream &fh, bool drxn )
-{
-    vector< pair<SeqNum, Coords> > reads;
-    for ( auto &read : reads_ )
-    {
-        reads.push_back( read );
-    }
-    sort( reads.begin(), reads.end(), [&drxn]( pair<SeqNum, Coords> &a, pair<SeqNum, Coords> &b ) {
-        return ( drxn ? a.second[1] > b.second[1] 
-                      : a.second[0] < b.second[0] );
-    });
-    
-    for ( int i ( 0 ); i < min( 3, (int)reads.size() ); i++ )
-    {
-        fh << ">" << reads[i].first << endl;
-        fh << bwt.getSequence( reads[i].first ) << endl;
-    }
-    
-    for ( Node* fwd : getDrxnNodes( drxn ) )
-    {
-        for ( auto &read : fwd->reads_ )
-        {
-            fh << ">" << read.first << endl;
-            fh << string( read.second[0] - fwd->ends_[0], '-' ) << bwt.getSequence( read.first ) << endl;
-        }
-    }
-}
+//void Node::bridgeIslandDump( Querier &bwt, ofstream &fh, bool drxn )
+//{
+//    vector< pair<SeqNum, Coords> > reads;
+//    for ( auto &read : reads_ )
+//    {
+//        reads.push_back( read );
+//    }
+//    sort( reads.begin(), reads.end(), [&drxn]( pair<SeqNum, Coords> &a, pair<SeqNum, Coords> &b ) {
+//        return ( drxn ? a.second[1] > b.second[1] 
+//                      : a.second[0] < b.second[0] );
+//    });
+//    
+//    for ( int i ( 0 ); i < min( 3, (int)reads.size() ); i++ )
+//    {
+//        fh << ">" << reads[i].first << endl;
+//        fh << bwt.getSequence( reads[i].first ) << endl;
+//    }
+//    
+//    for ( Node* fwd : getDrxnNodes( drxn ) )
+//    {
+//        for ( auto &read : fwd->reads_ )
+//        {
+//            fh << ">" << read.first << endl;
+//            fh << string( read.second[0] - fwd->ends_[0], '-' ) << bwt.getSequence( read.first ) << endl;
+//        }
+//    }
+//}
 
 void Node::bridgeIslandGetEnds( IslandVars &iv, NodeIntMap &limitMap, NodeList &endList, NodeSet &endSet, bool isIsland, bool drxn )
 {
@@ -553,10 +553,10 @@ void Node::bridgeIslandGetPairs( IslandVars &iv, NodeSetList &islandSets, NodeSe
             {
                 for ( Node* t : tNodes )
                 {
-                    auto it = t->reads_.find( mark.readId );
+                    auto it = t->reads_.find( mark.id );
                     if ( it != t->reads_.end() )
                     {
-                        SeqNum pairId = params.getPairId( mark.readId );
+                        SeqNum pairId = params.getPairId( mark.id );
                         auto it2 = node->reads_.find( pairId );
                         int32_t markCoord = it2->second[!iv.drxn];
                         auto r = qLimits.insert( make_pair( node, markCoord ) );
@@ -575,7 +575,7 @@ void Node::bridgeIslandGetPairs( IslandVars &iv, NodeSetList &islandSets, NodeSe
                         }
                         t->pushValidLimits( it->second[iv.drxn], iv.drxn );
                         
-                        if ( params.isReadPe( mark.readId ) )
+                        if ( params.isReadPe( mark.id ) )
                         {
                             iv.peReads.insert( pairId );
                             peSet.insert( node );
@@ -614,7 +614,7 @@ void Node::bridgeIslandOffset( IslandVars &iv, NodeSet &islandSet, bool drxn )
         {
             for ( Node* t : tNodes )
             {
-                auto hit = t->reads_.find( mark.readId );
+                auto hit = t->reads_.find( mark.id );
                 if ( hit != t->reads_.end() )
                 {
                     if ( node == this )
@@ -631,7 +631,7 @@ void Node::bridgeIslandOffset( IslandVars &iv, NodeSet &islandSet, bool drxn )
                     }
                     
                     int32_t thisOff = drxn ? hit->second[0] - mark.estimate : hit->second[1] - mark.estimate;
-                    if ( params.isReadPe( mark.readId ) )
+                    if ( params.isReadPe( mark.id ) )
                     {
                         peLimits[0] = peCount > 0 ? min( peLimits[0], thisOff ) : thisOff;
                         peLimits[1] = peCount > 0 ? max( peLimits[1], thisOff ) : thisOff;
@@ -1283,10 +1283,10 @@ bool Node::bridgeIslandSetOffsets( IslandVars &iv, NodeList &islandEnds, NodeLis
         {
             for ( ReadMark &mark : fwd->getMarksBase( iv.drxn ) )
             {
-                SeqNum pairId = params.getPairId( mark.readId );
+                SeqNum pairId = params.getPairId( mark.id );
                 for ( Node* t : tNodes )
                 {
-                    auto it = t->reads_.find( mark.readId );
+                    auto it = t->reads_.find( mark.id );
                     if ( it != t->reads_.end() )
                     {
                         if ( params.isReadPe( pairId ) )
@@ -1335,4 +1335,278 @@ bool Node::bridgeIslandSetOffsets( IslandVars &iv, NodeList &islandEnds, NodeLis
     return !islandEnds.empty();
 }
 
+bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
+{
+    pv.bwt.mapSequence( mn->seq, mn->ids, mn->coords );
+    mn->recoil();
+    
+    int32_t coords[2] = { mn->bridgeCoords[0][0], mn->bridgeCoords[1][0] };
+    NodeList hitNodes[2];
+    vector<int32_t> hitCoords[2][2];
+    NodeSet cloneSet, reachacble;
+    for ( int i : { 0, 1 } )
+    {
+        int32_t iCoords[2]{ coords[i], coords[i] };
+        iCoords[i] = iCoords[!i] + ( i ? mn->bridgeOverlaps[i][0] : -mn->bridgeOverlaps[i][0] );
+        mn->bridges[i][0]->overlapExtend( pv.nds, iCoords, hitNodes[i], hitCoords[i], i );
+        reachacble = target->getDrxnNodes( pv.drxn, true, true );
+        target->getDrxnNodes( reachacble, !pv.drxn, true );
+        for ( int j = 0; j < hitNodes[i].size(); )
+        {
+            if ( hitNodes[i][j]->drxn_ == !pv.drxn )
+            {
+                assert( false );
+                hitNodes[i].erase( hitNodes[i].begin() + j );
+                hitCoords[i][0].erase( hitCoords[i][0].begin() + j );
+                hitCoords[i][1].erase( hitCoords[i][1].begin() + j );
+                if ( hitNodes[i].empty() ) return false;
+            }
+            else
+            {
+                cloneSet.insert( hitNodes[i][j] );
+                hitNodes[i][j]->getDrxnNodes( cloneSet, i );
+                j++;
+            }
+        }
+    }
+    
+    NodeList nodes;
+    NodeSet newSet;
+    vector<int> overlaps;
+    setBridge( pv, newSet, nodes, overlaps, mn, pv.drxn );
+    if ( !nodes.empty() )
+    {
+        if ( !pv.drxn )
+        {
+            reverse( nodes.begin(), nodes.end() );
+            reverse( overlaps.begin(), overlaps.end() );
+        }
+        
+        for ( Node* &node : nodes )
+        {
+            if ( newSet.find( node ) == newSet.end() )
+            {
+                if ( cloneSet.find( node ) != cloneSet.end() )
+                {
+                    node = new Node( node );
+                    newSet.insert( node );
+                    assert( false );
+                }
+                else
+                {
+                    node->clearEdges( !pv.drxn );
+                    reachacble.insert( node );
+                    if ( node->drxn_ > 2 )
+                    {
+                        node->clearEdges( pv.drxn );
+                        node->clearPairs();
+                        node->drxn_ = pv.drxn ;
+                        newSet.insert( node );
+                        pv.nds[pv.drxn+3].erase( remove( pv.nds[pv.drxn+3].begin(), pv.nds[pv.drxn+3].end(), node ), pv.nds[pv.drxn+3].end() );
+                        pv.nds[pv.drxn].push_back( node );
+                    }
+                }
+            }
+            else pv.nds[pv.drxn].push_back( node );
+        }
+        
+        for ( int i = 0; i < hitNodes[!pv.drxn].size(); i++ )
+        {
+            hitNodes[!pv.drxn][i]->addEdge( nodes[0], hitCoords[!pv.drxn][1][i] - hitCoords[!pv.drxn][0][i], pv.drxn );
+            for ( int j = 0; j < hitNodes[pv.drxn].size(); j++ )
+            {
+                hitNodes[!pv.drxn][i]->removeEdge( hitNodes[pv.drxn][j], pv.drxn );
+                hitNodes[pv.drxn][j]->removeEdge( hitNodes[!pv.drxn][i], !pv.drxn );
+            }
+        }
+        for ( int i = 0; i < overlaps.size(); i++ )
+        {
+            nodes[i]->addEdge( nodes[i+1], overlaps[i], pv.drxn );
+        }
+        for ( int i = 0; i < hitNodes[pv.drxn].size(); i++ )
+        {
+            NodeSet fwdSet = nodes.back()->getDrxnNodes( pv.drxn );
+            if ( fwdSet.find( hitNodes[pv.drxn][i] ) == fwdSet.end() )
+            {
+                nodes.back()->addEdge( hitNodes[pv.drxn][i], hitCoords[pv.drxn][1][i] - hitCoords[pv.drxn][0][i], pv.drxn );
+            }
+        }
+        for ( Node* node : nodes )
+        {
+            node->setValid();
+        }
+        pv.newSet.insert( nodes.begin(), nodes.end() );
+        return true;
+    }
+    return false;
+}
+
+//bool Node::mapBridge( PathVars &pv, Node* target, MapNode* mn, int32_t* coords, bool drxn )
+//{
+//    pv.bwt.mapSequence( mn->seq, mn->ids, mn->coords );
+//    mn->recoil();
+//    
+//    NodeList hitNodes[2];
+//    vector<int32_t> hitCoords[2][2];
+//    NodeSet cloneSet;
+//    for ( int i : { 0, 1 } )
+//    {
+//        int32_t iCoords[2]{ coords[i], coords[i] };
+//        iCoords[i] = iCoords[!i] + ( i ? mn->bridgeOverlaps[i][0] : -mn->bridgeOverlaps[i][0] );
+//        mn->bridges[i][0]->overlapExtend( pv.nodes, iCoords, hitNodes[i], hitCoords[i], pv.drxn, i );
+//        cloneSet = target->getDrxnNodes( drxn, true, true );
+//        target->getDrxnNodes( cloneSet, !drxn, true );
+//        for ( int j = 0; j < hitNodes[i].size(); )
+//        {
+//            if ( cloneSet.find( hitNodes[i][j] ) == cloneSet.end() )
+//            {
+//                hitNodes[i].erase( hitNodes[i].begin() + j );
+//                hitCoords[i][0].erase( hitCoords[i][0].begin() + j );
+//                hitCoords[i][1].erase( hitCoords[i][1].begin() + j );
+//                if ( hitNodes[i].empty() ) return false;
+//            }
+//            else j++;
+//        }
+//    }
+//    
+//    NodeSet fwdSet( hitNodes[drxn].begin(), hitNodes[drxn].end() );
+//    for ( Node* node : hitNodes[drxn] )
+//    {
+//        node->getDrxnNodes( fwdSet, drxn );
+//    }
+//    for ( Node* node : hitNodes[!drxn] )
+//    {
+//        assert( fwdSet.find( node ) == fwdSet.end() );
+//    }
+//    
+//    NodeList nodes;
+//    NodeSet newSet;
+//    vector<int> overlaps;
+//    setBridge( pv, newSet, nodes, overlaps, mn, pv.drxn );
+//    if ( !nodes.empty() )
+//    {
+//        if ( !pv.drxn )
+//        {
+//            reverse( nodes.begin(), nodes.end() );
+//            reverse( overlaps.begin(), overlaps.end() );
+//        }
+//        
+//        for ( Node* &node : nodes )
+//        {
+//            if ( newSet.find( node ) == newSet.end() )
+//            {
+//                if ( cloneSet.find( node ) != cloneSet.end() )
+//                {
+//                    node = new Node( node );
+//                    newSet.insert( node );
+//                }
+//                else
+//                {
+//                    node->clearEdges( !pv.drxn );
+//                    cloneSet.insert( node );
+//                    if ( node->drxn_ > 2 )
+//                    {
+//                        node->clearEdges( pv.drxn );
+//                        node->clearPairs();
+//                        node->drxn_ = pv.drxn ;
+//                        newSet.insert( node );
+//                        pv.islands.erase( remove( pv.islands.begin(), pv.islands.end(), node ), pv.islands.end() );
+//                        pv.nodes.push_back( node );
+//                    }
+//                }
+//            }
+//            else pv.nodes.push_back( node );
+//        }
+//        
+//        for ( int i = 0; i < hitNodes[!pv.drxn].size(); i++ )
+//        {
+//            hitNodes[!pv.drxn][i]->addEdge( nodes[0], hitCoords[!pv.drxn][1][i] - hitCoords[!pv.drxn][0][i], pv.drxn );
+//            for ( int j = 0; j < hitNodes[pv.drxn].size(); j++ )
+//            {
+//                hitNodes[!pv.drxn][i]->removeEdge( hitNodes[pv.drxn][j], pv.drxn );
+//                hitNodes[pv.drxn][j]->removeEdge( hitNodes[!pv.drxn][i], !pv.drxn );
+//            }
+//        }
+//        for ( int i = 0; i < overlaps.size(); i++ )
+//        {
+//            nodes[i]->addEdge( nodes[i+1], overlaps[i], pv.drxn );
+//        }
+//        for ( int i = 0; i < hitNodes[pv.drxn].size(); i++ )
+//        {
+//            NodeSet fwdSet = nodes.back()->getDrxnNodes( pv.drxn );
+//            if ( fwdSet.find( hitNodes[pv.drxn][i] ) == fwdSet.end() )
+//            {
+//                nodes.back()->addEdge( hitNodes[pv.drxn][i], hitCoords[pv.drxn][1][i] - hitCoords[pv.drxn][0][i], pv.drxn );
+//            }
+//        }
+//        for ( Node* node : nodes )
+//        {
+//            node->setValid();
+//        }
+//        return true;
+//    }
+//    return false;
+//}
+
+void Node::setBridge( PathVars &pv, NodeSet &newSet, NodeList &nodes, vector<int> &overlaps, MapNode* mn, bool drxn )
+{
+    int i = 0;
+    int j = 0;
+    int32_t currLimits[2] = { 0, 0 }, prevLimits[2];
+    while ( j < mn->ids.size() )
+    {
+        bool found = false;
+        for ( int k = pv.drxn; k < 5; k += 3 )
+        {
+            for ( Node* n : pv.nds[k] )
+            {
+                auto it = n->reads_.find( mn->ids[j] );
+                if ( it != n->reads_.end() && !it->second.redundant )
+                {
+                    if ( i != j )
+                    {
+                        if ( !nodes.empty() ) overlaps.push_back( prevLimits[1] - currLimits[0] );
+                        nodes.push_back( new Node( mn, i, j - 1, drxn ) );
+                        newSet.insert( nodes.back() );
+                        prevLimits[0] = currLimits[0];
+                        prevLimits[1] = currLimits[1];
+                        currLimits[0] = mn->coords[0][j];
+                        currLimits[1] = mn->coords[1][j];
+                    }
+                    int32_t splitCoords[2] = { it->second[0], it->second[1] };
+                    while ( it != n->reads_.end() && ++j < mn->ids.size() && ( splitCoords[1] <= it->second[1] || it->second.redundant ) )
+                    {
+                        splitCoords[1] = it->second[1];
+                        currLimits[0] = min( currLimits[0], mn->coords[0][j-1] );
+                        currLimits[1] = max( currLimits[1], mn->coords[1][j-1] );
+                        it = n->reads_.find( mn->ids[j] );
+                    }
+                    if ( !nodes.empty() ) overlaps.push_back( prevLimits[1] - currLimits[0] );
+                    nodes.push_back( n->splitNodeDual( splitCoords, pv.nds[k], drxn ) );
+                    prevLimits[0] = currLimits[0];
+                    prevLimits[1] = currLimits[1];
+                    if ( j < mn->ids.size() )
+                    {
+                        currLimits[0] = mn->coords[0][j];
+                        currLimits[1] = mn->coords[1][j];
+                    }
+                    i = j;
+                    found = true;
+                    break;
+                }
+            }
+            if ( found ) break;
+        }
+        if ( found ) continue;
+        currLimits[0] = min( currLimits[0], mn->coords[0][j] );
+        currLimits[1] = max( currLimits[1], mn->coords[1][j] );
+        j++;
+    }
+    if ( i < j )
+    {
+        if ( !nodes.empty() ) overlaps.push_back( prevLimits[1] - currLimits[0] );
+        nodes.push_back( new Node( mn, i, j - 1, drxn ) );
+        newSet.insert( nodes.back() );
+    }
+}
 

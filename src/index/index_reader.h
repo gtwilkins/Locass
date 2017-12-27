@@ -37,9 +37,9 @@ public:
     void setBaseOverlap( uint8_t i, uint8_t j, CharId &rank, CharId &count );
     
 private:
-    void advance( CharCount &ranks, ReadId &bwtIndex, ReadId &toCount );
+    void advance( CharCount &ranks, CharId &bwtIndex, CharId &toCount );
     void setRank( uint8_t i, CharId rank, CharCount &ranks );
-    CharId setRankIndex( ReadId rankIndex, CharCount &ranks );
+    CharId setRankIndex( CharId rankIndex, CharCount &ranks );
     
     
     FILE* bwt,* idx;

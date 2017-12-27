@@ -315,6 +315,21 @@ NodeIntList Node::getOffsetEdges( bool drxn )
     return offsets;
 }
 
+void Node::getRedundantNodes( NodeSet &nodes, int32_t* coords, bool drxn )
+{
+    for ( Edge &e : edges_[drxn] )
+    {
+        int32_t offset = drxn ? ends_[1] - e.overlap - e.node->ends_[0]
+                              : ends_[0] + e.overlap - e.node->ends_[1];
+        int32_t offCoords[2] = { coords[0] + offset, coords[1] + offset };
+        if ( e.node->ends_[0] <= coords[0] && coords[1] <= e.node->ends_[1] )
+        {
+            nodes.insert( e.node );
+            e.node->getRedundantNodes( nodes, offCoords, drxn );
+        }
+    }
+}
+
 bool Node::isOffset( bool drxn )
 {
     for ( int i( 0 ); i + 1 < edges_[drxn].size(); i++ )
@@ -499,5 +514,31 @@ void Node::offsetIsland( NodeSet &propagated, bool drxn )
             
             drxn = !drxn;
         }
+    }
+}
+
+void Node::setOffsetMap( NodeIntMap &offsets, NodeSet useSet, int32_t limit, bool drxn )
+{
+    offsets[this] = 0;
+    NodeSet currSet = { this };
+    while ( !currSet.empty() )
+    {
+        NodeSet nxtSet;
+        for ( Node* curr : currSet )
+        {
+            int32_t currOffset = offsets[curr];
+            for ( Edge &e : curr->edges_[drxn] )
+            {
+                if ( useSet.find( e.node ) == useSet.end() ) continue;
+                if ( offsets.find( e.node ) != offsets.end() ) continue;
+                int32_t offset = drxn ? e.node->ends_[0] - curr->ends_[1] + e.overlap
+                                      : e.node->ends_[1] - curr->ends_[0] - e.overlap;
+                offsets[e.node] = offset + currOffset;
+                
+                int32_t thisEnd = e.node->ends_[drxn] - offset - currOffset;
+                if ( drxn ? thisEnd < limit : limit < thisEnd ) nxtSet.insert( e.node );
+            }
+        }
+        currSet = nxtSet;
     }
 }

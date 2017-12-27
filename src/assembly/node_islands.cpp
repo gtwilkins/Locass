@@ -39,13 +39,13 @@ void Node::addExtension( Extension &ext, IslandVars &iv, bool doesBranch, bool d
             Node* node = new Node( getSeqEnd( ext.maxOverLen, drxn ), ext, ends_[drxn], drxn, iv.drxn );
             addEdge( node, ext.maxOverLen, drxn );
             iv.ev.island.push_back( node );
-            node->setCoverage();
             if ( !ext.fwdExts.empty() )
             {
                 iv.ev.ante.insert( this );
                 node->addExtensions( ext.fwdExts, iv, drxn );
                 iv.ev.ante.erase( this );
             }
+            node->setCoverage();
         }
         else 
         {
@@ -55,6 +55,7 @@ void Node::addExtension( Extension &ext, IslandVars &iv, bool doesBranch, bool d
                 addExtensions( ext.fwdExts, iv, drxn );
             }
         }
+        setCoverage();
     }
 }
 
@@ -74,23 +75,30 @@ void Node::addExtensionMerge( MergeHit &merge, Extension &ext, IslandVars &iv, b
         else
         {
             appendNode( ext, drxn );
+            setCoverage();
         }
     }
     
     if ( merge.node->drxn_ != !iv.drxn )
     {
         bool isIslandMerge = ( merge.node->drxn_ > 2 );
-
+        Node* mergeNode = NULL;
+        
         if ( drxn == iv.drxn && isIslandMerge )
         {
-            Node* mergeNode = merge.node->splitNode( (*merge.coords)[!drxn], iv.ev.island, iv.drxn, drxn );
+            mergeNode = merge.node->splitNode( (*merge.coords)[!drxn], iv.ev.island, iv.drxn, drxn );
             thisNode->addEdge( mergeNode, merge.overlap, drxn );
         }
         else if ( drxn != iv.drxn )
         {
-            int32_t coords[2] = { merge.coords->coords[0], merge.coords->coords[1] };
-            Node* mergeNode = merge.node->mergeNode( ( isIslandMerge ? iv.ev.island : iv.ev.nodes ), merge.coords, iv.drxn, drxn );
+            mergeNode = merge.node->mergeNode( ( isIslandMerge ? iv.ev.island : iv.ev.nodes ), merge.coords, iv.drxn, drxn );
             mergeNode->addEdge( thisNode, merge.overlap, !drxn );
+        }
+        
+        if ( mergeNode && mergeNode != merge.node && iv.merged[drxn].find( merge.node ) != iv.merged[drxn].end() )
+        {
+            iv.merged[drxn].erase( merge.node );
+            iv.merged[drxn].insert( mergeNode );
         }
 
         if ( !isIslandMerge )
@@ -170,7 +178,8 @@ void Node::extendIsland( IslandVars &iv, bool drxn )
         addExtensions( exts, iv, drxn );
         extendCount_--;
     }
-    setCoverage( iv.ev, iv.drxn, drxn, true );
+    setCoverage();
+//    setCoverage( iv.ev, iv.drxn, drxn, true );
 }
 
 void Node::islandDelete( IslandVars &iv, Node* node )
@@ -191,7 +200,7 @@ bool Node::islandPairToBase( IslandVars &iv, NodeList &tNodes )
         {
             for ( auto it = marks_[iv.drxn].begin(); it != marks_[iv.drxn].end(); )
             {
-                auto hit = t->reads_.find( (*it).readId );
+                auto hit = t->reads_.find( (*it).id );
                 if ( hit != t->reads_.end() )
                 {
                     auto selfResult = pairs_.insert( make_pair( t, 1 ) );
@@ -205,7 +214,7 @@ bool Node::islandPairToBase( IslandVars &iv, NodeList &tNodes )
                         pairResult.first->second++;
                     }
                     
-                    SeqNum pairId = params.getPairId( (*it).readId );
+                    SeqNum pairId = params.getPairId( (*it).id );
                     islandUpdateValid( pairId );
                     if ( params.isReadPe( pairId ) )
                     {
@@ -927,7 +936,7 @@ void Node::pushValidLimits( IslandVars &iv, Node* markNode, Node* hitNode, int32
     }
 }
 
-bool Node::overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, vector<int32_t>* hitCoords, bool subGraph, bool drxn )
+bool Node::overlapExtend( NodeList* nodes, int32_t* coords, NodeList &hitNodes, vector<int32_t>* hitCoords, bool drxn )
 {
     NodeList currNodes = { this };
     vector<int32_t> currCoords[2];
@@ -955,9 +964,9 @@ bool Node::overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, 
                 {
                     if ( nxtCoord[!drxn] != currNodes[i]->ends_[!drxn] )
                     {
-                        if ( drxn == subGraph )
+                        if ( drxn == currNodes[i]->drxn_ )
                         {
-                            currNodes[i] = currNodes[i]->splitNode( nxtCoord[!drxn], nodes, subGraph, drxn );
+                            currNodes[i] = currNodes[i]->splitNode( nxtCoord[!drxn], nodes[drxn], drxn, drxn );
                         }
                         else
                         {
@@ -969,7 +978,7 @@ bool Node::overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, 
                                     splitCoord = drxn ? max( splitCoord, read.second[1] ) : min( splitCoord, read.second[0] );
                                 }
                             }
-                            currNodes[i]->splitNode( splitCoord, nodes, subGraph, !drxn );
+                            currNodes[i]->splitNode( splitCoord, nodes[!drxn], !drxn, !drxn );
                         }
                     }
                     hitNodes.push_back( currNodes[i] );
@@ -982,10 +991,8 @@ bool Node::overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, 
                 {
                     for ( Edge &e : currNodes[i]->edges_[drxn] )
                     {
-                        int32_t diff1 = currNodes[i]->ends_[drxn] - e.node->ends_[!drxn] + ( drxn ? -e.overlap : e.overlap );
                         int32_t diff = drxn ? e.node->ends_[0] - currNodes[i]->ends_[1] + e.overlap
                                             : e.node->ends_[1] - currNodes[i]->ends_[0] - e.overlap;
-                        assert( !diff || drxn );
                         nxtNodes.push_back( e.node );
                         nxtCoords[0].push_back( currCoords[0][i] + diff );
                         nxtCoords[1].push_back( currCoords[1][i] + diff );
@@ -1070,7 +1077,7 @@ bool Node::seedIslandsCheckRead( IslandVars &iv, ReadMark &mark )
 {
     for ( Node* node : iv.ev.island )
     {
-        if ( node->reads_.find( mark.readId ) != node->reads_.end() )
+        if ( node->reads_.find( mark.id ) != node->reads_.end() )
         {
             return false;
         }
@@ -1138,7 +1145,7 @@ void Node::seedIslandsClump( IslandVars &iv, vector<ReadMark> &marks, unordered_
     {
         if ( !Node::seedIslandsCheckRead( iv, mark ) ) continue;
         
-        string seq = iv.ev.bwt.getSequence( mark.readId );
+        string seq = iv.ev.bwt.getSequence( mark.id );
         vector<Extension> exts = iv.ev.bwt.mapExtensions( seq, !drxn, seeds );
         
         for ( Extension &ext : exts )
@@ -1208,223 +1215,223 @@ bool Node::seedIslandsConfirm( IslandVars &iv, unordered_set<SeqNum> &seeds, boo
     return false;
 }
 
-void Node::seedIslandsClumps( IslandVars &iv, vector<ReadMark> &clumps )
-{
-    vector<IslandRead> reads;
-    for ( ReadMark &mark : clumps )
-    {
-        reads.push_back( IslandRead( iv.ev.bwt.getSequence( mark.readId ), mark ) );
-        for ( int i = 0; i < reads.size() - 1; i++ )
-        {
-            if ( reads[i].seq == reads.back().seq )
-            {
-                reads.pop_back();
-                break;
-            }
-        }
-    }
-    
-    for ( int i = 0; i < reads.size(); i++ )
-    {
-        for ( int j = 0; j < reads.size(); j++ )
-        {
-            if ( i != j ) reads[i].setOverlap( reads[j] );
-        }
-    }
-    
-    unordered_set<IslandRead*> forks[2], branches[2], ends;
-    for ( IslandRead &read : reads )
-    {
-        if ( !read.edges[0] && !read.edges[1] ) continue;
-        if ( !read.edges[0] ) ends.insert( &read );
-        for ( int drxn : { 0, 1 } )
-        {
-            if ( read.edges[drxn] && read.edges[drxn]->edges[!drxn] != &read )
-            {
-                branches[drxn].insert( &read );
-                branches[drxn].insert( read.edges[drxn]->edges[!drxn] );
-                forks[!drxn].insert( read.edges[drxn] );
-            }
-        }
-    }
-    
-    vector< vector<IslandRead*> > paths;
-    unordered_set<IslandRead*> pathed;
-    for ( const unordered_set<IslandRead*> &readList : { ends, forks[0], branches[0] } )
-    {
-        for ( IslandRead* read : readList )
-        {
-            if ( pathed.find( read ) != pathed.end() ) continue;
-            vector<IslandRead*> path = { read };
-            while ( path.back()->edges[1] 
-                    && find( path.begin(), path.end(), path.back()->edges[1] ) == path.end()
-                    && forks[1].find( path.back() ) == forks[1].end()
-                    && branches[1].find( path.back() ) == branches[1].end() )
-            {
-                path.push_back( path.back()->edges[1] );
-            }
-            paths.push_back( path );
-            pathed.insert( path.begin(), path.end() );
-        }
-    }
-    
-    vector<MapNode*> mns, mes;
-    for ( vector<IslandRead*> &path : paths )
-    {
-        mns.push_back( new MapNode() );
-        mns.back()->seq = path[0]->seq;
-        int32_t sumCoord = path[0]->coord;
-        for ( int i = 1; i < path.size(); i++ )
-        {
-            mns.back()->seq += path[i]->seq.substr( path[i]->overlaps[0] );
-            sumCoord += path[i]->coord;
-        }
-        iv.ev.bwt.mapSequence( mns.back()->seq, mns.back()->ids, mns.back()->coords );
-        mns.back()->estimate = sumCoord / (int)path.size();
-        Node::seedIslandsClumpsCheck( iv, mns, mns.back() );
-    }
-    
-    for ( int i = 0; i < paths.size(); i++ )
-    {
-        if ( paths[i][0]->edges[0] )
-        {
-            mes.push_back( new MapNode() );
-            mns[i]->addEdge( mes.back(), paths[i][0]->overlaps[0], 0 );
-            int32_t sumCoord = mns[i]->estimate, coordCount = 1;
-            for ( int j = 0; j < paths.size(); j++ )
-            {
-                if ( paths[j].back() == paths[i][0]->edges[0] )
-                {
-                    if ( paths[j].back()->edges[1] == paths[i][0] ) paths[j].back()->edges[1] = NULL;
-                    mns[j]->addEdge( mes.back(), paths[i][0]->overlaps[0], 1 );
-                    sumCoord += mns[j]->estimate;
-                    coordCount++;
-                }
-            }
-            mes.back()->estimate = sumCoord / coordCount;
-            assert( !mes.back()->edges[0].empty() && !mes.back()->edges[1].empty() );
-        }
-        if ( paths[i].back()->edges[1] )
-        {
-            mes.push_back( new MapNode() );
-            mns[i]->addEdge( mes.back(), paths[i].back()->overlaps[1], 1 );
-            int32_t sumCoord = mns[i]->estimate, coordCount = 1;
-            for ( int j = 0; j < paths.size(); j++ )
-            {
-                if ( paths[j][0] == paths[i].back()->edges[1] )
-                {
-                    if ( paths[j][0]->edges[0] == paths[i].back() ) paths[j][0]->edges[0] = NULL;
-                    mns[j]->addEdge( mes.back(), paths[i].back()->overlaps[1], 0 );
-                    sumCoord += mns[j]->estimate;
-                    coordCount++;
-                }
-            }
-            mes.back()->estimate = sumCoord / coordCount;
-            assert( !mes.back()->edges[0].empty() && !mes.back()->edges[1].empty() );
-        }
-    }
-    
-    for ( int i = 0; i < mes.size(); )
-    {
-        if ( !mes[i]->edges[0].empty() && !mes[i]->edges[1].empty() )
-        {
-            mes[i]->setEdgeSeq();
-            iv.ev.bwt.mapSequence( mes[i]->seq, mes[i]->ids, mes[i]->coords );
-            if ( !mes[i]->recoil() || !Node::seedIslandsClumpsCheck( iv, mes, mes[i] ) )
-            {
-                delete mes[i];
-                mes.erase( mes.begin() + i );
-                continue;
-            }
-        }
-        i++;
-    }
-    
-    MapNode::collapse( mns, mes );
-    
-    for ( int i = 0; i < mns.size(); i++ )
-    {
-        if ( mns[i]->edges[!iv.drxn].empty() && mns[i]->bridges[!iv.drxn].empty() )
-        {
-            Node* hitNode = NULL;
-            NodeList hitNodes;
-            int32_t coords[2];
-            vector<int32_t> hitCoords[2];
-            string secondSeq;
-            Node::findOverlap( hitNode, coords, mns[i]->seq, iv.ev.nodes, 16, !iv.drxn );
-            if ( !hitNode && mns[i]->getSecondSeq( secondSeq, !iv.drxn ) )
-            {
-                Node::findOverlap( hitNode, coords, secondSeq, iv.ev.nodes, 32, !iv.drxn );
-                if ( hitNode ) mns[i]->setSecondSeq( !iv.drxn );
-            }
-            if ( hitNode && hitNode->overlapExtend( iv.ev.nodes, coords, hitNodes, hitCoords, iv.drxn, !iv.drxn ) )
-            {
-                string seq = iv.drxn ? mns[i]->seq.substr( 0, *min_element( mns[i]->coords[1].begin(), mns[i]->coords[1].end() ) - 1 )
-                                     : mns[i]->seq.substr( *max_element( mns[i]->coords[0].begin(), mns[i]->coords[0].end() ) + 1 );
-                for ( int j = 0; j < hitNodes.size(); j++ )
-                {
-                    int32_t coord = hitCoords[!iv.drxn][j];
-                    hitNodes[j]->getNextReadCoord( coord, !iv.drxn, !iv.drxn );
-                    int32_t extra = abs( coord - hitCoords[!iv.drxn][j] ) - 1;
-                    assert( extra >= 0 );
-                    MapNode* mn = new MapNode();
-                    mn->seq = iv.drxn ? hitNodes[j]->seq_.substr( coord - hitNodes[j]->ends_[0], extra ) + seq 
-                                      : seq + hitNodes[j]->seq_.substr( hitCoords[1][j] - hitNodes[j]->ends_[0], extra );
-                    hitCoords[!iv.drxn][j] = hitCoords[!iv.drxn][j] + ( iv.drxn ? -extra : extra );
-                    iv.ev.bwt.mapSequence( mn->seq, mn->ids, mn->coords );
-                    mn->addEdge( mns[i], seq.length(), iv.drxn );
-                    mn->addEdge( hitNodes[j], hitCoords[1][j]- hitCoords[0][j], !iv.drxn );
-                    if ( mn->recoil() )
-                    {
-                        mes.push_back( mn );
-                        if ( hitNodes.size() == 1 )
-                        {
-                            MapNode::fold( mn, mes, iv.drxn );
-                        }
-                    }
-                    else
-                    {
-                        delete mn;
-                    }
-                }
-                MapNode::collapse( mns, mes );
-            }
-        }
-        
-        mns[i]->checkLoop();
-        mns[i]->node = new Node( mns[i], 3 + iv.drxn );
-        iv.ev.island.push_back( mns[i]->node );
-        for ( int j = 0; j < mns[i]->bridges[!iv.drxn].size(); j++ )
-        {
-            mns[i]->bridges[!iv.drxn][j]->addEdge( mns[i]->node, mns[i]->bridgeOverlaps[!iv.drxn][j], iv.drxn );
-            iv.merged[!iv.drxn].insert( mns[i]->node );
-        }
-        
-        int32_t nodeLimits[2] = { mns[i]->node->ends_[1], mns[i]->node->ends_[0] };
-        for ( auto &read : mns[i]->node->reads_ )
-        {
-            nodeLimits[0] = min( nodeLimits[0], read.second[0] );
-            nodeLimits[1] = max( nodeLimits[1], read.second[1] );
-        }
-        assert( nodeLimits[0] == mns[i]->node->ends_[0] );
-        assert( nodeLimits[1] == mns[i]->node->ends_[1] );
-        assert( nodeLimits[1] - nodeLimits[0] == mns[i]->node->seq_.length() );
-    }
-    
-    for ( int i = 0; i < mns.size(); i++ )
-    {
-        for ( int j = 0; j < mns[i]->edges[iv.drxn].size(); j++ )
-        {
-            NodeSet fwdSet = mns[i]->edges[iv.drxn][j]->node->getDrxnNodes( iv.drxn );
-            if ( fwdSet.find( mns[i]->node ) == fwdSet.end() 
-                    && mns[i]->node != mns[i]->edges[iv.drxn][j]->node )
-            {
-                mns[i]->node->addEdge( mns[i]->edges[iv.drxn][j]->node, mns[i]->edgeOverlaps[iv.drxn][j], iv.drxn );
-            }
-        }
-        mns[i]->node->setCoverage();
-    }
-}
+//void Node::seedIslandsClumps( IslandVars &iv, vector<ReadMark> &clumps )
+//{
+//    vector<IslandRead> reads;
+//    for ( ReadMark &mark : clumps )
+//    {
+//        reads.push_back( IslandRead( iv.ev.bwt.getSequence( mark.id ), mark ) );
+//        for ( int i = 0; i < reads.size() - 1; i++ )
+//        {
+//            if ( reads[i].seq == reads.back().seq )
+//            {
+//                reads.pop_back();
+//                break;
+//            }
+//        }
+//    }
+//    
+//    for ( int i = 0; i < reads.size(); i++ )
+//    {
+//        for ( int j = 0; j < reads.size(); j++ )
+//        {
+//            if ( i != j ) reads[i].setOverlap( reads[j] );
+//        }
+//    }
+//    
+//    unordered_set<IslandRead*> forks[2], branches[2], ends;
+//    for ( IslandRead &read : reads )
+//    {
+//        if ( !read.edges[0] && !read.edges[1] ) continue;
+//        if ( !read.edges[0] ) ends.insert( &read );
+//        for ( int drxn : { 0, 1 } )
+//        {
+//            if ( read.edges[drxn] && read.edges[drxn]->edges[!drxn] != &read )
+//            {
+//                branches[drxn].insert( &read );
+//                branches[drxn].insert( read.edges[drxn]->edges[!drxn] );
+//                forks[!drxn].insert( read.edges[drxn] );
+//            }
+//        }
+//    }
+//    
+//    vector< vector<IslandRead*> > paths;
+//    unordered_set<IslandRead*> pathed;
+//    for ( const unordered_set<IslandRead*> &readList : { ends, forks[0], branches[0] } )
+//    {
+//        for ( IslandRead* read : readList )
+//        {
+//            if ( pathed.find( read ) != pathed.end() ) continue;
+//            vector<IslandRead*> path = { read };
+//            while ( path.back()->edges[1] 
+//                    && find( path.begin(), path.end(), path.back()->edges[1] ) == path.end()
+//                    && forks[1].find( path.back() ) == forks[1].end()
+//                    && branches[1].find( path.back() ) == branches[1].end() )
+//            {
+//                path.push_back( path.back()->edges[1] );
+//            }
+//            paths.push_back( path );
+//            pathed.insert( path.begin(), path.end() );
+//        }
+//    }
+//    
+//    vector<MapNode*> mns, mes;
+//    for ( vector<IslandRead*> &path : paths )
+//    {
+//        mns.push_back( new MapNode() );
+//        mns.back()->seq = path[0]->seq;
+//        int32_t sumCoord = path[0]->coord;
+//        for ( int i = 1; i < path.size(); i++ )
+//        {
+//            mns.back()->seq += path[i]->seq.substr( path[i]->overlaps[0] );
+//            sumCoord += path[i]->coord;
+//        }
+//        iv.ev.bwt.mapSequence( mns.back()->seq, mns.back()->ids, mns.back()->coords );
+//        mns.back()->estimate = sumCoord / (int)path.size();
+//        Node::seedIslandsClumpsCheck( iv, mns, mns.back() );
+//    }
+//    
+//    for ( int i = 0; i < paths.size(); i++ )
+//    {
+//        if ( paths[i][0]->edges[0] )
+//        {
+//            mes.push_back( new MapNode() );
+//            mns[i]->addEdge( mes.back(), paths[i][0]->overlaps[0], 0 );
+//            int32_t sumCoord = mns[i]->estimate, coordCount = 1;
+//            for ( int j = 0; j < paths.size(); j++ )
+//            {
+//                if ( paths[j].back() == paths[i][0]->edges[0] )
+//                {
+//                    if ( paths[j].back()->edges[1] == paths[i][0] ) paths[j].back()->edges[1] = NULL;
+//                    mns[j]->addEdge( mes.back(), paths[i][0]->overlaps[0], 1 );
+//                    sumCoord += mns[j]->estimate;
+//                    coordCount++;
+//                }
+//            }
+//            mes.back()->estimate = sumCoord / coordCount;
+//            assert( !mes.back()->edges[0].empty() && !mes.back()->edges[1].empty() );
+//        }
+//        if ( paths[i].back()->edges[1] )
+//        {
+//            mes.push_back( new MapNode() );
+//            mns[i]->addEdge( mes.back(), paths[i].back()->overlaps[1], 1 );
+//            int32_t sumCoord = mns[i]->estimate, coordCount = 1;
+//            for ( int j = 0; j < paths.size(); j++ )
+//            {
+//                if ( paths[j][0] == paths[i].back()->edges[1] )
+//                {
+//                    if ( paths[j][0]->edges[0] == paths[i].back() ) paths[j][0]->edges[0] = NULL;
+//                    mns[j]->addEdge( mes.back(), paths[i].back()->overlaps[1], 0 );
+//                    sumCoord += mns[j]->estimate;
+//                    coordCount++;
+//                }
+//            }
+//            mes.back()->estimate = sumCoord / coordCount;
+//            assert( !mes.back()->edges[0].empty() && !mes.back()->edges[1].empty() );
+//        }
+//    }
+//    
+//    for ( int i = 0; i < mes.size(); )
+//    {
+//        if ( !mes[i]->edges[0].empty() && !mes[i]->edges[1].empty() )
+//        {
+//            mes[i]->setEdgeSeq();
+//            iv.ev.bwt.mapSequence( mes[i]->seq, mes[i]->ids, mes[i]->coords );
+//            if ( !mes[i]->recoil() || !Node::seedIslandsClumpsCheck( iv, mes, mes[i] ) )
+//            {
+//                delete mes[i];
+//                mes.erase( mes.begin() + i );
+//                continue;
+//            }
+//        }
+//        i++;
+//    }
+//    
+//    MapNode::collapse( mns, mes );
+//    
+//    for ( int i = 0; i < mns.size(); i++ )
+//    {
+//        if ( mns[i]->edges[!iv.drxn].empty() && mns[i]->bridges[!iv.drxn].empty() )
+//        {
+//            Node* hitNode = NULL;
+//            NodeList hitNodes;
+//            int32_t coords[2];
+//            vector<int32_t> hitCoords[2];
+//            string secondSeq;
+//            Node::findOverlap( hitNode, coords, mns[i]->seq, iv.ev.nodes, 16, !iv.drxn );
+//            if ( !hitNode && mns[i]->getSecondSeq( secondSeq, !iv.drxn ) )
+//            {
+//                Node::findOverlap( hitNode, coords, secondSeq, iv.ev.nodes, 32, !iv.drxn );
+//                if ( hitNode ) mns[i]->setSecondSeq( !iv.drxn );
+//            }
+//            if ( hitNode && hitNode->overlapExtend( iv.ev.nodes, coords, hitNodes, hitCoords, iv.drxn, !iv.drxn ) )
+//            {
+//                string seq = iv.drxn ? mns[i]->seq.substr( 0, *min_element( mns[i]->coords[1].begin(), mns[i]->coords[1].end() ) - 1 )
+//                                     : mns[i]->seq.substr( *max_element( mns[i]->coords[0].begin(), mns[i]->coords[0].end() ) + 1 );
+//                for ( int j = 0; j < hitNodes.size(); j++ )
+//                {
+//                    int32_t coord = hitCoords[!iv.drxn][j];
+//                    hitNodes[j]->getNextReadCoord( coord, !iv.drxn, !iv.drxn );
+//                    int32_t extra = abs( coord - hitCoords[!iv.drxn][j] ) - 1;
+//                    assert( extra >= 0 );
+//                    MapNode* mn = new MapNode();
+//                    mn->seq = iv.drxn ? hitNodes[j]->seq_.substr( coord - hitNodes[j]->ends_[0], extra ) + seq 
+//                                      : seq + hitNodes[j]->seq_.substr( hitCoords[1][j] - hitNodes[j]->ends_[0], extra );
+//                    hitCoords[!iv.drxn][j] = hitCoords[!iv.drxn][j] + ( iv.drxn ? -extra : extra );
+//                    iv.ev.bwt.mapSequence( mn->seq, mn->ids, mn->coords );
+//                    mn->addEdge( mns[i], seq.length(), iv.drxn );
+//                    mn->addEdge( hitNodes[j], hitCoords[1][j]- hitCoords[0][j], !iv.drxn );
+//                    if ( mn->recoil() )
+//                    {
+//                        mes.push_back( mn );
+//                        if ( hitNodes.size() == 1 )
+//                        {
+//                            MapNode::fold( mn, mes, iv.drxn );
+//                        }
+//                    }
+//                    else
+//                    {
+//                        delete mn;
+//                    }
+//                }
+//                MapNode::collapse( mns, mes );
+//            }
+//        }
+//        
+//        mns[i]->checkLoop();
+//        mns[i]->node = new Node( mns[i], 3 + iv.drxn );
+//        iv.ev.island.push_back( mns[i]->node );
+//        for ( int j = 0; j < mns[i]->bridges[!iv.drxn].size(); j++ )
+//        {
+//            mns[i]->bridges[!iv.drxn][j]->addEdge( mns[i]->node, mns[i]->bridgeOverlaps[!iv.drxn][j], iv.drxn );
+//            iv.merged[!iv.drxn].insert( mns[i]->node );
+//        }
+//        
+//        int32_t nodeLimits[2] = { mns[i]->node->ends_[1], mns[i]->node->ends_[0] };
+//        for ( auto &read : mns[i]->node->reads_ )
+//        {
+//            nodeLimits[0] = min( nodeLimits[0], read.second[0] );
+//            nodeLimits[1] = max( nodeLimits[1], read.second[1] );
+//        }
+//        assert( nodeLimits[0] == mns[i]->node->ends_[0] );
+//        assert( nodeLimits[1] == mns[i]->node->ends_[1] );
+//        assert( nodeLimits[1] - nodeLimits[0] == mns[i]->node->seq_.length() );
+//    }
+//    
+//    for ( int i = 0; i < mns.size(); i++ )
+//    {
+//        for ( int j = 0; j < mns[i]->edges[iv.drxn].size(); j++ )
+//        {
+//            NodeSet fwdSet = mns[i]->edges[iv.drxn][j]->node->getDrxnNodes( iv.drxn );
+//            if ( fwdSet.find( mns[i]->node ) == fwdSet.end() 
+//                    && mns[i]->node != mns[i]->edges[iv.drxn][j]->node )
+//            {
+//                mns[i]->node->addEdge( mns[i]->edges[iv.drxn][j]->node, mns[i]->edgeOverlaps[iv.drxn][j], iv.drxn );
+//            }
+//        }
+//        mns[i]->node->setCoverage();
+//    }
+//}
 
 bool Node::seedIslandsClumpsCheck( IslandVars &iv, vector<MapNode*> &mns, MapNode* mn )
 {
@@ -1511,7 +1518,7 @@ bool Node::seedIslandsSingle( IslandVars &iv, ReadMark &mark, unordered_set<SeqN
 {
     if ( !Node::seedIslandsCheckRead( iv, mark ) ) return false;
     
-    string seq = iv.ev.bwt.getSequence( mark.readId );
+    string seq = iv.ev.bwt.getSequence( mark.id );
     vector<Extension> exts = iv.ev.bwt.mapExtensions( seq, drxn, ( params.readLen * 2 ) / 3 );
 
     for ( Extension &ext : exts )
@@ -1727,7 +1734,7 @@ bool Node::setBlank( IslandVars &iv, NodeSet &foldable, bool drxn )
         {
             for ( auto it = marks.begin(); it != marks.end(); )
             {
-                if ( t->reads_.find( it->readId ) != t->reads_.end() )
+                if ( t->reads_.find( it->id ) != t->reads_.end() )
                 {
                     if ( d == iv.drxn )
                     {
@@ -1744,7 +1751,7 @@ bool Node::setBlank( IslandVars &iv, NodeSet &foldable, bool drxn )
                     {
                         r.first->second++;
                     }
-                    SeqNum pairId = params.getPairId( it->readId );
+                    SeqNum pairId = params.getPairId( it->id );
                     islandUpdateValid( pairId );
                     
                     it = marks.erase( it );

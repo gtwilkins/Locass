@@ -21,6 +21,7 @@
 #include "node_structs.h"
 #include "node.h"
 #include <algorithm>
+#include "shared_functions.h"
 
 extern struct Parameters params;
 
@@ -86,6 +87,7 @@ float Score::ratio( float hits, float misses )
 
 void PathVars::addTarget( Node* t, NodeSet &fwdSet )
 {
+    tSet.insert( t );
     float cloneCount = t->clones_ ? 1 + t->clones_->size() : 1;
     float coeff = max( ( t->coverage_ / params.cover ) / float( cloneCount + 0.3 ), float( cloneCount ) );
     for ( auto &np : t->pairs_ )
@@ -107,21 +109,20 @@ void PathVars::addTarget( Node* t, NodeSet &fwdSet )
             }
             
             // Set adjustedHits
-            float adjHits = np.second / coeff;
+            float adjHits = np.second / ( t->drxn_ == np.first->drxn_ ? coeff : 1 );
             auto r2 = adjusted.insert( make_pair( np.first, adjHits ) );
             if ( !r2.second ) r2.first->second += adjHits;
             
             // Update furthest if necessary
-            if ( np.first->farPairNodes_[0] && np.first->farPairNodes_[0] != t
-                    && ( drxn ? t->ends_[0] < np.first->farPairCoords_[0]
-                              : np.first->farPairCoords_[0] < t->ends_[1] ) )
+            if ( !np.first->farPairNodes_[0]
+                    || ( np.first->farPairNodes_[0] && np.first->farPairNodes_[0] != t
+                            && ( drxn ? t->ends_[0] < np.first->farPairCoords_[0]
+                                      : np.first->farPairCoords_[0] < t->ends_[1] ) ) )
             {
                 np.first->setFurthest( tSet, drxn );
             }
         }
     }
-    
-    tSet.insert( t );
 }
 
 void PathVars::addTarget( NodeList &path )
@@ -299,7 +300,7 @@ void CloneScore::setCumul( Node* node, int prevScore, int prevMisses )
 }
 
 ReadMark::ReadMark( SeqNum &readId, Coords &inCoords, Lib* lib, bool drxn )
-: readId( readId ), mark( inCoords[!drxn] )
+: id( readId ), mark( inCoords[!drxn] )
 {
     estimate = drxn ? inCoords[0] + lib->size : inCoords[1] - lib->size;
     coords[0] = mark + ( drxn ? (*lib).minDist : -(*lib).maxDist );
@@ -390,7 +391,7 @@ MapStruct::MapStruct( string &inSeq, int32_t inMinLen, int32_t inCoord, int32_t 
 }
 
 IslandRead::IslandRead( string inSeq, ReadMark &mark )
-: seq( inSeq ), id( mark.readId )
+: seq( inSeq ), id( mark.id )
 {
     edges[0] = edges[1] = NULL;
     coord = mark.estimate < mark.mark ? mark.estimate : mark.estimate - seq.length();
@@ -844,3 +845,923 @@ void MapNode::splitEdge( Node* node, int i, bool drxn )
 {
     MapNode* mn = new MapNode();
 }
+
+bool NodeMapRead::checkDoubleHit()
+{
+    if ( nodes[0] && nodes[1] )
+    {
+        bool drxn = lens[1] > lens[0];
+        bool doUnset = true;
+        if ( coords[0][1] == nodes[0]->ends_[1] && nodes[1]->ends_[0] == coords[1][0] )
+        {
+            for ( Edge &e : nodes[0]->edges_[1] )
+            {
+                if ( e.node == nodes[1] 
+                        && ( coords[1][1] - coords[1][0] > e.overlap || e.isLeap ) )
+                {
+                    doUnset = false;
+                }
+            }
+        }
+        if ( doUnset )
+        {
+            nodes[!drxn] = NULL;
+            lens[!drxn] = 0;
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool NodeMapRead::checkHit( ReadMark &mark, bool markDrxn, bool drxn )
+{
+    if ( nodes[drxn] )
+    {
+        int estimate = drxn != markDrxn ? ( drxn ? mark.estimate - params.readLen 
+                                                 : mark.estimate + params.readLen ) 
+                                        : mark.estimate;
+        if ( nodes[drxn]->reads_.find( id ) != nodes[drxn]->reads_.end()
+                || abs( estimate - coords[drxn][markDrxn] ) > 150 )
+        {
+            nodes[drxn] = NULL;
+            lens[drxn] = 0;
+        }
+        else
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void NodeMapReadHits::add( NodeSet hitNodes, int32_t* hitCoords, bool doAdd, bool drxn )
+{
+    int iHome = -1;
+    for ( int i = 0; i < coords[0].size(); )
+    {
+        if ( hitCoords[0] <= coords[1][i] && coords[0][i] <= hitCoords[1]  )
+        {
+            iHome = iHome == -1 ? i : iHome;
+            coords[0][iHome] = min( coords[0][iHome], min( coords[0][i], hitCoords[0] ) );
+            coords[1][iHome] = max( coords[1][iHome], max( coords[1][i], hitCoords[1] ) );
+            nodes[iHome].insert( hitNodes.begin(), hitNodes.end() );
+            hits[drxn][iHome]++;
+            doAdd = false;
+            if ( i != iHome )
+            {
+                nodes[iHome].insert( nodes[i].begin(), nodes[i].end() );
+                nodes.erase( nodes.begin() + i );
+                hits[0][iHome] += hits[0][i];
+                hits[1][iHome] += hits[1][i];
+                hits[0].erase( hits[0].begin() + i );
+                hits[1].erase( hits[1].begin() + i );
+                coords[0].erase( coords[0].begin() + i );
+                coords[1].erase( coords[1].begin() + i );
+                continue;
+            }
+        }
+        i++;
+    }
+    
+    if ( doAdd )
+    {
+        nodes.push_back( hitNodes );
+        hits[drxn].push_back( 1 );
+        hits[!drxn].push_back( 0 );
+        coords[0].push_back( hitCoords[0] );
+        coords[1].push_back( hitCoords[1] );
+    }
+}
+
+MappedReadEnd::MappedReadEnd( string inSeq, ReadId inId, int32_t* inCoords, int32_t inOffset, bool endDrxn, bool fromDrxn )
+: seq( inSeq ), id( inId ), offset( inOffset ), drxn( fromDrxn ), doMap( false )
+{
+    coords[0 + endDrxn] = inCoords[0];
+    coords[1 + endDrxn] = inCoords[1];
+    coords[(!endDrxn)*2] = endDrxn ?  coords[2] - seq.length() : coords[0]  + seq.length();
+    counts[0] = counts[1] = 0;
+    counts[fromDrxn] = 1;
+}
+
+bool MappedReadEnd::checkMap( int score, bool overDrxn )
+{
+    if ( doMap )
+    {
+        int overlap = abs( coords[overDrxn*2] - coords[1] );
+        return abs( offset ) - ( overlap / 2 ) - score < 100;
+    }
+    return false;
+}
+
+string MappedReadEnd::getExtSeq( bool drxn )
+{
+    int len = min( (int)seq.length(), abs( coords[1] - coords[drxn*2] ) );
+    return ( drxn ? seq.substr( seq.length() - len ) : seq.substr( 0, len ) );
+}
+
+int MappedReadEnd::getMinOverlap( int minlen, bool overDrxn )
+{
+    int i = 0;
+    while ( i < seq.length() &&
+            ( overDrxn ? seq[i] == seq[i+1] : seq[seq.length()-i-1] == seq[seq.length()-i-2] ) ) i++;
+    return minlen + i;
+}
+
+int MappedReadEnd::getOverlap( bool overDrxn )
+{
+    return abs( coords[overDrxn*2] - coords[1] );
+}
+
+void MappedReadEnd::set( MappedReadEnd &read )
+{
+    seq = read.seq ;
+    id = read.id;
+    coords[0] = read.coords[0];
+    coords[1] = read.coords[1];
+    coords[2] = read.coords[2];
+    counts[0] = counts[1] = 0;
+    drxn = read.drxn;
+    counts[drxn] = 1;
+}
+
+bool MappedReadEnd::withinLimits( int32_t* limits )
+{
+    return ( limits[0] < coords[2] && coords[0] < limits[1] );
+}
+
+//PathSeq::PathSeq( Node* node )
+//: contMapping( true ), exhausted( false )
+//{
+//    seq = node->seq_;
+//    nodes.push_back( node );
+//    nodeCoords.push_back( Coords( node->ends_[0], node->ends_[1], true ) );
+//    ends[0] = node->ends_[0];
+//    ends[1] = node->ends_[1];
+//    dist = 0;
+//}
+
+//void PathSeq::clearEdges()
+//{
+//    for ( bool drxn : { 0, 1 } )
+//    {
+//        for ( MappedReadEnd e : edges[drxn] )
+//        {
+//            e->seq = "";
+//            delete e;
+//        }
+//        edges[drxn].clear();
+//    }
+//}
+
+//bool PathSeq::doMap( PathVars &pv, int score, unordered_set<ReadId> &usedIds, bool drxn )
+//{
+//    NodeList edgeNodes;
+//    for ( int i = 0; i < nodes.size() - 1; i++ )
+//    {
+//        edgeNodes.push_back( new Node() );
+//        edgeNodes.back()->ends_[0] = ends[1];
+//        edgeNodes.back()->ends_[1] = ends[0];
+//        edgeNodes.back()->drxn_ = nodes[i]->drxn_ > 0;
+//    }
+//    
+//    NodeSet fwdSet = ( pv.drxn ? nodes.back() : nodes[0] )->getDrxnNodes( drxn, true, true );
+//    NodeSet bckSet = ( pv.drxn ? nodes.back() : nodes[0] )->getDrxnNodes( !drxn, true, true );
+//    NodeSet delSet;
+//    
+//    bool didAdd = false;
+//    
+//    for ( int i : { 0, 1 } )
+//    {
+//        for ( auto it = reads[i].begin(); it != reads[i].end(); )
+//        {
+//            if ( (*it).checkMap( score, i ) && usedIds.find( it->id ) == usedIds.end() )
+//            {
+//                bool doAdd = true;
+//                for ( NodeList const &ns : { pv.nodes, pv.islands } )
+//                {
+//                    for ( Node* node : ns )
+//                    {
+//                        if ( node->reads_.find( it->id ) != node->reads_.end() )
+//                        {
+//                            if ( node->drxn_ > 2 )
+//                            {
+//                                node->clearEdges( 0 );
+//                                node->clearEdges( 1 );
+//                                node->dismantleNode();
+//                                delSet.insert( node );
+//                            }
+//                            else if ( fwdSet.find( node ) == fwdSet.end() && bckSet.find( node ) == bckSet.end() )
+//                            {
+//                                node->dismantleNode( delSet, pv.drxn );
+//                            }
+//                            else
+//                            {
+//                                doAdd = false;
+//                                assert( false );
+//                                break;
+//                            }
+//                        }
+//                    }
+//                }
+//                if ( !doAdd )
+//                {
+//                    it++; 
+//                    assert( false );
+//                    continue;
+//                }
+//                
+//                for ( int j = 0; j < nodes.size(); j++ )
+//                {
+//                    if ( it->coords[0] <= nodeCoords[j][0] && nodeCoords[j][1] <= it->coords[2] )
+//                    {
+//                        int offset = nodes[j]->ends_[0] - nodeCoords[j][0];
+//                        nodes[j]->addRead( it->id, max( nodes[j]->ends_[0], it->coords[0] + offset)
+//                                                 , min( nodes[j]->ends_[1], it->coords[2] + offset ), true );
+//                        added.insert( nodes[j] );
+//                        usedIds.insert( it->id );
+//                        didAdd = true;
+//                        break;
+//                    }
+//                    if ( it->coords[2] <= nodeCoords[j][1] )
+//                    {
+//                        if ( nodeCoords[j][0] <= it->coords[0] )
+//                        {
+//                            int offset = nodes[j]->ends_[0] - nodeCoords[j][0];
+//                            nodes[j]->addRead( it->id, it->coords[0] + offset, it->coords[2] + offset, true );
+//                            added.insert( nodes[j] );
+//                        }
+//                        else if ( j > 0 )
+//                        {
+//                            edgeNodes[j-1]->addRead( it->id, it->coords[0], it->coords[2], true );
+//                            edgeNodes[j-1]->ends_[0] = min( edgeNodes[j-1]->ends_[0], it->coords[0] );
+//                            edgeNodes[j-1]->ends_[1] = max( edgeNodes[j-1]->ends_[1], it->coords[2] );
+//                        }
+//                        usedIds.insert( it->id );
+//                        didAdd = true;
+//                        break;
+//                    }
+//                }
+//            }
+//            
+//            if ( usedIds.find( it->id ) == usedIds.end() ) it++;
+//            else it = reads[i].erase( it );
+//        }
+//    }
+//    
+//    for ( Node* del : delSet )
+//    {
+//        delete del;
+//        pv.nodes.erase( remove( pv.nodes.begin(), pv.nodes.end(), del ), pv.nodes.end() );
+//        pv.islands.erase( remove( pv.islands.begin(), pv.islands.end(), del ), pv.islands.end() );
+//    }
+//    
+//    for ( int i = 0; i < edgeNodes.size(); i++ )
+//    {
+//        if ( edgeNodes[i]->reads_.empty() ) delete edgeNodes[i];
+//        else
+//        {
+//            pv.nodes.push_back( edgeNodes[i] );
+//            nodes[i]->removeEdge( nodes[i+1], 1 );
+//            nodes[i+1]->removeEdge( nodes[i], 0 );
+//            int overlaps[2] = { nodeCoords[i][1] - edgeNodes[i]->ends_[0]
+//                              , edgeNodes[i]->ends_[1] - nodeCoords[i+1][0]};
+//            edgeNodes[i]->seq_ = seq.substr( edgeNodes[i]->ends_[0] - ends[0], edgeNodes[i]->ends_[1] - edgeNodes[i]->ends_[0] );
+//            nodes[i + !drxn]->addEdge( edgeNodes[i], overlaps[!drxn], drxn );
+//            edgeNodes[i]->addEdge( nodes[i + drxn], overlaps[drxn], drxn );
+//            edgeNodes[i]->setCoverage();
+//            edgeNodes[i]->setValid();
+//        }
+//    }
+//    
+//    for ( Node* node : added )
+//    {
+//        node->setCoverage();
+//        node->updatePairs();
+//    }
+//    
+//    return didAdd;
+//}
+//
+//int PathSeq::getBest( PathVars &pv, vector<PathSeq> &pss, int &bestCount, int &bestOffset, bool bothDrxn )
+//{
+//    int iBest = -1;
+//    bestCount = 1;
+//    for ( int i = 0; i < pss.size(); i++ )
+//    {
+//        if ( pss[i].exhausted ) continue;
+//        vector<bool> drxns = { pv.drxn };
+//        if ( bothDrxn ) drxns.push_back( !pv.drxn );
+//        for ( bool drxn : drxns )
+//        {
+//            int thisCount = 0, thisOffset;
+//            int32_t thisCoords[2];
+//            pss[i].getBest( thisCount, thisOffset, thisCoords, false, !drxn );
+//            if ( thisCount > bestCount )
+//            {
+//                bestCount = thisCount;
+//                bestOffset = thisOffset;
+//                iBest = i;
+//            }
+//        }
+//    }
+//    return iBest;
+//}
+//
+//void PathSeq::getBest( int &count, int &offset, int32_t* coords, bool weakSpot, bool drxn )
+//{
+//    for ( int i = 0; i + count + 1 < reads[drxn].size(); i++ )
+//    {
+//        if ( reads[drxn][i].drxn != drxn && ( !weakSpot || reads[drxn][i].withinLimits( goodLimits ) ) )
+//        {
+//            vector<int> offsets = { abs( reads[drxn][i].offset ) };
+//            int thisCount = 1;
+//            int j = i;
+//            while ( ++j < reads[drxn].size() 
+//                    && abs( reads[drxn][i].coords[1] - reads[drxn][j].coords[1] ) < 50
+//                    && ( !weakSpot || reads[drxn][j].withinLimits( goodLimits ) ) )
+//            {
+//                if ( reads[drxn][j].drxn != drxn )
+//                {
+//                    thisCount++;
+//                    offsets.push_back( abs( reads[drxn][i].offset ) );
+//                }
+//            }
+//            if ( thisCount > count )
+//            {
+//                count = thisCount;
+//                coords[0] = reads[drxn][i].coords[1];
+//                coords[1] = reads[drxn][j-1].coords[1];
+//                offset = 0;
+//                sort( offsets.begin(), offsets.end() );
+//                int offCount = ( 1 + offsets.size() ) / 2;
+//                for ( int i = 0; i < offCount; i++ ) offset += offsets[i];
+//                offset /= offCount;
+//            }
+//        }
+//    }
+//}
+//
+//void PathSeq::map( PathVars &pv, vector<PathSeq> &pss, Node* node, bool drxn )
+//{
+//    NodeSet qSets[2] = { {node}, {node} };
+//    node->getDrxnNodes( qSets[drxn], drxn, node->ends_[!drxn] + ( drxn ? params.maxPeMean : -params.maxPeMean ) );
+//    node->getDrxnNodes( qSets[!drxn], !drxn, node->ends_[!drxn] + ( drxn ? -params.maxPeMean*2 : params.maxPeMean*2 ) );
+//    
+//    NodeSet allSet;
+//    unordered_set<ReadId> badIds;
+//    for ( PathSeq &ps : pss ) allSet.insert( ps.nodes.begin(), ps.nodes.end() );
+//    for ( Node* n : allSet )
+//        for ( const auto &read : n->reads_ ) badIds.insert( read.first );
+//    
+//    for ( int i : { drxn, !drxn } )
+//    {
+//        for ( Node* q : qSets[i] )
+//        {
+//            if ( q->coverage_ < params.cover * 1.6 )
+//            {
+//                for ( ReadMark &mark : q->marks_[i] )
+//                {
+//                    if ( badIds.find( mark.id ) != badIds.end() ) continue;
+//                    string seq = pv.bwt.getSequence( mark.id );
+//                    for ( PathSeq &ps : pss )
+//                    {
+//                        ps.map( seq, mark, i );
+//                    }
+//                }
+//            }
+//        }
+//    }
+//    
+//    
+//    bool anyMap = true;
+//    while( anyMap )
+//    {
+//        anyMap = false;
+//        for ( PathSeq &ps : pss )
+//        {
+//            if ( ps.contMapping ) ps.setEdges();
+//        }
+//        vector<MappedReadEnd> tmpReads[pss.size()][2];
+//        for ( int i : { drxn, !drxn } )
+//        {
+//            for ( Node* q : qSets[i] )
+//            {
+//                if ( q->coverage_ < params.cover * 1.6 )
+//                {
+//                    for ( ReadMark &mark : q->marks_[i] )
+//                    {
+//                        if ( badIds.find( mark.id ) != badIds.end() ) continue;
+//                        string seq = pv.bwt.getSequence( mark.id );
+//                        for ( int j = 0; j < pss.size(); j++ )
+//                        {
+//                            if ( pss[j].contMapping ) pss[j].remap( tmpReads[j], seq, mark, i );
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//        for ( int i = 0; i < pss.size(); i++ )
+//        {
+//            pss[i].reads[0].insert( pss[i].reads[0].end(), tmpReads[i][0].begin(), tmpReads[i][0].end() );
+//            pss[i].reads[1].insert( pss[i].reads[1].end(), tmpReads[i][1].begin(), tmpReads[i][1].end() );
+//            pss[i].contMapping = !tmpReads[i][0].empty() || !tmpReads[i][1].empty();
+//            anyMap = anyMap || pss[i].contMapping;
+//        }
+//    }
+//}
+//
+//void PathSeq::map( string q, ReadMark &mark, bool fromDrxn )
+//{
+//    int32_t estimates[2] = { mark.estimate, mark.estimate };
+//    estimates[fromDrxn] = estimates[fromDrxn] + ( fromDrxn ? q.length() : -q.length() );
+//    
+//    for ( bool i : { 0, 1 } )
+//    {
+//        if ( usedIds[i].find( mark.id ) == usedIds[i].end() )
+//        {
+//            int minLen = 16 + getHomopolymerLen( q, i );
+//            int32_t coords[2] = { 0, 0 };
+//            mapSeqEnd( q, seq, minLen, coords, i );
+//            if ( coords[1] - coords[0] > 0
+//                    && ( i ? q.length() <= coords[1]  
+//                           : coords[0] + q.length() <= seq.length() ) )
+//            {
+//                coords[0] = ends[0] + coords[0];
+//                coords[1] = ends[0] + coords[1];
+//                int32_t offset = fromDrxn ? coords[i] - estimates[i]
+//                                          : estimates[i] - coords[i];
+//                reads[i].push_back( MappedReadEnd( q, mark.id, coords, offset, i, fromDrxn ) );
+//                usedIds[i].insert( mark.id );
+//            }
+//        }
+//    }
+//}
+//
+//void PathSeq::remap( vector<MappedReadEnd> (&hitReads)[2], string q, ReadMark &mark, bool fromDrxn )
+//{
+//    int32_t estimates[2] = { mark.estimate, mark.estimate };
+//    estimates[fromDrxn] = estimates[fromDrxn] + ( fromDrxn ? q.length() : -q.length() );
+//    
+//    for ( bool i : { 0, 1 } )
+//    {
+//        if ( usedIds[i].find( mark.id ) == usedIds[i].end() )
+//        {
+//            int minLen = params.readLen / 2;
+//            int32_t coords[2]{0};
+//            for ( MappedReadEnd &read : reads[i] )
+//            {
+//                int ol = mapSeqOverlap( ( i ? q : read.seq ), ( i ? read.seq : q ), minLen );
+//                if ( ol )
+//                {
+//                    coords[i] = ( i ? read.coords[0] + ol : read.coords[2] - ol );
+//                    coords[!i] = read.coords[1];
+//                    minLen = ol + 1;
+//                }
+//            };
+//            if ( coords[1] - coords[0] > 0
+//                    && ( i ? ends[0] <= coords[1] - q.length() 
+//                           : coords[0] + q.length() <= ends[1] ) )
+//            {
+//                int32_t offset = fromDrxn ? coords[i] - estimates[i]
+//                                          : estimates[i] - coords[i];
+//                hitReads[i].push_back( MappedReadEnd( q, mark.id, coords, offset, i, fromDrxn ) );
+//                usedIds[i].insert( mark.id );
+//            }
+//        }
+//    }
+//}
+//
+//void PathSeq::removeDubious( PathVars &pv )
+//{
+//    unordered_set<ReadId> removeIds;
+//    for ( int i : { 0, 1 } )
+//    {
+//        for ( int j = 0; j < reads[i].size(); )
+//        {
+//            int overlen = reads[i][j].getOverlap( i );
+//            bool drxn = overlen < reads[i][j].seq.length() / 2 ? i : !i;
+//            overlen = min( int(params.readLen * 0.5), 
+//                      max( int(params.readLen * 0.4), 
+//                         ( drxn == i ? overlen : (int)reads[i][j].seq.length() - overlen ) ) );
+//            if ( removeIds.find( reads[i][j].id ) != removeIds.end() 
+//                    || pv.bwt.isExtendable( reads[i][j].seq, overlen+1, drxn ) > 1 )
+//            {
+//                ReadId count = pv.bwt.isExtendable( reads[i][j].seq, overlen+1, drxn );
+//                reads[i].erase( reads[i].begin() + j );
+//            }
+//            else j++;
+//        }
+//    }
+//}
+//
+//void PathSeq::setEdges()
+//{
+//    bool setAgain = true;
+//    while ( setAgain )
+//    {
+//        setAgain = false;
+//        sortReads();
+//        edges[0].clear();
+//        edges[1].clear();
+//        for ( bool drxn : { 0, 1 } )
+//        {        
+//            int j;
+//            unordered_set<int> used, dontAdd;
+//            vector< vector<int> > paths;
+//            for ( int i = 0; i < reads[drxn].size(); i = j )
+//            {
+//                j = i;
+//                while ( ++j < reads[drxn].size() && reads[drxn][i].coords[1] == reads[drxn][j].coords[1] );
+//                for ( int k = i; k < j; k++ )
+//                {
+//                    if ( used.find( k ) == used.end() )
+//                    {
+//                        MappedReadEnd e;
+//                        e.set( reads[drxn][k] );
+//                        vector<int> path = { k };
+//                        int count = 0;
+//                        int offSum = reads[drxn][k].drxn != drxn ? reads[drxn][k].offset : 0;
+//                        for ( int m = k + 1; m < j; m++ )
+//                        {
+//                            int offset = e.coords[0] - reads[drxn][m].coords[0];
+//                            if ( offset >= 0 ? mapSeqCongruent( reads[drxn][m].seq, e.seq, offset  )
+//                                             : mapSeqCongruent( e.seq, reads[drxn][m].seq, -offset ) )
+//                            {
+//                                if ( reads[drxn][m].drxn != drxn ) offSum += reads[drxn][m].offset;
+//                                e.counts[ reads[drxn][m].drxn ]++;
+//                                e.id = reads[drxn][m].id;
+//                                path.push_back( m );
+//                                count++;
+//                                int diff = reads[drxn][m].coords[drxn*2] - e.coords[drxn*2];
+//                                if ( drxn && diff > 0 )
+//                                {
+//                                    e.seq += reads[1][m].seq.substr( reads[1][m].seq.length() - diff );
+//                                    e.coords[2] += diff;
+//                                }
+//                                if ( !drxn && diff < 0 )
+//                                {
+//                                    e.seq = reads[0][m].seq.substr( 0, -diff ) + e.seq;
+//                                    e.coords[0] += diff;
+//                                }
+//                            }
+//                        }
+//                        e.offset = offSum / max( 1, e.counts[!drxn] );
+//                        edges[drxn].emplace_back( e );
+//                        if ( dontAdd.find( path.back() ) == dontAdd.end() ) paths.push_back( path );
+//                        if ( path.size() > 2 ) used.insert( path.begin() + 2, path.end() );
+//                        dontAdd.insert( path.begin(), path.end() );
+//                    }
+//                }
+//            }
+//            for ( vector<int> &path : paths )
+//            {
+//                MappedReadEnd* read = &reads[drxn][path.back()];
+//                int iol = abs( read->coords[1] - read->coords[drxn*2] );
+//                int32_t offset = 0, coord;
+//                for ( int i = 0; i < edges[drxn].size(); i++ )
+//                {
+//                    int jol = abs( edges[drxn][i].coords[1] - edges[drxn][i].coords[drxn*2] );
+//                    if ( jol >= iol && edges[drxn][i].id != read->id )
+//                    {
+//                        int ijol = mapSeqOverlap( ( drxn ? read->seq : edges[0][i].seq )
+//                                               , ( drxn ? edges[1][i].seq : read->seq ), iol );
+//                        if ( ijol > iol )
+//                        {
+//                            coord = edges[drxn][i].coords[1];
+//                            offset = drxn ? edges[1][i].coords[0] + ijol - read->coords[2]
+//                                          : edges[0][i].coords[2] - ijol - read->coords[0];
+//                            iol = ijol;
+//                        }
+//                    }
+//                }
+//                if ( offset )
+//                {
+//                    for ( int i : path )
+//                    {
+//                        reads[drxn][i].coords[0] += offset;
+//                        reads[drxn][i].coords[1] = coord;
+//                        reads[drxn][i].coords[2] += offset;
+//                    }
+//                    setAgain = true;
+//                }
+//            }
+//        }
+//    }
+//}
+//
+//bool PathSeq::setWeakspot( vector<PathSeq> &pss, int32_t estimate[2] )
+//{
+//    int32_t limits[2] = { min( estimate[1] - params.readLen, estimate[0] )
+//                        , max( estimate[0] + params.readLen, estimate[1] ) };
+//    int len = limits[1] - limits[0];
+//    int cover[len]{0};
+//    
+//    NodeSet usedSet;
+//    for ( PathSeq &ps : pss )
+//    {
+//        for ( int i = 0; i < ps.nodes.size(); i++ )
+//        {
+//            Node* node = ps.nodes[i];
+//            if ( usedSet.find( node ) == usedSet.end() )
+//            {
+//                usedSet.insert( node );
+//                int32_t offset = node->ends_[0] - ps.nodeCoords[i][0];
+//                if ( limits[0] < node->ends_[1] + offset && node->ends_[0] + offset < limits[1] )
+//                {
+//                    for ( auto &read : node->reads_ )
+//                    {
+//                        int j = max( limits[0], read.second[0] + offset ) - limits[0];
+//                        int k = min( limits[1], read.second[1] + offset ) - limits[0];
+//                        while ( j < k )
+//                        {
+//                            assert( j >= 0 && j < len );
+//                            cover[j++]++;
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//    }
+//    
+//    int minCover = cover[0];
+//    int32_t coord;
+//    int32_t goodCover[3] = {0,len,0};
+//    int32_t highCover[3] = {0,len,0};
+//    int goodCutoff = params.cover * 0.6, highCutoff = params.cover * 1.2;
+//    for ( int i = 0; i < len; i++ )
+//    {
+//        if ( cover[i] > goodCutoff )
+//        {
+//            if ( i < goodCover[1] ) goodCover[1] = i;
+//            goodCover[2] = i;
+//        }
+//        
+//        if ( cover[i] > highCutoff )
+//        {
+//            if ( i < highCover[1] ) highCover[1] = i;
+//            highCover[2] = i;
+//        }
+//        
+//        if ( cover[i] < minCover )
+//        {
+//            if ( cover[i] < goodCutoff )
+//            {
+//                goodCover[0] = goodCover[2];
+//                goodCover[1] = len;
+//            }
+//            if ( cover[i] < highCutoff )
+//            {
+//                highCover[0] = highCover[2];
+//                highCover[1] = len;
+//            }
+//            minCover = cover[i];
+//            coord = i;
+//        }
+//    }
+//    
+//    for ( PathSeq &ps : pss )
+//    {
+//        ps.estimate = coord + limits[0];
+//        ps.minCover = minCover;
+//        ps.allHigh = !highCover[1];
+//        ps.allGood = !goodCover[1];
+//        ps.highLimits[0] = limits[0] + highCover[0];
+//        ps.highLimits[1] = limits[0] + highCover[1];
+//        ps.goodLimits[0] = limits[0] + goodCover[0];
+//        ps.goodLimits[1] = limits[0] + goodCover[1];
+//    }
+//    
+//    return minCover <= goodCutoff;
+//}
+//
+//void PathSeq::sortReads()
+//{
+//    // Sorted left to right then by extension length
+//    sort( reads[0].begin(), reads[0].end(), []( const MappedReadEnd &a, const MappedReadEnd &b ){
+//        return a.coords[1] == b.coords[1] ? a.coords[2] > b.coords[2]
+//                                          : a.coords[1] < b.coords[1];
+//    } );
+//    sort( reads[1].begin(), reads[1].end(), []( const MappedReadEnd &a, const MappedReadEnd &b ){
+//        return a.coords[1] == b.coords[1] ? a.coords[0] < b.coords[0]
+//                                          : a.coords[1] < b.coords[1];
+//    } );
+//}
+//
+//bool PathSeq::tryBridge( PathVars &pv, int mapCount, int mapOffset, bool drxn )
+//{
+//    MapNode* mn = new MapNode();
+//    double maxScore = 0;
+//    int32_t bestCoords[2];
+//    int bestOverlaps[2];
+//    int bestOffset;
+//    int bestDist;
+//    double target = (double)mapCount * 0.7 * double( 100 - min( 90, mapOffset ) ) / 100.0;
+//    
+//    for ( int i = 0; i < edges[0].size(); i++ )
+//    {
+//        for ( int j = 0; j < edges[1].size(); j++ )
+//        {
+//            int minlen = max( 28, getHomopolymerLen( edges[0][i].seq, 1 ) );
+//            int overlap = mapSeqOverlap( edges[0][i].seq, edges[1][j].seq, minlen );
+//            if ( overlap )
+//            {
+//                int overlaps[2] = { edges[0][i].coords[1] - edges[0][i].coords[0]
+//                                  , edges[1][j].coords[2] - edges[1][j].coords[1] };
+//                int32_t thisCoords[2] = { edges[0][i].coords[1], edges[1][j].coords[1]};
+//                int counts[2] = { edges[0][i].counts[1], edges[1][j].counts[0] };
+//                int count = edges[0][i].counts[drxn] + edges[1][j].counts[drxn];
+//                string thisSeq = edges[0][i].seq + edges[1][j].seq.substr( overlap );
+//                int dist = thisCoords[0] - thisCoords[1] + thisSeq.length() - overlaps[0] - overlaps[1];
+//                int offset = ( ( edges[0][i].offset * edges[0][i].counts[1] ) 
+//                             + ( edges[1][j].offset * edges[1][j].counts[0] ) )
+//                             / max( 1, edges[0][i].counts[1] + edges[1][j].counts[0] );
+//                overlap = min( overlap, min( overlaps[0], overlaps[1] ) );
+//                double thisScore = ( overlap + overlaps[0] + overlaps[1] ) 
+//                              * ( 2 + counts[0] + counts[1] + count )
+//                              * ( 200 + min( 0, abs( offset ) - abs( dist - offset ) ) );
+//                double targetScore = (double)counts[!drxn] * double( 100 + abs( offset ) - abs( dist - offset ) ) / 100.0;
+//                bool isLeap = seq.find( 'N', thisCoords[0] - ends[0] ) < thisCoords[1] - ends[0];
+//                if ( ( isLeap || ( counts[!drxn] > 2 && targetScore > target ) ) && thisScore > maxScore )
+//                {
+//                    maxScore = thisScore;
+//                    mn->seq = thisSeq;
+//                    bestOffset = offset;
+//                    bestDist = dist;
+//                    bestCoords[0] = thisCoords[0];
+//                    bestCoords[1] = thisCoords[1];
+//                    bestOverlaps[0] = overlaps[0];
+//                    bestOverlaps[1] = overlaps[1];
+//                }
+//            }
+//        }
+//    }
+//    
+//    bool didBridge = false;
+//    if ( !mn->seq.empty() && ( min( bestOverlaps[0], bestOverlaps[1] ) + bestOffset > params.readLen * 0.6 ) )
+//    {
+//        mn->bridgeOverlaps[0].push_back( bestOverlaps[0] );
+//        mn->bridgeOverlaps[1].push_back( bestOverlaps[1] );
+//        mn->bridges[0].push_back( NULL );
+//        mn->bridges[1].push_back( NULL );
+//        int iBgn = -1, iEnd = -1;
+//        for ( int i = 0; i < nodes.size(); i++ )
+//        {
+//            if ( iBgn == -1 && bestCoords[0] <= nodeCoords[i][1] ) iBgn = i;
+//            if ( nodeCoords[i][0] <= bestCoords[1] ) iEnd = i;
+//        }
+//        assert( iBgn != -1 && iEnd != -1 );
+//        mn->bridges[0][0] = nodes[iBgn];
+//        mn->bridges[1][0] = nodes[iEnd];
+//        bestCoords[0] += nodes[iBgn]->ends_[0] - nodeCoords[iBgn][0];
+//        bestCoords[1] += nodes[iEnd]->ends_[0] - nodeCoords[iEnd][0];
+//        didBridge = Node::mapBridge( pv, ( pv.drxn ? nodes.back() : nodes[0] ), mn, bestCoords, drxn );
+//    }
+//    delete mn;
+//    return didBridge;
+//}
+//
+//bool PathSeq::tryComplete( PathVars &pv, unordered_set<ReadId> &usedIds )
+//{
+//    if ( allHigh ) return false;
+//    unordered_set<ReadId> badIds( usedIds.begin(), usedIds.end() );
+//    removeDubious( pv );
+//    for ( MappedReadEnd &r0 : reads[0] )
+//    {
+//        for ( MappedReadEnd &r1 : reads[1] )
+//        {
+//            if ( highLimits[1] < r0.coords[0] || r0.coords[2] < highLimits[0] ) continue;
+//            if ( highLimits[1] < r1.coords[0] || r1.coords[2] < highLimits[0] ) continue;
+//            if ( r0.id == r1.id && r1.coords[1] <= r0.coords[1] + 1 )
+//            {
+//                r0.doMap = true;
+//                badIds.insert( r0.id );
+//            }
+//        }
+//    }
+//    for ( int i : { 0, 1 } )
+//    {
+//        for ( MappedReadEnd &read : reads[i] )
+//        {
+//            if ( highLimits[1] < read.coords[0] || read.coords[2] < highLimits[0] ) continue;
+//            if ( badIds.find( read.id ) != badIds.end() ) continue;
+//            string q = read.getExtSeq( !i );
+//            string t = seq.substr( read.coords[!i] - ends[0]
+//                                 , abs( read.coords[1] - read.coords[!i*2] ) );
+//            int misses = 0;
+//            int j = 0;
+//            while ( j < q.length() ) misses += q[j] != t[j++];
+//            if ( misses <= 2 )
+//            {
+//                read.doMap = true;
+//                badIds.insert( read.id );
+//            }
+//        }
+//    }
+//    
+//    return doMap( pv, 0, usedIds, pv.drxn );
+//}
+//
+//bool PathSeq::tryMap( PathVars &pv, unordered_set<ReadId> &usedIds, bool remap, bool drxn )
+//{
+//    if ( remap ) return tryRemap( pv, usedIds );
+//    if ( allGood ) return false;
+//    int count = 0, baseOffset;
+//    int32_t coords[2];
+//    getBest( count, baseOffset, coords, true, !drxn );
+//    if ( count < 2 ) return false;
+//    coords[drxn] = drxn ? min( ends[1], max( coords[0] + 60, coords[1] + 20 ) )
+//                        : max( ends[0], min( coords[1] - 60, coords[0] - 20 ) );
+//    
+//    int support = 0;
+//    int avgOff[2]{0}, avgOver[2]{0};
+//    for ( int i : { !drxn, drxn } )
+//    {
+//        vector<int> overlaps, offsets;
+//        for ( MappedReadEnd &read : reads[i] )
+//        {
+//            if ( read.coords[0] < coords[i] && coords[i] < read.coords[2] )
+//            {
+//                overlaps.push_back( abs( read.coords[1] - read.coords[(!drxn)*2] ) );
+//                offsets.push_back( abs( read.offset ) );
+//                support += read.drxn != drxn || i == drxn;
+//                read.doMap = true;
+//            }
+//        }
+//        
+//        if ( !overlaps.empty() && !offsets.empty() )
+//        {
+//            sort( overlaps.rbegin(), overlaps.rend() );
+//            sort( offsets.begin(), offsets.end() );
+//            int offCount = min( (int)offsets.size(), 1 + (int)offsets.size() / 3 );
+//            for ( int j = 0; j < min( (int)overlaps.size(), 3 ); j++ ) avgOver[i] += overlaps[j];
+//            for ( int j = 0; j < offCount; j++ ) avgOff[i] += offsets[j];
+//            avgOver[i] /= 3;
+//            avgOff[i] /= offCount;
+//        }
+//    }
+//    
+//    int score = min( avgOver[!drxn], support * 10 ) 
+//              + min( 30, avgOver[!drxn] + min( avgOver[drxn], avgOver[!drxn] ) - params.readLen )
+//              + ( 50 - avgOff[!drxn] );
+//    
+//    if ( score > 0 )
+//    {
+//        return doMap( pv, score / 10, usedIds, drxn );
+//    }
+//    int x = 0;
+//    return false;
+//}
+//
+//bool PathSeq::tryRemap( PathVars &pv, unordered_set<ReadId> &usedIds )
+//{
+//    int counts[2]{0};
+//    int bestOffsets[2]{0};
+//    int32_t coords[2][2];
+//    getBest( counts[0], bestOffsets[0], coords[0], true, 0 );
+//    getBest( counts[1], bestOffsets[1], coords[1], true, 1 );
+//    bool drxn = bestOffsets[0] != bestOffsets[1] ? bestOffsets[1] > bestOffsets[0] : !pv.drxn;
+//    drxn = counts[1] != counts[0] ? counts[1] > counts[0] : drxn;
+//    coords[drxn][!drxn] = drxn ? max( ends[0], min( coords[1][1] - 60, coords[1][0] - 20 ) )
+//                               : min( ends[1], max( coords[0][0] + 60, coords[0][1] + 20 ) );
+//    
+//    int support = 0;
+//    int avgOff[2]{0}, avgOver[2]{0};
+//    for ( bool i : { !drxn, drxn } )
+//    {
+//        vector<int> overlaps, offsets;
+//        for ( MappedReadEnd &read : reads[i] )
+//        {
+//            if ( read.coords[0] < coords[drxn][i] && coords[drxn][i] < read.coords[2] )
+//            {
+//                overlaps.push_back( abs( read.coords[1] - read.coords[(!drxn)*2] ) );
+//                offsets.push_back( abs( read.offset ) );
+//                support += read.drxn != i;
+//                read.doMap = counts[drxn] > 2;
+//            }
+//        }
+//        
+//        if ( !overlaps.empty() && !offsets.empty() )
+//        {
+//            sort( overlaps.rbegin(), overlaps.rend() );
+//            sort( offsets.begin(), offsets.end() );
+//            int offCount = min( (int)offsets.size(), 1 + (int)offsets.size() / 3 );
+//            for ( int j = 0; j < min( (int)overlaps.size(), 3 ); j++ ) avgOver[i] += overlaps[j];
+//            for ( int j = 0; j < offCount; j++ ) avgOff[i] += offsets[j];
+//            avgOver[i] /= 3;
+//            avgOff[i] /= offCount;
+//        }
+//    }
+//    
+//    bool didMap = false;
+//    int score = min( 50, support * 5 ) + 0;
+//    if ( score < 0 )
+//        for ( int i : {0,1} )
+//            for ( MappedReadEnd &read : reads[i] ) read.doMap = false;
+//    else didMap = doMap( pv, score, usedIds, drxn );
+//    
+//    
+//    didMap = tryComplete( pv, usedIds ) || didMap;
+//    
+//    return didMap;
+//}

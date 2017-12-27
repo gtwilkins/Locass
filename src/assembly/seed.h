@@ -31,6 +31,7 @@ public:
     Seed( string &header, string &seq, Querier &inBwt, int errorCount );
     void assemble();
     vector<Locus*> getLoci();
+    bool warning();
     virtual ~Seed();
 private:
     void checkDivergent( NodeList &path );
@@ -51,6 +52,7 @@ private:
     string header_, seq_;
     NodeList nodes_;
     int32_t validLimits_[2], ends_[2], tether_[2];
+    int readCount_;
     Querier &bwt_;
 };
 

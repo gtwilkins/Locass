@@ -119,13 +119,13 @@ Assemble::Assemble( int argc, char** argv )
     {
         int i = 0;
         outFile = "locass-out.fa";
-        ifstream testout( outFile );
-        while ( testout )
-        {
-            testout.close();
-            outFile = "locass-out-" + to_string( i ) + ".fa";
-            testout.open( outFile );
-        }
+//        ifstream testout( outFile );
+//        while ( testout )
+//        {
+//            testout.close();
+//            outFile = "locass-out-" + to_string( ++i ) + ".fa";
+//            testout.open( outFile );
+//        }
     }
     
     if ( limit > 200000 )
@@ -163,11 +163,13 @@ Assemble::Assemble( int argc, char** argv )
     int locusCount = 0, seedCount = 0;
     for ( int i = 0; i < seqs.size(); i++ )
     {
+//        if ( i < 57 ) continue;
         cout << "Assembling locus " << to_string( i + 1 ) << " of " << to_string( seqs.size() ) << endl;
         cout << "\tSearching for target loci... " << endl;
         Seed seed( headers[i], seqs[i], bwt, errorCount );
-        seed.assemble();
         seedCount++;
+        if ( seed.warning() ) continue;
+        seed.assemble();
         vector<Locus*> loci = seed.getLoci();
         cout << ( loci.empty() ? "\tNo target loci found." : "\tTarget loci found!" ) << endl;
         if ( !loci.empty() )
@@ -221,7 +223,7 @@ void Assemble::readIn( ifstream &fh, vector<string> &headers, vector<string> &se
     int lineNum = 0;
     int seqNum = 0;
     string acceptedChars = "acgtACGT";
-    while ( getline( fh, line ) )
+    while ( getline( fh, line ) && !line.empty() )
     {
         if ( !lineNum )
         {

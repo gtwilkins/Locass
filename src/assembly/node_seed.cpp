@@ -438,13 +438,13 @@ bool Node::seedValidate( NodeList &tNodes, NodeOffsetMap &fwdMap, NodeOffsetMap 
         {
             for ( Node* t : tNodes )
             {
-                auto it = t->reads_.find( mark.readId );
+                auto it = t->reads_.find( mark.id );
                 if ( it != t->reads_.end()
                         && ( drxn ? it->second[1] <= t->validLimits_[2] : validLimits_[1] <= it->second[0] ) )
                 {
                     didPair = true;
                     hitSet.insert( t );
-                    usedIds.insert( mark.readId );
+                    usedIds.insert( mark.id );
                     pushValidLimits( mark.mark, drxn );
                     t->pushValidLimits( it->second[!drxn], !drxn );
                     NodeSet midSet = t->getDrxnNodesInSet( tSet, drxn );

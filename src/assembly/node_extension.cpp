@@ -65,7 +65,6 @@ void Node::addExtension( Extension &ext, ExtVars &ev, vector<MergeHit> &selfMerg
             Node* node = new Node( getSeqEnd( ext.maxOverLen, drxn ), ext, ends_[drxn], drxn );
             addEdge( node, ext.maxOverLen, drxn );
             ev.nodes.push_back( node );
-            node->setCoverage();
             bool fwdBranch = false;
             if ( !ext.fwdExts.empty() )
             {
@@ -73,6 +72,7 @@ void Node::addExtension( Extension &ext, ExtVars &ev, vector<MergeHit> &selfMerg
                 node->addExtensions( ext.fwdExts, ev, fwdBranch, drxn );
                 ev.ante.erase( this );
             }
+            node->setCoverage();
         }
         else 
         {
@@ -83,6 +83,7 @@ void Node::addExtension( Extension &ext, ExtVars &ev, vector<MergeHit> &selfMerg
                 addExtensions( ext.fwdExts, ev, fwdBranch, drxn );
             }
         }
+        setCoverage();
     }
 }
 
@@ -135,7 +136,6 @@ void Node::addExtension( Extension &ext, ExtVars &ev, NodeSet &acceptable, NodeS
             Node* node = new Node( getSeqEnd( ext.maxOverLen, drxn ), ext, ends_[drxn], drxn );
             addEdge( node, ext.maxOverLen, drxn );
             ev.nodes.push_back( node );
-            node->setCoverage();
             if ( !ext.fwdExts.empty() )
             {
                 ev.ante.insert( this );
@@ -146,6 +146,7 @@ void Node::addExtension( Extension &ext, ExtVars &ev, NodeSet &acceptable, NodeS
                 }
                 ev.ante.erase( this );
             }
+            node->setCoverage();
         }
         else 
         {
@@ -158,6 +159,7 @@ void Node::addExtension( Extension &ext, ExtVars &ev, NodeSet &acceptable, NodeS
                 }
             }
         }
+        setCoverage();
     }
 }
 
@@ -192,6 +194,7 @@ void Node::addExtensionMerge( MergeHit &merge, Extension &ext, ExtVars &ev, bool
     }
 
     thisNode->addEdge( mergeNode, merge.overlap, drxn, ev.doOffset );
+    mergeNode->setCoverage();
     
     if ( mergeNode->drxn_ > 2 )
     {
@@ -251,9 +254,14 @@ void Node::appendNode( Extension &ext, bool drxn )
     {
         addRead( *iter, anchor, drxn );
     }
-//    cout << ext.seq << " " << ext.maxOverLen << endl;
     
-    assert( paired_ && !clones_ );
+    assert( !clones_ );
+    if ( !paired_ )
+    {
+        paired_ = new NodeSet;
+        validated_ = false;
+    }
+    assert( !validated_ );
     paired_->clear();
     
     this->appendSeq( ext.seq, drxn );
@@ -288,7 +296,8 @@ void Node::debriefExtension( ExtVars &ev, bool drxn )
         stop_[drxn] = 4;
     }
     
-    setCoverage( ev, drxn, drxn );
+//    setCoverage( ev, drxn, drxn );
+    setCoverage();
     
     if ( !isContinue( 0 ) && !isContinue( 1 ) )
     {
@@ -406,6 +415,7 @@ void Node::extendForward( ExtVars &ev, NodeSet &acceptable, bool drxn )
             addExtension( ext, ev, acceptable, ignore, doesBranch, drxn );
         }
     }
+    setCoverage();
 }
 
 void Node::extendNode( ExtVars &ev, bool drxn )
@@ -601,32 +611,24 @@ bool Node::isMergeSelf( ExtVars &ev, MergeHit &merge )
     return false;
 }
 
-//void Node::mergeDrxn( ExtVars &ev, bool drxn )
-//{
-//    if ( edges_[drxn].size() == 1 && edges_[drxn][0].node->edges_[!drxn].size() == 1 )
-//    {
-//        Node* node = edges_[drxn][0].node;
-//        int overlap = edges_[drxn][0].overlap;
-//        int seqLen = seq_.length() - overlap;
-//        node->offsetNode( drxn );
-//        node->edges_[!drxn].clear();
-//        node->seq_ = drxn ? seq_.substr( 0, seqLen ) + node->seq_ : node->seq_ + seq_.substr( overlap );
-//        node->ends_[!drxn] += ( drxn ? -seqLen : seqLen );
-//        node->readMarks_.insert( node->readMarks_.end(), readMarks_.begin(), readMarks_.end() );
-//        node->reads_.insert( reads_.begin(), reads_.end() );
-//        node->edges_[!drxn].clear();
-//        for ( Edge &edge : edges_[!drxn] )
-//        {
-//            edge.node->removeEdge( this, drxn );
-//            edge.node->addEdge( node, edge.overlap, drxn );
-//        }
-//        node->clearPairs( node->drxn_ == 1 || node->drxn_ == 4 );
-//        edges_[0].clear();
-//        edges_[1].clear();
-//        dismantleNode();
-//        ev.del.insert( this );
-//    }
-//}
+Node* Node::mergeNode( NodeList &nodes, int32_t coord, bool subGraph )
+{
+    if ( coord != ends_[subGraph] )
+    {
+        int32_t splitCoord = ends_[subGraph];
+        for ( auto &read : reads_ )
+        {
+            if ( subGraph ? coord <= read.second[1] && read.second[0] < splitCoord
+                          : read.second[0] <= coord && splitCoord < read.second[1] )
+            {
+                splitCoord = read.second[!subGraph];
+            }
+        }
+        
+        splitNode( splitCoord, nodes, subGraph, subGraph );
+    }
+    return this;
+}
 
 Node* Node::mergeNode( NodeList &nodes, Coords* coords, bool subGraph, bool drxn )
 {
@@ -793,4 +795,39 @@ Node* Node::splitNode( int32_t splitBegin, NodeList &nodes, bool subGraph, bool 
     node->setCoverage();
     
     return node;
+}
+
+Node* Node::splitNodeDual( int32_t* coords, NodeList &nodes, int subGraph )
+{
+    int32_t splitCoords[2] = { ends_[bool(subGraph)],ends_[bool(subGraph)] };
+    for ( auto &read : reads_ )
+    {
+        if ( subGraph )
+        {
+            if ( read.second[0] < splitCoords[0] && coords[0] <= read.second[0] )
+            {
+                splitCoords[0] = read.second[0];
+            }
+            if ( read.second[0] < splitCoords[1] && coords[1] < read.second[1] )
+            {
+                splitCoords[1] = read.second[0];
+            }
+        }
+        else
+        {
+            if ( splitCoords[0] < read.second[1] && read.second[0] < coords[0] )
+            {
+                splitCoords[0] = read.second[1];
+            }
+            if ( splitCoords[1] < read.second[1] && read.second[1] <= coords[1] )
+            {
+                splitCoords[1] = read.second[1];
+            }
+        }
+    }
+    if ( splitCoords[bool(subGraph)] != ends_[bool(subGraph)] )
+    {
+        splitNode( splitCoords[bool(subGraph)], nodes, subGraph, bool(subGraph) );
+    }
+    return splitNode( splitCoords[!bool(subGraph)], nodes, subGraph, bool(subGraph) );;
 }
