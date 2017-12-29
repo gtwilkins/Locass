@@ -58,6 +58,10 @@ PathReview::PathReview( PathVars &pv, NodeList &path, int32_t* reliable, int32_t
 
 bool PathReview::review( Path &path, NodeList &sideNodes, NodeSet &delSet )
 {
+    if ( path_.back()->ends_[0] < -45866 )
+    {
+        int x = 0;
+    }
     bool assembled = resolveForks( delSet );
     assembled = resolveEnd( delSet ) && assembled;
     assembled = resolveMisassembly( delSet ) && assembled;

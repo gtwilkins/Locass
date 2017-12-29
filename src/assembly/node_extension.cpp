@@ -261,7 +261,7 @@ void Node::appendNode( Extension &ext, bool drxn )
         paired_ = new NodeSet;
         validated_ = false;
     }
-    assert( !validated_ );
+    validated_ = false;
     paired_->clear();
     
     this->appendSeq( ext.seq, drxn );

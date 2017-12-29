@@ -370,7 +370,7 @@ void SeqPathReassemble::setBridges( vector<SeqPathReassemble*> seqs, MapNode* mn
                 offsets[0] /= max( drxns[0], 1 );
                 offsets[1] /= max( drxns[1], 1 );
                 
-                // If offsets are positive, then current is too long and a short cut
+                // If offsets are positive, then current is too long and a short cut is implicated
                 // If offsets are negative, then an expanded bridge is implicated
                 
                 float score = totalOl * ( float( ols[0] + ols[1] + ols[2] ) / float( 3 * params.readLen ) );
@@ -561,7 +561,22 @@ bool SeqPathMerge::doMerge( PathVars &pv, NodeSet &delSet, bool drxn )
                 }
             }
             
-            if ( splitCoord != mergeNodes[!drxn]->ends_[drxn] )
+            if ( splitCoord == mergeNodes[!drxn]->ends_[!drxn] )
+            {
+                int diff = abs( mergeNodes[!drxn]->ends_[!drxn] - splitCoords[!drxn] );
+                bool didFind = false;
+                for ( Edge &e : mergeNodes[!drxn]->edges_[!drxn] )
+                {
+                    if ( find( nodes.begin(), nodes.end(), e.node ) == nodes.end() ) continue;
+                    if ( e.overlap > diff );
+                    mergeNodes[!drxn] = e.node;
+                    splitCoords[!drxn] = e.node->ends_[drxn];
+                    ol -= ( diff - e.overlap );
+                    didFind = true;
+                }
+                if ( !didFind ) return false;
+            }
+            else if ( splitCoord != mergeNodes[!drxn]->ends_[drxn] )
             {
                 mergeNodes[!drxn]->splitNode( splitCoord, pv.nds[pv.drxn], drxn, drxn );
                 for ( Node* nxt : mergeNodes[!drxn]->getNextNodes( drxn ) )

@@ -78,7 +78,7 @@ bool Locus::plotPath( Path &path, bool drxn )
     endNodes_[drxn].clear();
     sideNodes_[drxn].clear();
     toExtend_[drxn].clear();
-    path.reset( nodes_[drxn] );
+    path.reset( forkNodes_[drxn], drxn );
     setForkLimits();
     vector<Span> initSpans = path.spans;
     locusTest();

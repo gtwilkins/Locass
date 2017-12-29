@@ -18,6 +18,7 @@ SRCS =  \
 	timer.cpp \
 	parameters.cpp \
 	filenames.cpp \
+	shared_functions \
 	node_looping.cpp \
 	locus_export.cpp \
 	node_folding.cpp \
@@ -27,6 +28,7 @@ SRCS =  \
 	node_structs.cpp \
 	seed.cpp \
 	node_completion.cpp \
+	node_slicing.cpp \
 	node_groupings.cpp \
 	node_bridging.cpp \
 	node_reliability.cpp \
@@ -51,6 +53,10 @@ SRCS =  \
 	import_file.cpp \
 	locus_leaping.cpp \
 	node_calibration.cpp \
+	path_merge.cpp \
+	path_reassembly.cpp \
+	path_review.cpp \
+	path_sequence.cpp \
 	query_state.cpp \
 	query_binary.cpp \
 	query_extension.cpp \
@@ -61,9 +67,9 @@ SRCS =  \
 # C++ compiler
 CXX = g++
 # C++ flags; passed to compiler
-CXXFLAGS = -std=c++11
+CXXFLAGS = -std=c++11 -g
 # Linker flags; passed to compiler
-LDFLAGS = -std=c++11
+LDFLAGS = -std=c++11 -g
 # Dependency flags; passed to compiler
 DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.Td
 # Objects directory

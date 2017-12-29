@@ -349,8 +349,82 @@ bool Node::testInvalid( int32_t* limits, bool drxn )
 {
     NodeSet testedSet, backedSet;
     propagateValidation( limits, testedSet, backedSet, drxn );
+}
+
+void Node::trimIsland( IslandVars &iv, NodeSet &bgnSet )
+{
+    NodeSet fwdSet( bgnSet.begin(), bgnSet.end() ), goodSet, islandSet;
+    for ( Node* node : bgnSet )
+    {
+        if ( islandSet.find( node ) == islandSet.end() ) node->getConnectedNodes( islandSet, true );
+        node->getDrxnNodes( fwdSet, iv.drxn );
+        node->getDrxnNodes( goodSet, !iv.drxn );
+    }
     
+    NodeSet hitBckSet, reliBckSet;
+    NodeIntMap hitMap, reliMap;
+    for ( Node* fwd : fwdSet )
+    {
+        int hits = 0, reli = 0;
+        for ( auto &np : fwd->pairs_ )
+        {
+            if ( np.first->drxn_ > 2 ) continue;
+            hits += np.second;
+            if ( !np.first->isReliable() 
+                    && ( np.first->ends_[1] - np.first->ends_[0] < params.readLen * 1.5 
+                            || np.first->coverage_ > params.cover * 1.2 ) ) continue;
+            reli += np.second;
+        }
+        if ( hits )
+        {
+            goodSet.insert( fwd );
+            fwd->getDrxnNodesInSet( goodSet, fwdSet, !iv.drxn );
+            hitMap[fwd] = hits;
+            fwd->getDrxnNodesInSet( hitBckSet, fwdSet, !iv.drxn );
+        }
+        if ( reli )
+        {
+            reliMap[fwd] = reli;
+            fwd->getDrxnNodesInSet( reliBckSet, fwdSet, !iv.drxn );
+        }
+    }
     
+    trimIsland( iv, fwdSet, hitBckSet, hitMap, goodSet );
+    trimIsland( iv, fwdSet, reliBckSet, reliMap, goodSet );
+    
+    for ( Node* isl : islandSet )
+    {
+        if ( goodSet.find( isl ) != goodSet.end() ) continue;
+        isl->dismantleNode();
+        iv.ev.del.insert( isl );
+    }
+}
+
+void Node::trimIsland( IslandVars &iv, NodeSet &fwdSet, NodeSet &hitBckSet, NodeIntMap &hitMap, NodeSet &goodSet )
+{
+    int maxHits = 0;
+    Node* maxNode = NULL;
+    for ( auto &hit : hitMap )
+    {
+        if ( hitBckSet.find( hit.first ) != hitBckSet.end() ) continue;
+        int hits = hit.second;
+        NodeSet hitSet = hit.first->getDrxnNodesInSet( fwdSet, !iv.drxn, false );
+        for ( Node* node : hitSet )
+        {
+            auto it = hitMap.find( node );
+            if ( it != hitMap.end() ) hits += it->second;
+        }
+        if ( hits > maxHits )
+        {
+            maxNode = hit.first;
+            maxHits = hits;
+        }
+    }
+    
+    if ( maxNode )
+    {
+        maxNode->getDrxnNodes( goodSet, iv.drxn );
+    }
 }
 
 bool Node::validate( int32_t* limits )

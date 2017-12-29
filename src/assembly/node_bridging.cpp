@@ -69,6 +69,11 @@ bool Node::bridgeIsland( IslandVars &iv, NodeSetList &islandSets )
     
     if ( !islandEnds.empty() )
     {
+        NodeSet endSet( islandEnds.begin(), islandEnds.end() );
+        if ( iv.limit > 25000 )
+        {
+            Node::trimIsland( iv, endSet );
+        }
         NodeList mainEnds = Node::bridgeIslandGetMainEnds( iv, peSet, tLimits );
         
         if ( !mainEnds.empty() )
@@ -528,7 +533,6 @@ NodeList Node::bridgeIslandGetForks( IslandVars &iv, NodeIntMap &limitMap, NodeS
             {
                 node->edges_[drxn][i].node->dismantleNode( iv.ev.del, drxn );
                 i--;
-                assert( false );
             }
         }
     }
@@ -1091,31 +1095,31 @@ bool Node::bridgeIslandSet( IslandVars &iv, NodeList &mainEnds, NodeList &island
     
     NodeSet islandSet = islandEnds[iBestMain]->getConnectedNodes( true );
     
-    for ( int i ( iBestMain ); --i >= 0; )
-    {
-        int32_t thisOffset = abs( setsOverlaps[i][0] - ( params.readLen / 2 ) );
-        int32_t bestOffset = abs( setsOverlaps[iBestMain][0] - ( params.readLen / 2 ) );
-        bool doSwap;
-        if ( islandSet.find( islandEnds[i] ) != islandSet.end() )
-        {
-            doSwap = thisOffset < bestOffset && hitsBestMains[i] > 0;
-            for ( int j ( 1 ); j < mainEnds.size(); j++ )
-            {
-                int32_t altOffset = abs( setsOverlaps[i][0] - ( params.readLen / 2 ) ) - ( params.readLen / 2 );
-                doSwap = doSwap && !( setsHits[i][j] == setsHits[i][0] && altOffset < bestOffset );
-            }
-        }
-        else
-        {
-            doSwap = thisOffset < bestOffset && setsOverlaps[iBestMain][0] < 0;
-        }
-        
-        if ( doSwap && !iAttempted[i] )
-        {
-            iBestMain = i;
-            islandSet = islandEnds[iBestMain]->getConnectedNodes( true );
-        }
-    }
+//    for ( int i ( iBestMain ); --i >= 0; )
+//    {
+//        int32_t thisOffset = abs( setsOverlaps[i][0] - ( params.readLen / 2 ) );
+//        int32_t bestOffset = abs( setsOverlaps[iBestMain][0] - ( params.readLen / 2 ) );
+//        bool doSwap;
+//        if ( islandSet.find( islandEnds[i] ) != islandSet.end() )
+//        {
+//            doSwap = thisOffset < bestOffset && hitsBestMains[i] > 0;
+//            for ( int j ( 1 ); j < mainEnds.size(); j++ )
+//            {
+//                int32_t altOffset = abs( setsOverlaps[i][0] - ( params.readLen / 2 ) ) - ( params.readLen / 2 );
+//                doSwap = doSwap && !( setsHits[i][j] == setsHits[i][0] && altOffset < bestOffset );
+//            }
+//        }
+//        else
+//        {
+//            doSwap = thisOffset < bestOffset && setsOverlaps[iBestMain][0] < 0;
+//        }
+//        
+//        if ( doSwap && !iAttempted[i] )
+//        {
+//            iBestMain = i;
+//            islandSet = islandEnds[iBestMain]->getConnectedNodes( true );
+//        }
+//    }
     
     if ( setsOverlaps[iBestMain][0] > params.readLen * 2.5 )
     {
@@ -1134,14 +1138,17 @@ bool Node::bridgeIslandSet( IslandVars &iv, NodeList &mainEnds, NodeList &island
         }
     }
     
-    Node* islandMerged = islandEnds[iBestMain]->foldEdge( iv.ev, mainEnds[0], iv.drxn );
+    NodeSet islandMerged = islandEnds[iBestMain]->foldEdge( iv.ev, mainEnds[0], iv.drxn );
     iAttempted[iBestMain] = true;
-    if ( islandMerged )
+    if ( !islandMerged.empty() )
     {
         NodeSet propagated;
-        iv.merged[!iv.drxn].insert( islandMerged );
-        islandMerged->offsetNode( iv.drxn );
-        islandMerged->offsetIsland( propagated, iv.drxn );
+        for ( Node* merge : islandMerged )
+        {
+            iv.merged[!iv.drxn].insert( merge );
+            merge->offsetNode( iv.drxn );
+            merge->offsetIsland( propagated, iv.drxn );
+        }
     }
     else if ( unattempted > 1 )
     {
@@ -1180,9 +1187,9 @@ bool Node::bridgeIslandSet( IslandVars &iv, NodeList &mainEnds, NodeList &island
             if ( islandSet.find( islandEnds[iBest] ) != islandSet.end() )
             {
                 islandMerged = islandEnds[iBest]->foldEdge( iv.ev, mainEnds[j], iv.drxn );
-                if ( islandMerged )
+                for ( Node* merge : islandMerged )
                 {
-                    iv.merged[!iv.drxn].insert( islandMerged );
+                    iv.merged[!iv.drxn].insert( merge );
                     mainsEdgedCount++;
                     mainsEdged[j] = true;
                     islandsEdged[iBest] = true;
@@ -1190,41 +1197,41 @@ bool Node::bridgeIslandSet( IslandVars &iv, NodeList &mainEnds, NodeList &island
             }
             break;
         }
-        if ( iBest == iBestMain )
-        {
-            Node* mainFolded = mainEnds[j]->foldEnd( iv.ev, mainEnds[0], iv.drxn );
-            if ( mainFolded )
-            {
-                for ( Node* nxt : mainFolded->getNextNodes( iv.drxn ) )
-                {
-                    if ( nxt->drxn_ > 2 )
-                    {
-                        iv.merged[!iv.drxn].insert( nxt );
-                    }
-                }
-            }
-        }
+//        if ( iBest == iBestMain )
+//        {
+//            Node* mainFolded = mainEnds[j]->foldEnd( iv.ev, mainEnds[0], iv.drxn );
+//            if ( mainFolded )
+//            {
+//                for ( Node* nxt : mainFolded->getNextNodes( iv.drxn ) )
+//                {
+//                    if ( nxt->drxn_ > 2 )
+//                    {
+//                        iv.merged[!iv.drxn].insert( nxt );
+//                    }
+//                }
+//            }
+//        }
     }
 
-    for ( int i( 0 ); i < islandEnds.size(); i++ )
-    {
-        if ( !islandsEdged[i] && islandSet.find( islandEnds[i] ) != islandSet.end() )
-        {
-            Node* islandFolded = islandEnds[i]->foldEnd( iv.ev, islandEnds[iBestMain], !iv.drxn );
-            if ( islandFolded )
-            {
-                for ( Node* nxt : islandFolded->getNextNodes( !iv.drxn ) )
-                {
-                    if ( nxt->drxn_ <= 2 )
-                    {
-                        iv.merged[!iv.drxn].insert( nxt );
-                        break;
-                    }
-                }
-                break;
-            }
-        }
-    }
+//    for ( int i( 0 ); i < islandEnds.size(); i++ )
+//    {
+//        if ( !islandsEdged[i] && islandSet.find( islandEnds[i] ) != islandSet.end() )
+//        {
+//            Node* islandFolded = islandEnds[i]->foldEnd( iv.ev, islandEnds[iBestMain], !iv.drxn );
+//            if ( islandFolded )
+//            {
+//                for ( Node* nxt : islandFolded->getNextNodes( !iv.drxn ) )
+//                {
+//                    if ( nxt->drxn_ <= 2 )
+//                    {
+//                        iv.merged[!iv.drxn].insert( nxt );
+//                        break;
+//                    }
+//                }
+//                break;
+//            }
+//        }
+//    }
     
     return mainsEdgedCount > 0;
 }
@@ -1348,7 +1355,7 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
     {
         int32_t iCoords[2]{ coords[i], coords[i] };
         iCoords[i] = iCoords[!i] + ( i ? mn->bridgeOverlaps[i][0] : -mn->bridgeOverlaps[i][0] );
-        mn->bridges[i][0]->overlapExtend( pv.nds, iCoords, hitNodes[i], hitCoords[i], i );
+        mn->bridges[i][0]->overlapExtend( pv.nds[pv.drxn], iCoords, hitNodes[i], hitCoords[i], pv.drxn, i );
         reachacble = target->getDrxnNodes( pv.drxn, true, true );
         target->getDrxnNodes( reachacble, !pv.drxn, true );
         for ( int j = 0; j < hitNodes[i].size(); )

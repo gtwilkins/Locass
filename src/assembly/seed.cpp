@@ -279,6 +279,7 @@ vector<Locus*> Seed::getLoci()
     
     NodeIntMap scores;
     NodeList bestPath = getLociGetPath( loci.empty() );
+    if ( bestPath.empty() ) return loci;
 //    checkDivergent( bestPath );
     
     Node* forks[2];
@@ -379,8 +380,6 @@ NodeList Seed::getLociGetPath( bool doForce )
         getLociGetPath( bestPath.back(), bestPath, bestPathScore, 0 );
         reverse( bestPath.begin(), bestPath.end() );
     }
-    
-    assert( !bestPath.empty() );
     
     return bestPath;
 }
@@ -607,6 +606,7 @@ bool Seed::resolveBackFork( Node** forks, NodeSet &delSet )
         bool delMid = midScore < scores[0] && midScore < scores[1];
         for ( bool drxn : { 0, 1 } )
         {
+            NodeList midNodes;
             bool delQ = !delMid && scores[drxn] <= scores[!drxn];
             for ( Node* nxt : forks[drxn]->getNextNodes( !drxn ) )
             {
@@ -620,6 +620,24 @@ bool Seed::resolveBackFork( Node** forks, NodeSet &delSet )
                         nxt->dismantleNode( delSet, drxn );
                     }
                 }
+                if ( !isQ ) midNodes.push_back( nxt );
+            }
+            if ( !delQ && !delMid && midNodes.size() > 1 )
+            {
+                Node* worst = NULL;
+                int worstScore = 0;
+                for ( Node* node : midNodes )
+                {
+                    int score = 0;
+                    NodeSet midSet = node->getDrxnNodesNotInSet( tSets[!drxn], !drxn, true );
+                    for ( Node* mid : midSet ) score += mid->getPairHitsTotal();
+                    if ( !worst || score < worstScore )
+                    {
+                        worst = node;
+                        worstScore = score;
+                    }
+                }
+                worst->dismantleNode( delSet, !drxn );
             }
         }
         

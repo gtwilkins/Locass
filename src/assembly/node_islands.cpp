@@ -936,7 +936,7 @@ void Node::pushValidLimits( IslandVars &iv, Node* markNode, Node* hitNode, int32
     }
 }
 
-bool Node::overlapExtend( NodeList* nodes, int32_t* coords, NodeList &hitNodes, vector<int32_t>* hitCoords, bool drxn )
+bool Node::overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, vector<int32_t>* hitCoords, bool subGraph, bool drxn )
 {
     NodeList currNodes = { this };
     vector<int32_t> currCoords[2];
@@ -964,9 +964,9 @@ bool Node::overlapExtend( NodeList* nodes, int32_t* coords, NodeList &hitNodes, 
                 {
                     if ( nxtCoord[!drxn] != currNodes[i]->ends_[!drxn] )
                     {
-                        if ( drxn == currNodes[i]->drxn_ )
+                        if ( drxn == subGraph )
                         {
-                            currNodes[i] = currNodes[i]->splitNode( nxtCoord[!drxn], nodes[drxn], drxn, drxn );
+                            currNodes[i] = currNodes[i]->splitNode( nxtCoord[!drxn], nodes, drxn, drxn );
                         }
                         else
                         {
@@ -978,12 +978,15 @@ bool Node::overlapExtend( NodeList* nodes, int32_t* coords, NodeList &hitNodes, 
                                     splitCoord = drxn ? max( splitCoord, read.second[1] ) : min( splitCoord, read.second[0] );
                                 }
                             }
-                            currNodes[i]->splitNode( splitCoord, nodes[!drxn], !drxn, !drxn );
+                            currNodes[i]->splitNode( splitCoord, nodes, !drxn, !drxn );
                         }
                     }
                     hitNodes.push_back( currNodes[i] );
                     usedSet.insert( currNodes[i] );
                     currNodes[i]->getDrxnNodes( usedSet, drxn );
+                    
+                    assert( currNodes[i]->ends_[0] <= nxtCoord[0] );
+                    assert( currNodes[i]->ends_[1] >= nxtCoord[1] );
                     hitCoords[0].push_back( nxtCoord[0] );
                     hitCoords[1].push_back( nxtCoord[1] );
                 }
@@ -991,6 +994,7 @@ bool Node::overlapExtend( NodeList* nodes, int32_t* coords, NodeList &hitNodes, 
                 {
                     for ( Edge &e : currNodes[i]->edges_[drxn] )
                     {
+                        if ( currNodes[i]->drxn_ == 2 ) continue;
                         int32_t diff = drxn ? e.node->ends_[0] - currNodes[i]->ends_[1] + e.overlap
                                             : e.node->ends_[1] - currNodes[i]->ends_[0] - e.overlap;
                         nxtNodes.push_back( e.node );

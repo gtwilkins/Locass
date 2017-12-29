@@ -152,6 +152,10 @@ void Locus::locusTest()
     {
         for ( Node* node : nodes_[i] )
         {
+            int count = 0;
+            for ( Node* n2 : nodes_[i] ) count += node == n2;
+            assert( count == 1 );
+            
 //            assert( !node->unreliable_ );
             assert( node->drxn_ == i );
             float cover = node->coverage_;

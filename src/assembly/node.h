@@ -53,6 +53,7 @@ public:
     Node( MapNode* mn, int i, int j, int drxn );
     Node( string seq, ReadId id, int32_t estimate, int drxn );
     virtual ~Node() {};
+//    ~Node();
 
     void addEdge( Node* node, bool drxn, bool isLeap=false );
     void addEdge( Node* node, int overlap, bool drxn, bool doOffset=true, bool isLeap=false );
@@ -231,9 +232,9 @@ public:
     bool getNextReadCoord( int32_t &coord, bool coordDrxn, bool readDrxn );
 private:
     void bluntEnd( bool drxn );
-    Node* foldEdge( ExtVars &ev, Node* targetNode, bool drxn );
-    Node* foldEdgeHit( ExtVars &ev, MapResult &result, bool drxn );
-    Node* foldEdgeMiss( ExtVars &ev, Node* targetNode, int32_t limit, bool drxn );
+    NodeSet foldEdge( ExtVars &ev, Node* targetNode, bool drxn );
+    static NodeSet foldEdgeHit( ExtVars &ev, MapResult &result, bool drxn );
+    NodeSet foldEdgeMiss( ExtVars &ev, Node* targetNode, int32_t limit, bool drxn );
     NodeListList foldEdgeGetTargets( Node* targetNode, int32_t* limits, bool drxn );
     Node* foldEnd( ExtVars &ev, Node* altNode, bool drxn );
     Node* foldEndHit( ExtVars &ev, Node* hitNode, MapResult &result, bool drxn );
@@ -289,13 +290,15 @@ public:
     bool islandSetExtendSingle( IslandVars &iv, NodeSet* &extSets, int32_t* cutoffs, int drxns );
     static void islandSetValidate( IslandVars &iv, NodeList &testNodes, NodeSet &tested );
     void mergeIsland( ExtVars &ev, bool drxn, bool trimBack=false );
-    bool overlapExtend( NodeList* nodes, int32_t* coords, NodeList &hitNodes, vector<int32_t>* hitCoords, bool drxn );
+    bool overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, vector<int32_t>* hitCoords, bool subGraph, bool drxn );
     static void reviewMerged( ExtVars &ev, NodeSet &mergeSet, bool drxn );
     static bool seedIslandBridge( IslandVars &iv, vector<IslandRead*> &path, Node* hitNode, int32_t* coords, bool drxn );
     static void seedIslandsClump( IslandVars &iv, vector<ReadMark> &marks, unordered_set<SeqNum> &seeds, bool drxn );
 //    static void seedIslandsClumps( IslandVars &iv, vector<ReadMark> &clumps );
     static bool seedIslandsClumpsCheck( IslandVars &iv, vector<MapNode*> &mns, MapNode* mapNode );
     static bool seedIslandsSingle( IslandVars &iv, ReadMark &mark, unordered_set<SeqNum> &seeds, bool drxn );
+    static void trimIsland( IslandVars &iv, NodeSet &bgnSet );
+    static void trimIsland( IslandVars &iv, NodeSet &fwdSet, NodeSet &hitBckSet, NodeIntMap &hitMap, NodeSet &goodSet );
     bool validate( IslandVars &iv );
 private:
     void addExtension( Extension &ext, IslandVars &iv, bool doesBranch, bool drxn );

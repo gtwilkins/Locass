@@ -79,7 +79,7 @@ struct Path
 {
     void completeSpan( Node* node, bool drxn );
     void getAllelesInSet( vector<Allele> &rAlleles, NodeSet &nodes );
-    void reset( NodeList &nodes );
+    void reset( NodeList forks, bool drxn );
     
     Node* fork;
     NodeList path, convFork;

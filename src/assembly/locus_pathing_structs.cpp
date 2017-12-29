@@ -300,7 +300,7 @@ void Path::getAllelesInSet( vector<Allele> &rAlleles, NodeSet &nodes )
     }
 }
 
-void Path::reset( NodeList &nodes )
+void Path::reset( NodeList forks, bool drxn )
 {
     fork = NULL;
     convergents.clear();
@@ -308,9 +308,16 @@ void Path::reset( NodeList &nodes )
     divergent.clear();
     path.clear();
     
+    NodeSet bckSet;
+    for ( Node* node : forks )
+    {
+        if ( node->drxn_ == 2 ) break;
+        node->getDrxnNodes( bckSet, !drxn );
+    }
+    
     for ( int i = 0; i < spans.size(); )
     {
-        if ( find( nodes.begin(), nodes.end(), spans[i].node ) == nodes.end() )
+        if ( bckSet.find( spans[i].node ) == bckSet.end() )
         {
             spans.erase( spans.begin() + i );
         }

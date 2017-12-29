@@ -216,8 +216,9 @@ struct MapStruct
 
 struct MapResult
 {
-    MapResult(): l( NULL ), r( NULL ), len( 0 ), score( 0 ){};
-    Node* l, * r;
+    MapResult(): len( 0 ), score( 0 ){ node[0] = node[1] = NULL; };
+//    Node* l, * r;
+    Node* node[2];
     int32_t coords[2];
     int32_t len;
     int score;

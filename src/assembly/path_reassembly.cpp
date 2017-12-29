@@ -365,11 +365,6 @@ bool Reassemble::tryBridge( PathVars &pv )
 {
     MapNode* mn = new MapNode();
     
-    if ( est_ == 34808 )
-    {
-        int x = 0;
-    }
-    
     float bestScore = 0;
     unordered_set<ReadId> usedIds; 
     for ( SeqPathReassemble* s : seqs_ )
@@ -494,7 +489,7 @@ bool Reassemble::tryHalf( PathVars &pv, NodeSet &delSet, bool drxn )
         {
             NodeList hitNodes;
             vector<int32_t> hitCoords[2];
-            mn->bridges[drxn][0]->overlapExtend( pv.nds, coords, hitNodes, hitCoords, drxn );
+            mn->bridges[drxn][0]->overlapExtend( pv.nds[pv.drxn], coords, hitNodes, hitCoords, pv.drxn, drxn );
             pv.nds[pv.drxn].push_back( node );
             pv.newSet.insert( node );
             int32_t dummy[2] = { params.locusLimits[0], params.locusLimits[1] };

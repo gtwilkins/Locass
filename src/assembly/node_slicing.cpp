@@ -342,31 +342,6 @@ bool Node::sliceOrBridge( PathVars &pv, Node* target, int32_t coords[2], NodeSet
         return false;
     }
     
-    // Do slice or bridge
-    bool doSetUnreliable = false;
-    if ( hitSet.empty() || didBridge )
-    {
-        int32_t splitCoord = coords[!pv.drxn];
-        if ( target->getNextReadCoord( splitCoord, !pv.drxn, pv.drxn ) )
-        {
-            target = target->splitNode( splitCoord, pv.nds[pv.drxn], pv.drxn, pv.drxn );
-            doSetUnreliable = target->ends_[1] - target->ends_[0] < params.readLen * 2;
-        }
-        else
-        {
-            NodeList hitNodes;
-            vector<int32_t> hitCoords[2];
-            target->overlapExtend( pv.nds, coords, hitNodes, hitCoords, pv.drxn );
-            for ( int i = 0; i < hitNodes.size(); i++ )
-            {
-                addEdge( hitNodes[i], hitCoords[1][i] - hitCoords[0][i], pv.drxn );
-            }
-        }
-        
-        tSet.clear();
-        target->getDrxnNodes( tSet, pv.drxn );
-    }
-    
     if ( didBridge )
     {
         NodeSet mergeSet = iv.merged[!pv.drxn];
@@ -385,15 +360,35 @@ bool Node::sliceOrBridge( PathVars &pv, Node* target, int32_t coords[2], NodeSet
             delete isl;
         }
         
-        inheritEdges( pv.drxn );
         for ( Node* merge : mergeSet ) merge->setValid();
-        didBridge = true;
+        
         return true;
     }
     
     // Do slice
-    else if ( hitSet.empty() )
+    if ( hitSet.empty() )
     {
+        bool doSetUnreliable = false;
+        int32_t splitCoord = coords[!pv.drxn];
+        if ( target->getNextReadCoord( splitCoord, !pv.drxn, pv.drxn ) )
+        {
+            target = target->splitNode( splitCoord, pv.nds[pv.drxn], pv.drxn, pv.drxn );
+            doSetUnreliable = target->ends_[1] - target->ends_[0] < params.readLen * 2;
+        }
+        else
+        {
+            NodeList hitNodes;
+            vector<int32_t> hitCoords[2];
+            target->overlapExtend( pv.nds[pv.drxn], coords, hitNodes, hitCoords, pv.drxn, pv.drxn );
+            for ( int i = 0; i < hitNodes.size(); i++ )
+            {
+                addEdge( hitNodes[i], hitCoords[1][i] - hitCoords[0][i], pv.drxn );
+            }
+        }
+        
+        tSet.clear();
+        target->getDrxnNodes( tSet, pv.drxn );
+        
         NodeSet badSet = getNextNodes( pv.drxn );
         for ( Node* t : tSet )
         {
@@ -407,12 +402,14 @@ bool Node::sliceOrBridge( PathVars &pv, Node* target, int32_t coords[2], NodeSet
                 }
             }
         }
+        
         clearEdges( pv.drxn );
         for ( Node* bad : badSet )
         {
             if ( bad->drxn_ != pv.drxn ) continue;
             bad->dismantleNode( delSet, pv.drxn );
         }
+        
         for ( Node* isl : islands )
         {
             isl->dismantleNode();

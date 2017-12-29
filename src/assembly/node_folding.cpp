@@ -136,51 +136,7 @@ bool Node::foldAlleles( NodeList &nodes, Node* forks[2], NodeList paths[2], Node
                 if ( j+1 < paths[i].size() ) offset += paths[i][j]->seq_.length() - paths[i][j]->getOverlap( paths[i][j+1], 1 );
             }
         }
-//        int32_t coord = abs( paths[pref][0]->getOverlap( forks[0], 0 ) - bestOls[0] );
-//        for ( int i = 0; i < paths[pref].size(); i++ )
-//        {
-//            if ( !i )
-//            {
-//                int ol = forks[0]->getOverlap( paths[pref][0], 1 );
-//                if ( ol < 0 )
-//                {
-//                    node->seq_ += string( -ol, 'N' );
-//                    ol = 0;
-//                }
-//                node->seq_ += paths[pref][0]->seq_.substr( ol );
-//            }
-//            else
-//            {
-//                coord -= paths[pref][i]->getOverlap( paths[pref][i-1], 0 );
-//                node->seq_ += paths[pref][i]->seq_.substr( paths[pref][i-1]->getOverlap( paths[pref][i], 1 ) );
-//            }
-//            for ( auto &read : paths[pref][i]->reads_ )
-//            {
-//                int32_t coords[2] = { coord + read.second[0] - paths[pref][i]->ends_[0]
-//                                    , coord + read.second[1] - paths[pref][i]->ends_[0] };
-//                node->addRead( read.first, coords[0], coords[1], false );
-//            }
-//            coord += paths[pref][i]->seq_.length();
-//        }
         
-//        coord = abs( paths[!pref][0]->getOverlap( forks[0], 0 ) - bestOls[0] );
-//        for ( int i = 0; i < paths[!pref].size(); i++ )
-//        {
-//            if ( i ) coord -= paths[!pref][i]->getOverlap( paths[!pref][i-1], 0 );
-//            for ( auto &read : paths[!pref][i]->reads_ )
-//            {
-//                int32_t coords[2] = { coord + read.second[0] - paths[!pref][i]->ends_[0]
-//                                    , coord + read.second[1] - paths[!pref][i]->ends_[0] };
-//                int diff = coords[1] - node->ends_[1];
-//                if ( diff > 0 )
-//                {
-//                    coords[0] -= diff;
-//                    coords[1] -= diff;
-//                }
-//                node->addRead( read.first, coords[0], coords[1], false );
-//            }
-//            coord += paths[!pref][i]->seq_.length();
-//        }
         paths[0][0]->clearEdges( 0 );
         paths[0].back()->clearEdges( 1 );
         paths[1][0]->clearEdges( 0 );
@@ -208,7 +164,7 @@ void Node::foldBranch( NodeList &nodes, Node* merges[2], int32_t coords[2], int 
     merges[!drxn]->addEdge( merges[drxn], ol, drxn );
 }
 
-Node* Node::foldEdge( ExtVars &ev, Node* targetNode, bool drxn )
+NodeSet Node::foldEdge( ExtVars &ev, Node* targetNode, bool drxn )
 {
     assert( targetNode->ends_[0] <= targetNode->validLimits_[0] && targetNode->validLimits_[3] <= targetNode->ends_[1] );
     validLimits_[3*(!drxn)] = drxn ? max( min( validLimits_[0], ends_[1] - params.readLen ), ends_[0] )
@@ -227,83 +183,114 @@ Node* Node::foldEdge( ExtVars &ev, Node* targetNode, bool drxn )
         }
     }
     
-    if ( result.l && result.r )
+    if ( result.node[0] && result.node[1] )
     {
-        return ( drxn ? result.r : result.l )->foldEdgeHit( ev, result, drxn );
+        return Node::foldEdgeHit( ev, result, drxn );
     }
     else if ( drxn ? targetNode->validLimits_[3] - validLimits_[0] < params.readLen * 3
                    : validLimits_[3] - targetNode->validLimits_[0] < params.readLen * 3 )
     {
         return foldEdgeMiss( ev, targetNode, validLimits_[(!drxn) * 3], drxn );
     }
-    return NULL;
+    return NodeSet();
 }
 
-Node* Node::foldEdgeHit( ExtVars &ev, MapResult &result, bool drxn )
+NodeSet Node::foldEdgeHit( ExtVars &ev, MapResult &result, bool drxn )
 {
-    // Truncate island end if necessary
-    assert( foldPrep( ev, result.coords[drxn], result.len, true, !drxn ) );
+    NodeList hitNodes[2];
+    vector<int32_t> hitCoords[2][2];
+    NodeSet bridgeSet;
     
-    // Prep and edge target
-    if ( ( drxn ? result.l : result.r )->foldPrep( ev, result.coords[!drxn], result.len, true, drxn ) )
+    for ( int i : { drxn, !drxn } )
     {
-        ( drxn ? result.l : result.r )->addEdge( this, result.len, drxn, false, result.len <= 0 );
-    }
-    else
-    {
-        for ( Edge &e : ( drxn ? result.l : result.r )->edges_[drxn] )
+        int32_t coords[2] = { result.coords[i], result.coords[i] };
+        coords[i] = i ? coords[0] + params.readLen : coords[1] - params.readLen;
+        if ( !result.node[i]->overlapExtend( ( result.node[i]->drxn_ > 2 ? ev.island : ev.nodes ), coords, hitNodes[i], hitCoords[i], drxn, i ) )
         {
-            int len = result.len - abs( result.coords[!drxn] - ( drxn ? result.l : result.r )->ends_[drxn] ) + e.overlap;
-            e.node->addEdge( this, len, drxn, false, len <= 0 || e.isLeap );
+            return bridgeSet;
+        }
+        for ( int j = 0; j < hitNodes[i].size(); j++ )
+        {
+            hitCoords[i][i][j] += i ? result.len - params.readLen : params.readLen - result.len;
         }
     }
     
-    return ( edges_[!drxn].empty() ? NULL : this );
+    for ( int i = 0; i < hitNodes[drxn].size(); i++ )
+    {
+        hitNodes[drxn][i]->clearEdges( !drxn );
+        for ( int j = 0; j < hitNodes[!drxn].size(); j++ )
+        {
+            int overlap = min( hitCoords[drxn][1][i] - hitCoords[drxn][0][i], hitCoords[!drxn][1][j] - hitCoords[!drxn][0][j] );
+            hitNodes[!drxn][j]->addEdge( hitNodes[drxn][i], overlap, drxn, true, overlap < 0 );
+        }
+        bridgeSet.insert( hitNodes[drxn][i] );
+    }
+    
+    assert( !bridgeSet.empty() );
+    return bridgeSet;
 }
 
-Node* Node::foldEdgeMiss( ExtVars &ev, Node* targetNode, int32_t limit, bool drxn )
+NodeSet Node::foldEdgeMiss( ExtVars &ev, Node* targetNode, int32_t limit, bool drxn )
 {
     // Prep if necessary
     int dummy = 0;
-    assert( foldPrep( ev, ends_[!drxn], dummy, true, !drxn ) );
-    if ( drxn ? ends_[0] <= targetNode->ends_[1] : targetNode->ends_[0] <= ends_[1] )
-    {
-        assert( foldPrep( ev, limit, dummy, true, !drxn ) );
-        assert( targetNode->foldPrep( ev, targetNode->validLimits_[drxn*3], dummy, true, drxn ) );
-    }
-    
-    // Blunt if necessary
-//    if ( drxn ? ends_[0] <= targetNode->ends_[1] : targetNode->ends_[0] <= ends_[1] )
-//    {
-//        bluntEnd( !drxn );
-//        if ( targetNode->edges_[drxn].empty() )
-//        {
-//            targetNode->bluntEnd( drxn );
-//        }
-//    }
+    foldPrep( ev, limit, dummy, true, !drxn );
+    targetNode->foldPrep( ev, targetNode->validLimits_[drxn*3], dummy, true, drxn );
     
     // Add leap edge
-    if ( drxn ? targetNode->ends_[1] < ends_[0] : ends_[1] < targetNode->ends_[0] )
+    NodeSet bridgeSet;
+    int overlap = drxn ? targetNode->ends_[1] - ends_[0] : ends_[1] - targetNode->ends_[0];
+    if ( overlap < params.readLen )
     {
-        int overlap = drxn ? targetNode->ends_[1] - ends_[0] : ends_[1] - targetNode->ends_[0];
-        targetNode->addEdge( this, overlap, drxn, false, true );
+        targetNode->addEdge( this, overlap, drxn, true, true );
+        bridgeSet.insert( this );
     }
-    else if ( abs( targetNode->ends_[drxn] - ends_[!drxn] ) < params.readLen * 2 && !targetNode->clones_ )
+    else
     {
-        int32_t qLen = seq_.length() - getBestOverlap( drxn );
-        int32_t tLen = targetNode->seq_.length() - targetNode->getBestOverlap( !drxn );
-        int overlap = min( min( qLen, tLen ), max( 30, abs( targetNode->ends_[drxn] - ends_[!drxn] ) ) );
-        if ( overlap < 30 )
+        NodeList edgeNodes[2];
+        for ( int i : { 0, 1 } )
         {
-            blankEnd( min( 30, qLen ), !drxn );
-            targetNode->blankEnd( min( 30, tLen ), drxn );
-            overlap = max( 0, 30 - min( qLen, tLen ) );
+            Node* node = drxn == i ? this : targetNode;
+            int32_t coord = node->ends_[i];
+            for ( auto &read : node->reads_ )
+            {
+                if ( i == drxn )
+                {
+                    if ( read.second[!i] == node->ends_[!i] ) continue;
+                    coord = i ? min( coord, read.second[0] ) : max( coord, read.second[1] );
+                }
+                else
+                {
+                    coord = drxn ? max( coord, read.second[0] ) : min( coord, read.second[1] );
+                }
+            }
+            if ( coord != node->ends_[i] )
+            {
+                Node* split = node->splitNode( coord, ( node->drxn_ > 2 ? ev.island : ev.nodes ), drxn, drxn );
+                edgeNodes[i].push_back( i == drxn ? split : node );
+            }
+            else
+            {
+                for ( Node* nxt : node->getNextNodes( i ) ) edgeNodes[i].push_back( nxt );
+            }
         }
-
-        targetNode->addEdge( this, overlap, drxn, false, true );
+        
+        for ( int i = 0; i < edgeNodes[!drxn].size(); i++ )
+        {
+            for ( int j = 0; j < edgeNodes[drxn].size(); j++ )
+            {
+                int overlap = edgeNodes[0][ drxn ? i : j ]->ends_[1] - edgeNodes[1][drxn ? j : i ]->ends_[0];
+                if ( overlap < params.readLen )
+                {
+                    edgeNodes[drxn][j]->clearEdges( !drxn );
+                    edgeNodes[!drxn][i]->addEdge( edgeNodes[drxn][j], overlap, drxn, false, true );
+                    bridgeSet.insert( edgeNodes[drxn][j] );
+                }
+            }
+        }
     }
     
-    return ( edges_[!drxn].empty() ? NULL : this );
+    return bridgeSet;
 }
 
 NodeListList Node::foldEdgeGetTargets( Node* targetNode, int32_t* limits, bool drxn )
@@ -369,9 +356,9 @@ Node* Node::foldEnd( ExtVars &ev, Node* altNode, bool drxn )
         }
     }
     
-    if ( result.l && result.r )
+    if ( result.node[0] && result.node[1] )
     {
-        return ( drxn ? result.l : result.r )->foldEndHit( ev, ( drxn ? result.r : result.l ), result, drxn );
+        return result.node[!drxn]->foldEndHit( ev, result.node[drxn], result, drxn );
     }
     else if ( !altPath.empty() )
     {
@@ -895,7 +882,7 @@ bool Node::foldPrep( ExtVars &ev, int32_t coord, int &overlap, bool isEnd, bool 
             }
         }
         
-        if ( splitCoord != ends_[drxn] )
+        if ( splitCoord != ends_[!drxn] )
         {
             splitNode( splitCoord, ( drxn_ <= 2 ? ev.nodes : ev.island ), ( drxn_ <= 2 ? drxn : !drxn ), drxn );
             overlap -= abs( coord - ends_[drxn] );
@@ -1229,7 +1216,7 @@ void Node::mapFold( MapResult &result, MapStruct &q, MapStruct &t, int32_t distW
     MapStruct* l = drxn ? &t : &q;
     MapStruct* r = drxn ? &q : &t;
     int iBest = -1, jBest = -1, bestLen = 0;
-    bool isSet = result.l && result.r;
+    bool isSet = result.node[0] && result.node[1];
     
     mapSeqs( *l, *r, result.score, iBest, jBest, bestLen, minLen, distWiggle, fixedDist, isSet );
     
@@ -1287,8 +1274,8 @@ void Node::mapSeqs( MapStruct &l, MapStruct &r, int &bestScore, int &iBest, int 
 
 void Node::mapSetResult( MapResult &result, MapStruct &l, MapStruct &r, int iBest, int jBest, int len )
 {
-    result.l = l.nodes[0];
-    result.r = r.nodes[0];
+    result.node[0] = l.nodes[0];
+    result.node[1] = r.nodes[0];
     result.coords[0] = l.coord + iBest + 1;
     result.coords[1] = r.coord - r.len + ( jBest - len + 1 );
     result.len = len;
@@ -1306,14 +1293,14 @@ void Node::mapSetResult( MapResult &result, MapStruct &l, MapStruct &r, int iBes
         else
         {
             result.coords[0] += offset;
-            result.l = l.nodes[i];
+            result.node[0] = l.nodes[i];
         }
     }
     
-    if ( result.l->ends_[1] < result.coords[0] )
+    if ( result.node[0]->ends_[1] < result.coords[0] )
     {
-        result.len -= result.coords[0] - result.l->ends_[1];
-        result.coords[0] = result.l->ends_[1];
+        result.len -= result.coords[0] - result.node[0]->ends_[1];
+        result.coords[0] = result.node[0]->ends_[1];
     }
     
     for ( int i ( 1 ); i < r.nodes.size(); i++ )
@@ -1329,14 +1316,14 @@ void Node::mapSetResult( MapResult &result, MapStruct &l, MapStruct &r, int iBes
         else
         {
             result.coords[1] += offset;
-            result.r = r.nodes[i];
+            result.node[1] = r.nodes[i];
         }
     }
     
-    if ( result.coords[1] < result.r->ends_[0] )
+    if ( result.coords[1] < result.node[1]->ends_[0] )
     {
-        result.len -= result.r->ends_[0] - result.coords[1];
-        result.coords[1] = result.r->ends_[0];
+        result.len -= result.node[1]->ends_[0] - result.coords[1];
+        result.coords[1] = result.node[1]->ends_[0];
     }
 }
 
