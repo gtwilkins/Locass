@@ -163,7 +163,7 @@ Assemble::Assemble( int argc, char** argv )
     int locusCount = 0, seedCount = 0;
     for ( int i = 0; i < seqs.size(); i++ )
     {
-//        if ( i < 79 ) continue;
+//        if ( i < 49 ) continue;
         cout << "Assembling locus " << to_string( i + 1 ) << " of " << to_string( seqs.size() ) << endl;
         cout << "\tSearching for target loci... " << endl;
         Seed seed( headers[i], seqs[i], bwt, errorCount );

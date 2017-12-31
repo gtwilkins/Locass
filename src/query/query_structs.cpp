@@ -75,3 +75,21 @@ void MappedSeqs::sort()
         return a.coords[0] == b.coords[0] ? a.coords[1] > b.coords[1] : a.coords[0] < b.coords[0];
     });
 }
+
+void MappedSeqs::updateTethers( string &seq )
+{
+    for ( ReadStruct &read : reads )
+    {
+        while ( read.tether[0] > read.coords[0] 
+                && seq[read.tether[0]-1] == read.seq[ read.tether[0]-1 - read.coords[0] ] )
+        {
+            read.tether[0]--;
+        }
+        while ( read.tether[1] < seq.length() 
+                && read.tether[1] < read.coords[1]
+                && read.seq[ read.tether[1] - read.coords[0] ] == seq[ read.tether[1] ] )
+        {
+            read.tether[1]++;
+        }
+    }
+}

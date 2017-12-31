@@ -439,6 +439,12 @@ void Node::resolveLoops( ExtVars &ev, bool drxn )
         it++;
     }
     
+    for ( auto it = ev.cloneSet.begin(); it != ev.cloneSet.end(); )
+    {
+        if ( ev.del.find( *it ) == ev.del.end() ) it++;
+        else it = ev.cloneSet.erase( it );
+    }
+    
     if ( ev.cloneSet.empty() ) return;
     
     LoopVars lv;
@@ -470,6 +476,15 @@ void Node::resolveLoops( ExtVars &ev, bool drxn )
         ev.cloneSet.erase( node );
     }
     
+    if ( lv.startList.empty() && !ev.cloneSet.empty() )
+    {
+        for ( Node* node : ev.cloneSet )
+        {
+            node->dismantleNode( ev.del, drxn );
+        }
+        ev.cloneSet.clear();
+        return;
+    }
     assert( !lv.startList.empty() && lv.startList.size() <= 2 );
     
     Node::loop( lv, ev, drxn );

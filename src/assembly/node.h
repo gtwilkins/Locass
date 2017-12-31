@@ -118,6 +118,7 @@ private:
     static void bridgeIslandSetEndSets( IslandVars &iv, NodeList &mainEnds, NodeList &islandEnds, NodeSetList &mainSets, NodeSet &islandShared );
     static bool bridgeIslandSetOffsets( IslandVars &iv, NodeList &islandEnds, NodeList &tNodes );
     void bridgeIslandTrimEnd( ExtVars &ev, int32_t coord, bool doTruncate, bool drxn );
+    void cloneBridge( PathVars &pv, NodeList &hitNodes );
     
 // NodeBypassing
 public:

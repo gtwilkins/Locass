@@ -67,6 +67,8 @@ bool Node::foldAlleles( NodeList &nodes, Node* forks[2], NodeList paths[2], Node
     {
         for ( int j = 0; j < paths[i].size(); j++ )
         {
+            if ( paths[i][j]->edges_[0].size() > 1 ) return false;
+            if ( paths[i][j]->edges_[1].size() > 1 ) return false;
             reads[i] += paths[i][j]->reads_.size();
             minOl[i] = min( minOl[i], paths[i][j]->getBestOverlap( 0 ) );
             minOl[i] = min( minOl[i], paths[i][j]->getBestOverlap( 1 ) );
@@ -113,6 +115,7 @@ bool Node::foldAlleles( NodeList &nodes, Node* forks[2], NodeList paths[2], Node
         
         // Add reads to node
         // Reads are added as offset from their closest path end
+        int32_t readLimits[2] = { node->ends_[1], node->ends_[0] };
         for ( int i : { 0, 1 } )
         {
             int32_t offset = bestOls[0] - forks[0]->getOverlap( paths[i][0], 1 );
@@ -130,6 +133,8 @@ bool Node::foldAlleles( NodeList &nodes, Node* forks[2], NodeList paths[2], Node
                         readCoords[1] = node->seq_.length() - fromEnds[1];
                         readCoords[0] = readCoords[1] - ( read.second[1] - read.second[0] );
                     }
+                    readLimits[0] = min( readLimits[0], readCoords[0] );
+                    readLimits[1] = max( readLimits[1], readCoords[1] );
                     node->addRead( read.first, readCoords[0], readCoords[1], i != pref );
                     assert( fromEnds[0] >= 0 && fromEnds[1] >= 0 );
                 }
@@ -137,6 +142,19 @@ bool Node::foldAlleles( NodeList &nodes, Node* forks[2], NodeList paths[2], Node
             }
         }
         
+        int32_t limitDiffs[2] ={ readLimits[0] - node->ends_[0], node->ends_[1] - readLimits[1] };
+        if ( limitDiffs[0] )
+        {
+            node->seq_ = node->seq_.substr( limitDiffs[0] );
+            bestOls[0] -= limitDiffs[0];
+            node->ends_[0] += limitDiffs[0];
+        }
+        if ( limitDiffs[1] )
+        {
+            node->seq_ = node->seq_.substr( 0, node->seq_.length() - limitDiffs[0] );
+            bestOls[1] -= limitDiffs[1];
+            node->ends_[1] -= limitDiffs[1];
+        }
         paths[0][0]->clearEdges( 0 );
         paths[0].back()->clearEdges( 1 );
         paths[1][0]->clearEdges( 0 );
@@ -185,6 +203,7 @@ NodeSet Node::foldEdge( ExtVars &ev, Node* targetNode, bool drxn )
     
     if ( result.node[0] && result.node[1] )
     {
+        if ( result.node[!drxn]->drxn_ == !drxn  ) return NodeSet();
         return Node::foldEdgeHit( ev, result, drxn );
     }
     else if ( drxn ? targetNode->validLimits_[3] - validLimits_[0] < params.readLen * 3

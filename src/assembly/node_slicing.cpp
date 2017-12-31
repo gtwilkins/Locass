@@ -280,9 +280,8 @@ bool Node::sliceOrBridge( PathVars &pv, Node* target, int32_t coords[2], NodeSet
                 if ( merge->getBiggestOffset( !pv.drxn ) < params.readLen * 2 ) mergeSet.insert( merge );
                 else
                 {
-                    assert( false );
                     merge->clearEdges( !pv.drxn );
-                    merge->stop( 1, pv.drxn );
+                    merge->stop( 1, !pv.drxn );
                 }
             }
             iv.merged[!pv.drxn] = mergeSet;

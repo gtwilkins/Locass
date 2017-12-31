@@ -487,10 +487,6 @@ bool Locus::leapSetIslandClumps( IslandVars &iv, vector<ReadMark> &peClumps, uno
 //    }
     for ( ReadMark &mark : peClumps )
     {
-        if ( mark.id == 578317239 )
-        {
-            int x = 0;
-        }
         Node::seedIslandsSingle( iv, mark, readIds, iv.drxn );
         leptReads_[iv.drxn].insert( mark.id );
         locusTest();

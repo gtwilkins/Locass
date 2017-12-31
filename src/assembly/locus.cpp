@@ -169,6 +169,10 @@ void Locus::locusTest()
                 assert( node->ends_[0] <= read.second[0] && read.second[1] <= node->ends_[1] );
             }
             assert( ended[0] && ended[1] );
+            if ( i == 0 && node->edges_[1].empty() )
+            {
+                int x = 0;
+            }
             if ( i == 0 ) assert( !node->edges_[1].empty() );
             if ( i == 1 ) assert( !node->edges_[0].empty() );
             for ( bool drxn : { 0, 1 } )
@@ -178,14 +182,18 @@ void Locus::locusTest()
                 {
 //                    assert( drxn != node->drxn_ || node->drxn_ != 1 || e.node->drxn_ == 1 );
 //                    assert( drxn != node->drxn_ || node->drxn_ != 0 || e.node->drxn_ == 0 );
+                    if ( i == 1 || i == 0 )
+                    {
+                        assert( e.node->drxn_ != i || find( nodes_[i].begin(), nodes_[i].end(), e.node ) != nodes_[i].end() );
+                    }
                     bool found = false;
                     int k = 0;
                     for ( Edge &e2 : e.node->edges_[!drxn] )
                     {
                         if ( e2.node == node ) found = true;
-                        assert( k++ < 15 );
+                        assert( k++ < 30 );
                     }
-                    assert( j < 15 );
+                    assert( j < 30 );
                     assert( found );
                     j++;
                 }

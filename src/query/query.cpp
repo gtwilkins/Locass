@@ -445,6 +445,7 @@ MappedSeqs Querier::mapSeed( string &seq, int errorRate, bool bestMatch )
         mapSeed( qs, 0, 1 );
     }
     
+    ms.updateTethers( seq );
     if ( bestMatch )
     {
         ms.setBest( seq );

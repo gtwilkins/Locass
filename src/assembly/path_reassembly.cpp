@@ -193,7 +193,7 @@ void Reassemble::map( PathVars &pv )
     for ( SeqPathReassemble* seq : seqs_ ) seq->setEdges();
 }
 
-bool Reassemble::reassemble( PathVars &pv, NodeSet &delSet )
+bool Reassemble::reassemble( PathVars &pv, NodeSet &delSet, bool isAlleleFork )
 {
     if ( !doesSpanOrigin( pv ) )
     {
@@ -208,8 +208,8 @@ bool Reassemble::reassemble( PathVars &pv, NodeSet &delSet )
         removeDubious( pv );
         if ( !invalid_ && tryGap( pv ) ) return true;
         if ( tryMap( pv ) ) return true;
-        if ( trySlice( pv, delSet ) ) return true;
-        assert( false );
+        
+        return trySlice( pv, delSet, isAlleleFork );
     }
     
     return false;
@@ -596,7 +596,7 @@ bool Reassemble::tryMap( PathVars &pv )
     return didMap;
 }
 
-bool Reassemble::trySlice( PathVars &pv, NodeSet &delSet )
+bool Reassemble::trySlice( PathVars &pv, NodeSet &delSet, bool isAlleleFork )
 {
 //    bool misassembled = fork_->isMisassembledRev( markLimits_, pv.drxn );
 //    if ( !misassembled )
@@ -607,17 +607,22 @@ bool Reassemble::trySlice( PathVars &pv, NodeSet &delSet )
 //    if ( fork_->slice( pv, misassembled, pv.drxn ) ) return true;
     int32_t coord = markLimits_[!pv.drxn] + ( pv.drxn ? -params.readLen / 2 : params.readLen / 2 );
     coord = pv.drxn ? max( coord, fork_->ends_[0] ) : min( coord, fork_->ends_[1] );
+    assert( fork_->drxn_ != 2 );
     Node* node = fork_;
     if ( fork_->getNextReadCoord( coord, !pv.drxn, pv.drxn ) )
     {
         node = node->splitNode( coord, pv.nds[pv.drxn], pv.drxn, pv.drxn );
+        if ( isAlleleFork ) node->setUnreliable();
+        else node->dismantleNode( delSet, pv.drxn );
+        return true;
     }
     
-    node->dismantleNode( delSet, pv.drxn );
-//    else
-//    {
-//        node->setUnreliable();
-//        assert( false );
-//    }
+    if ( isAlleleFork ) return false;
+    
+    for ( Node* nxt : node->getNextNodes( pv.drxn ) )
+    {
+        nxt->dismantleNode( delSet, pv.drxn );
+    }
+    
     return true;
 }

@@ -244,6 +244,8 @@ bool Node::isMisassembled( PathVars &pv, bool drxn )
 
 bool Node::isMisassembled( PathVars &pv, Node* farFork, NodeSet &forkSet, bool drxn )
 {
+    if ( !reliable_ ) return false;
+    
     vector<int32_t> marks, ests;
     int32_t cutoff = ends_[drxn] + ( drxn ? params.maxPeMean : -params.maxPeMean );
     Node* curr = farFork->isReliable() ? farFork : NULL;

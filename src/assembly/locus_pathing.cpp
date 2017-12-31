@@ -115,12 +115,7 @@ bool Locus::plotPath( Path &path, bool drxn )
     if ( !pv.rerun )
     {
         // Prune weak divergent branches and set side nodes
-        NodeSet goodSet, delSet;
-    //    plotPathTrimPrep( pv, path, drxn );
-//        plotPathTrimDivergent( pv, path, goodSet, delSet, drxn );
-//        plotPathTrimEnds( pv, best, branches, goodSet, delSet, drxn );
-        deleteNodes( delSet, goodSet, drxn );
-        delSet.clear();
+        NodeSet delSet;
         locusTest();
         PathReview review( pv, path.path, reliable_, forkLimits_, finished_[!drxn] );
         pv.rerun = !review.review( path, sideNodes_[drxn], delSet );
@@ -1192,6 +1187,15 @@ void Locus::plotPathUpdateFork( PathVars &pv, Path &path, bool drxn )
     {
         forkNodes_[drxn] = originEnds_[drxn];
         return;
+    }
+    
+    for ( auto it = pv.newSet.begin(); it != pv.newSet.end(); )
+    {
+        if ( find( nodes_[drxn].begin(), nodes_[drxn].end(), *it ) == nodes_[drxn].end() )
+        {
+            it = pv.newSet.erase( it );
+        }
+        else it++;
     }
     
     if ( pv.newSet.empty() ) return;

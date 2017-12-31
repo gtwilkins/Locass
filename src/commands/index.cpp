@@ -26,6 +26,7 @@
 #include <cassert>
 #include <algorithm>
 #include <fstream>
+#include <unistd.h>
 
 Index::Index( int argc, char** argv )
 {
@@ -64,7 +65,20 @@ Index::Index( int argc, char** argv )
                 cerr << "Error: more than one output prefix provided." << endl;
                 exit( EXIT_FAILURE );
             }
-            fns = new PreprocessFiles( argv[i+1] );
+            string prefix = argv[i+1];
+            if ( prefix[0] != '/' )
+            {
+                string curr = getcwd( NULL, 0 );
+                if ( !prefix.empty() && prefix[0] == '.' ) prefix = prefix.substr( 1 );
+                if ( !prefix.empty() && prefix[0] != '/' ) prefix = "/" + prefix;
+                if ( prefix.empty() || curr.empty() )
+                {
+                    cerr << "Invalid file prefix. Please use the absolute path." << endl;
+                }
+                prefix = curr + prefix;
+            }
+            
+            fns = new PreprocessFiles( prefix );
             i += 2;
         }
         else if ( !strcmp( argv[i], "--resume" ) )

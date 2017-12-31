@@ -35,6 +35,7 @@ struct MappedSeqs
     MappedSeqs(){};
     void setBest( string &seq );
     void sort();
+    void updateTethers( string &seq );
     vector<int32_t> chunks;
     vector<ReadStruct> reads;
     unordered_set<SeqNum> usedIds;

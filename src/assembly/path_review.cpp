@@ -58,19 +58,18 @@ PathReview::PathReview( PathVars &pv, NodeList &path, int32_t* reliable, int32_t
 
 bool PathReview::review( Path &path, NodeList &sideNodes, NodeSet &delSet )
 {
-    if ( path_.back()->ends_[0] < -45866 )
-    {
-        int x = 0;
-    }
     bool assembled = resolveForks( delSet );
     assembled = resolveEnd( delSet ) && assembled;
     assembled = resolveMisassembly( delSet ) && assembled;
     if ( resolveUnspanned( path, delSet ) ) assembled = false;
     
+    // Set new fork
     if ( fork_ && delSet.find( path.fork ) == delSet.end() ) path.fork = fork_;
     
+    // Update status of spans and remove invalid ones
     if ( assembled && path.fork ) reviewSpans( path );
     
+    // Assign divergent branches to be extended
     for ( Node* node : sideSet_ )
     {
         if ( delSet.find( node ) == delSet.end() ) sideNodes.push_back( node );
@@ -82,7 +81,8 @@ bool PathReview::review( Path &path, NodeList &sideNodes, NodeSet &delSet )
         else i++;
     }
     
-    if ( delSet.find( path.path.back() ) != delSet.end() ) assembled = false;
+    for ( Node* node : path.path ) if ( delSet.find( node ) != delSet.end() ) assembled = false;
+    
     
     return assembled;
 }
@@ -92,7 +92,6 @@ bool PathReview::resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged )
     if ( find( con.paths[0].begin(), con.paths[0].end(), truncate_ ) != con.paths[0].end()
             || find( con.paths[1].begin(), con.paths[1].end(), truncate_ ) != con.paths[1].end() )
     {
-        assert( false );
         return false;
     }
     
@@ -118,11 +117,12 @@ bool PathReview::resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged )
     // Detect misassembly
     NodeSet forkSet( con.paths[0].begin(), con.paths[0].end() );
     forkSet.insert( con.paths[1].begin(), con.paths[1].end() );
+    bool misassembled = false;
     if ( cover < params.cover * 1.5 && con.forks[!drxn_]->isMisassembled( pv_, con.forks[drxn_], forkSet, drxn_ ) )
     {
         Reassemble re( con.forks[!drxn_], pv_, false );
-        if ( re.reassemble( pv_, delSet ) ) return false;
-        return true;
+        if ( re.reassemble( pv_, delSet, true ) ) return false;
+        misassembled = true;
     }
     
     // Characterize alleles
@@ -227,9 +227,7 @@ bool PathReview::resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged )
                                                                    : params.maxPeMean - params.readLen );
             Reassemble re( con.paths[!pref][0], pv_, false );
             if ( re.reassemble( pv_, delSet ) ) return false;
-            assert( false );
         }
-        assert( badness < 0.5 );
     }
     
     return true;
@@ -739,12 +737,13 @@ bool PathReview::resolveForks( NodeSet &delSet )
             }
             
         }
-        if ( doErase )
+        if ( !drxn_ ) for ( Node* node : pv_.nds[1] ) assert( !node->edges_[0].empty() );
+        if ( doErase || delSet.find( divs_[i].path[0] ) != delSet.end() )
         {
             divs_[i].path[0]->dismantleNode( delSet, drxn_ );
             divs_.erase( divs_.begin() + i );
         } 
-        else if ( !divs_[i].doesContinue && dist > 0 )
+        else if ( !divs_[i].doesContinue && dist > 0 && delSet.find( divs_[i].path.back() ) == delSet.end() )
         {
             PathMerge merge( divs_[i].fork, divs_[i].path, pathSet_, drxn_ );
             if ( merge.merge( pv_, delSet, drxn_ ) )

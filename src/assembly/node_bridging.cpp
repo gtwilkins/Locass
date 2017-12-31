@@ -70,10 +70,8 @@ bool Node::bridgeIsland( IslandVars &iv, NodeSetList &islandSets )
     if ( !islandEnds.empty() )
     {
         NodeSet endSet( islandEnds.begin(), islandEnds.end() );
-        if ( iv.limit > 25000 )
-        {
-            Node::trimIsland( iv, endSet );
-        }
+        Node::trimIsland( iv, endSet );
+        
         NodeList mainEnds = Node::bridgeIslandGetMainEnds( iv, peSet, tLimits );
         
         if ( !mainEnds.empty() )
@@ -1342,6 +1340,70 @@ bool Node::bridgeIslandSetOffsets( IslandVars &iv, NodeList &islandEnds, NodeLis
     return !islandEnds.empty();
 }
 
+void Node::cloneBridge( PathVars &pv, NodeList &hitNodes )
+{
+    NodeSet bckSet = getDrxnNodes( !pv.drxn );
+    NodeSet currSet;
+    unordered_map<Node*, Node*> nodeMap; 
+    
+    for ( Node* &hit : hitNodes )
+    {
+        if ( bckSet.find( hit ) == bckSet.end() ) continue;
+        hit->clearPairsForward( pv.drxn );
+        Node* clone = new Node( hit );
+        pv.nds[pv.drxn].push_back( clone );
+        nodeMap.insert( make_pair( hit, clone ) );
+        currSet.insert( hit );
+        hit = clone;
+    }
+    
+    if ( currSet.empty() ) return;
+    
+    while ( !currSet.empty() )
+    {
+        NodeSet nxtSet;
+        for ( Node* curr : currSet )
+        {
+            assert( nodeMap.find( curr ) != nodeMap.end() );
+            Node* clone = nodeMap[curr];
+            
+            for ( Edge &e : curr->edges_[pv.drxn] )
+            {
+                if ( bckSet.find( e.node ) == bckSet.end() ) continue;
+                Node* cloneEdge = NULL;
+                auto it = nodeMap.find( e.node );
+                if ( it != nodeMap.end() ) cloneEdge = it->second;
+                else
+                {
+                    cloneEdge = new Node( e.node );
+                    pv.nds[pv.drxn].push_back( cloneEdge );
+                    nxtSet.insert( e.node );
+                    nodeMap[e.node] = cloneEdge;
+                }
+                clone->addEdge( cloneEdge, e.overlap, pv.drxn, false, e.isLeap );
+            }
+        }
+        currSet = nxtSet;
+    }
+    
+    for ( Node* prv : getNextNodes( !pv.drxn ) )
+    {
+        auto it = nodeMap.find( prv );
+        if ( it == nodeMap.end() ) assert( false );
+        for ( int i = 0; i < prv->edges_[pv.drxn].size(); )
+        {
+            if ( prv->edges_[pv.drxn][i].node == this ) i++;
+            else
+            {
+                Node* clone = it->second;
+                clone->addEdge( prv->edges_[pv.drxn][i].node, prv->edges_[pv.drxn][i].overlap, pv.drxn, false, prv->edges_[pv.drxn][i].isLeap );
+                prv->edges_[pv.drxn][i].node->removeEdge( prv, !pv.drxn );
+                prv->edges_[pv.drxn].erase( prv->edges_[pv.drxn].begin() + i );
+            }
+        }
+    }
+}
+
 bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
 {
     pv.bwt.mapSequence( mn->seq, mn->ids, mn->coords );
@@ -1350,14 +1412,11 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
     int32_t coords[2] = { mn->bridgeCoords[0][0], mn->bridgeCoords[1][0] };
     NodeList hitNodes[2];
     vector<int32_t> hitCoords[2][2];
-    NodeSet cloneSet, reachacble;
     for ( int i : { 0, 1 } )
     {
         int32_t iCoords[2]{ coords[i], coords[i] };
         iCoords[i] = iCoords[!i] + ( i ? mn->bridgeOverlaps[i][0] : -mn->bridgeOverlaps[i][0] );
         mn->bridges[i][0]->overlapExtend( pv.nds[pv.drxn], iCoords, hitNodes[i], hitCoords[i], pv.drxn, i );
-        reachacble = target->getDrxnNodes( pv.drxn, true, true );
-        target->getDrxnNodes( reachacble, !pv.drxn, true );
         for ( int j = 0; j < hitNodes[i].size(); )
         {
             if ( hitNodes[i][j]->drxn_ == !pv.drxn )
@@ -1368,12 +1427,7 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
                 hitCoords[i][1].erase( hitCoords[i][1].begin() + j );
                 if ( hitNodes[i].empty() ) return false;
             }
-            else
-            {
-                cloneSet.insert( hitNodes[i][j] );
-                hitNodes[i][j]->getDrxnNodes( cloneSet, i );
-                j++;
-            }
+            else j++;
         }
     }
     
@@ -1383,6 +1437,16 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
     setBridge( pv, newSet, nodes, overlaps, mn, pv.drxn );
     if ( !nodes.empty() )
     {
+        NodeSet cloneSet;
+        for ( int i : { 0, 1 } )
+        {
+            for ( int j = 0; j < hitNodes[i].size(); j++ )
+            {
+                hitNodes[i][j]->getDrxnNodes( cloneSet, i, true );
+                cloneSet.insert( hitNodes[i][j] );
+            }
+        }
+        
         if ( !pv.drxn )
         {
             reverse( nodes.begin(), nodes.end() );
@@ -1397,12 +1461,11 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
                 {
                     node = new Node( node );
                     newSet.insert( node );
-                    assert( false );
+                    pv.nds[pv.drxn].push_back( node );
                 }
                 else
                 {
                     node->clearEdges( !pv.drxn );
-                    reachacble.insert( node );
                     if ( node->drxn_ > 2 )
                     {
                         node->clearEdges( pv.drxn );
@@ -1426,22 +1489,20 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
                 hitNodes[pv.drxn][j]->removeEdge( hitNodes[!pv.drxn][i], !pv.drxn );
             }
         }
+        
         for ( int i = 0; i < overlaps.size(); i++ )
         {
             nodes[i]->addEdge( nodes[i+1], overlaps[i], pv.drxn );
         }
+        
+        nodes[0]->cloneBridge( pv, hitNodes[pv.drxn] );
+        
         for ( int i = 0; i < hitNodes[pv.drxn].size(); i++ )
         {
-            NodeSet fwdSet = nodes.back()->getDrxnNodes( pv.drxn );
-            if ( fwdSet.find( hitNodes[pv.drxn][i] ) == fwdSet.end() )
-            {
-                nodes.back()->addEdge( hitNodes[pv.drxn][i], hitCoords[pv.drxn][1][i] - hitCoords[pv.drxn][0][i], pv.drxn );
-            }
+            nodes.back()->addEdge( hitNodes[pv.drxn][i], hitCoords[pv.drxn][1][i] - hitCoords[pv.drxn][0][i], pv.drxn );
         }
-        for ( Node* node : nodes )
-        {
-            node->setValid();
-        }
+        int32_t dummy[2] = { params.locusLimits[0], params.locusLimits[1] };
+        nodes[0]->propagateValidation( dummy, pv.drxn );
         pv.newSet.insert( nodes.begin(), nodes.end() );
         return true;
     }

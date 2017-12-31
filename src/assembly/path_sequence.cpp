@@ -387,10 +387,6 @@ void SeqPathReassemble::setBridges( vector<SeqPathReassemble*> seqs, MapNode* mn
                                / float( 50 + abs( float(len-dist) / (float)10 ) ) );
                 float mod = min( olMod, ratioMod );
                 mod = min( mod, sqrt( mod ) );
-                if ( abs( bonus * mod ) > abs( score ) )
-                {
-                    int x = 0;
-                }
                 score += bonus * mod;
                 
                 if ( ( fromDrxn == 2 || drxns[fromDrxn] > 2 ) && score > bestScore )
@@ -400,8 +396,11 @@ void SeqPathReassemble::setBridges( vector<SeqPathReassemble*> seqs, MapNode* mn
                     int seqOls[2]{ params.readLen - 1, params.readLen - 1 };
                     usedIds.clear();
                     mn->seq = hitSeqs[0]->getExtraSeq( olReads[0], seqOls[0], 0 );
+                    int nowLen = mn->seq.length();
                     mn->seq += hitRead->getSeq( usedIds, drxn );
+                    nowLen = mn->seq.length();
                     mn->seq += hitSeqs[1]->getExtraSeq( olReads[1], seqOls[1], 1 );
+                    nowLen = mn->seq.length();
                     for ( int i : { 0, 1 } )
                     {
                         mn->bridges[i].clear();
@@ -446,6 +445,7 @@ void SeqPathReassemble::setEdges()
         }
         
         // Trim possible loops
+        unordered_set<ReadEndMap*> eraseReads;
         for ( ReadEndMap* read : reads[drxn] )
         {
             if ( edged.find( read ) == edged.end() || !read->edge ) continue;
@@ -460,11 +460,31 @@ void SeqPathReassemble::setEdges()
                 pathedReads.insert( curr );
                 curr = curr->edge;
             }
-            assert( pathedReads.find( curr ) == pathedReads.end() );
+            loop = loop || pathedReads.find( curr ) != pathedReads.end();
             if ( loop )
             {
-                weak->edge = NULL;
-                edged.erase( weak );
+                eraseReads.insert( pathedReads.begin(), pathedReads.end() );
+            }
+        }
+        
+        int eraseSize = 0;
+        while ( eraseSize < eraseReads.size() )
+        {
+            eraseSize = eraseReads.size();
+            for ( ReadEndMap* read : reads[drxn] )
+            {
+                if ( eraseReads.find( read->edge ) == eraseReads.end() ) continue;
+                eraseReads.insert( read );
+            }
+        }
+        
+        for ( int i = 0; i < reads[drxn].size(); )
+        {
+            if ( eraseReads.find( reads[drxn][i] ) == eraseReads.end() ) i++;
+            else
+            {
+                delete reads[drxn][i];
+                reads[drxn].erase( reads[drxn].begin() + i );
             }
         }
         
@@ -547,6 +567,11 @@ bool SeqPathMerge::doMerge( PathVars &pv, NodeSet &delSet, bool drxn )
     splitCoords[!drxn] = selfCoord;
     mergeNodes[drxn] = hitSeq->getSplitCoord( splitCoords[drxn], drxn );
     mergeNodes[!drxn] = getSplitCoord( splitCoords[!drxn], !drxn );
+    
+    NodeSet fwdSet = mergeNodes[drxn]->getDrxnNodes( drxn );
+    {
+        if ( fwdSet.find( mergeNodes[!drxn] ) != fwdSet.end() ) return false;
+    }
     if ( mergeNodes[0] && mergeNodes[1] )
     {
         if ( splitCoords[!drxn] != mergeNodes[!drxn]->ends_[drxn] )

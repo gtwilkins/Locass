@@ -25,7 +25,7 @@ public:
     Reassemble( Node* node, PathVars &pv, bool invalid );
     ~Reassemble();
     
-    bool reassemble( PathVars &pv, NodeSet &delSet );
+    bool reassemble( PathVars &pv, NodeSet &delSet, bool isAlleleFork=false );
     
 private:
     bool doesSpanOrigin( PathVars &pv );
@@ -37,7 +37,7 @@ private:
     bool tryGap( PathVars &pv );
     bool tryHalf( PathVars &pv, NodeSet &delSet, bool drxn );
     bool tryMap( PathVars &pv );
-    bool trySlice( PathVars &pv, NodeSet &delSet );
+    bool trySlice( PathVars &pv, NodeSet &delSet, bool isAlleleFork );
     
     NodeIntMap offsets_;
     Node* fork_;

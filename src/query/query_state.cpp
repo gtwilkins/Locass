@@ -87,6 +87,7 @@ bool QuerySeedState::advance( int it, int k, int &thisErrors, bool drxn )
     
     if ( i + 1 >= len )
     {
+        if ( !thisErrors ) iError = len;
         j = k;
         return true;
     }

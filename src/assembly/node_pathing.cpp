@@ -153,15 +153,14 @@ bool Node::resolveOffset( ExtVars &ev, bool doExtend, bool drxn )
         
         for ( auto it = edges_[!drxn].begin(); it != edges_[!drxn].end(); )
         {
-            if ( offsetSets[samePref].find( it->node ) != offsetSets[samePref].end() )
+            if ( diffEdges.find( it->node ) != diffEdges.end() ? samePref : !samePref )
             {
                 it->node->removeEdge( this, drxn );
                 it->node->stop_[drxn] = it->node->edges_[drxn].empty();
                 it = edges_[!drxn].erase( it );
                 didErase = true;
-                continue;
             }
-            it++;
+            else it++;
         }
         
         offsetForward( drxn );
