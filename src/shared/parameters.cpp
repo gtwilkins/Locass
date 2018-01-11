@@ -173,7 +173,7 @@ int32_t Parameters::getLibSize( SeqNum &readId )
     return 0;
 }
 
-SeqNum Parameters::getPairId( const SeqNum readId )
+ReadId Parameters::getPairId( const SeqNum readId )
 {
     Lib* lib = getLib( readId );
     if ( lib )
@@ -195,6 +195,11 @@ SeqNum Parameters::getPairId( const SeqNum readId )
         return pairId;
     }
     return readId;
+}
+
+ReadId Parameters::getRevId( const ReadId readId )
+{
+    return readId - ( readId & 0x1 ) + !( readId & 0x1 );
 }
 
 void Parameters::set()

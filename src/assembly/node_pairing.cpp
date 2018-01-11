@@ -569,16 +569,20 @@ void Node::limitScore( Score &score, bool inclNotValidSelf )
 
 void Node::updatePairs()
 {
-    bool drxn = drxn_ == 4 || drxn_ == 1;
-    if ( paired_ ) paired_->clear();
-    
-    NodeList tNodes = getTargetNodes( drxn, true );
-    setPairs( tNodes, drxn );
-
-    for ( Node* fwd : getDrxnNodes( drxn ) )
+    for ( bool drxn : { 0, 1 } )
     {
-        NodeList tSelf = { this };
-        fwd->setPairs( tSelf, drxn );
+        if ( drxn && ( drxn_ == 0 || drxn_ == 4 ) ) continue;
+        if ( !drxn && ( drxn_ == 1 || drxn_ == 3 ) ) continue;
+        if ( paired_ ) paired_->clear();
+
+        NodeList tNodes = getTargetNodes( drxn, true );
+        setPairs( tNodes, drxn );
+
+        for ( Node* fwd : getDrxnNodes( drxn ) )
+        {
+            NodeList tSelf = { this };
+            fwd->setPairs( tSelf, drxn );
+        }
     }
 }
 
@@ -781,30 +785,31 @@ void Node::setPairs( PairingVars &pv, bool drxn )
         if ( drxn_ != 2 || ( drxn ? validLimits_[1] <= mark.mark - params.readLen
                                   : mark.mark + params.readLen <= validLimits_[2] ) )
         {
+            bestHit = NULL;
             for ( Node* t : pv.tNodes )
             {
                 // Find pair in target node
                 if ( t->clones_ )
                 {
                     PairHit r = t->findReadPairBestClone( pv.tNodes, mark, valid, drxn );
-                    bestHit = r.node && valid && r.node->isValidHit( r.coords, drxn )? r.node : NULL;
+                    if ( r.node && valid && ( validated_ || drxn_ == !r.node->drxn_ || r.node->isValidHit( r.coords, drxn ) ) ) bestHit = r.node;
                 }
                 else
                 {
                     PairHit r = t->findReadPair( mark, valid, drxn );
-                    bestHit = r.node && valid && r.node->isValidHit( r.coords, drxn )? r.node : NULL;
+                    if ( r.node && valid && ( validated_ || drxn_ == !r.node->drxn_ || r.node->isValidHit( r.coords, drxn ) ) ) bestHit = r.node;
                 }
+            }
 
-                // Record pair hit
-                if ( bestHit )
+            // Record pair hit
+            if ( bestHit )
+            {
+                auto result = pv.pairs.insert( make_pair( bestHit, 1 ) );
+                if ( result.second == false )
                 {
-                    auto result = pv.pairs.insert( make_pair( bestHit, 1 ) );
-                    if ( result.second == false )
-                    {
-                        result.first->second++;
-                    }
-                    pv.hitIds.insert( mark.id );
+                    result.first->second++;
                 }
+                pv.hitIds.insert( mark.id );
             }
         }
     }

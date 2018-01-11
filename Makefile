@@ -21,6 +21,7 @@ SRCS =  \
 	shared_functions \
 	node_looping.cpp \
 	locus_export.cpp \
+	node_filling.cpp \
 	node_folding.cpp \
 	node_validation.cpp \
 	locus_pathing_structs.cpp \

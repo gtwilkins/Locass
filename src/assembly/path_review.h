@@ -49,7 +49,7 @@ struct ConPath
 
 class PathReview {
 public:
-    PathReview( PathVars &pv, NodeList &path, int32_t* reliable, int32_t* forkLimits, bool anteFinished );
+    PathReview( PathVars &pv, NodeList &path, int32_t* reliable, int32_t* forkLimits, bool anteFinished, bool calibrate );
     bool review( Path &path, NodeList &sideNodes, NodeSet &delSet );
     
 private:
@@ -60,9 +60,11 @@ private:
     AltPath resolveDiverge( Node* fork, NodeSet &delSet );
     bool resolveEnd( NodeSet &delSet );
     bool resolveForks( NodeSet &delSet );
+    bool resolveManual( NodeSet &delSet );
     bool resolveMisassembly( NodeSet &delSet );
     bool resolveUnspanned( Path &path, NodeSet &delSet );
     void reviewSpans( Path &path );
+    void test();
     
     PathVars &pv_;
     Node* fork_,* truncate_;
@@ -72,7 +74,7 @@ private:
     vector<ConPath> cons_;
     vector<AltPath> divs_;
     int32_t reliLimits_[2], forkLimits_[2];
-    bool drxn_, anteFinished_;
+    bool drxn_, anteFinished_, calibrate_;
 };
 
 #endif /* PATHCONVERGE_H */

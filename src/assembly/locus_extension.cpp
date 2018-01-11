@@ -41,9 +41,7 @@ void Locus::extendLocus()
                 if ( !updateExtension( drxn ) ) break;
             }
         }
-        locusTest();
         if ( !plot() ) leap();
-        locusTest();
     }
     
     duration_ = (double)( clock() - startTime ) / (double) CLOCKS_PER_SEC;
@@ -183,7 +181,6 @@ bool Locus::debriefExtend( ExtVars &ev, bool drxn, bool rePlot )
         if ( !ev.offset.empty() )
         {
             Node::resolveOffsets( ev, drxn );
-            locusTest();
             continue;
         }
         
@@ -244,7 +241,6 @@ bool Locus::extendNodes( bool drxn )
             ExtVars ev( nodes_[drxn], nodes_[drxn + 3], validLimits_, bwt_ );
             node->extendNode( ev, drxn );
             forkCount_[drxn] += node->edges_[drxn].size();
-            locusTest();
             if ( !debriefExtend( ev, drxn ) ) break;
         }
     }

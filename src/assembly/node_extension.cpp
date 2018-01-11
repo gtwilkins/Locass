@@ -746,7 +746,7 @@ Node* Node::splitNode( int32_t splitBegin, NodeList &nodes, bool subGraph, bool 
     for ( Edge &edge : edges_[drxn] )
     {
         edge.node->removeEdge( this, !drxn );
-        node->addEdge( edge.node, edge.overlap, drxn, false );
+        node->addEdge( edge.node, edge.overlap, drxn, edge.isLeap );
     }
     
     // Add edge from this to split node

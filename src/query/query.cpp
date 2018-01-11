@@ -139,6 +139,53 @@ vector<Extension> Querier::compileExtensions( vector<Overlap> &overlaps, bool dr
     return exts;
 }
 
+int Querier::countKmer( string seq )
+{
+    int seqLen = min( params.readLen, (int)seq.length() );
+    uint8_t query[seqLen];
+    setQuery( seq, query, seqLen, 0 );
+    QueryState q( query, seqLen, seqLen );
+    CharId rank, count;
+    reader_->setBaseAll( query[0], query[1], rank, count );
+    int it = 1;
+    while ( it < seqLen - 1 && count )
+    {
+        CharCount ranks;
+        CharCount counts;
+        uint8_t i = q.q[it];
+        uint8_t j = q.q[++it];
+
+        reader_->countRange( i, rank, count, ranks, counts );
+        rank = ranks[j];
+        count = counts[j];
+    }
+    
+    return count;
+}
+
+void Querier::estimateCoverage( ofstream &fh, int kmerLen, int sampleSize )
+{
+    srand( time(NULL) );
+    int maxKmer = 200;
+    int counts[maxKmer]{0};
+    int i = 0;
+    while ( i < sampleSize )
+    {
+        ReadId id = ( ( rand() & 65535 ) << 16 | ( rand() & 65535 ) ) % params.seqCount;
+        string seq = getSequence( id );
+        if ( seq.size() < kmerLen ) continue;
+        int count = countKmer( seq.substr( 0, kmerLen ) );
+        if ( count > 200 ) continue;
+        counts[count]++;
+        i++;
+    }
+    
+    for ( int j = 0; j < maxKmer; j++ )
+    {
+        fh << to_string( j ) << "," << to_string( counts[j] ) << endl;
+    }
+}
+
 vector<Overlap> Querier::getOverlaps( string &seq, uint16_t minOver, bool drxn )
 {
     // Query index
@@ -154,6 +201,7 @@ vector<Overlap> Querier::getOverlaps( string &seq, uint16_t minOver, bool drxn )
     vector<Overlap> overlaps;
     for ( int i ( 0 ); i < q.endOverlaps.size() && overlaps.size() < maxSeqs_; i++ )
     {
+        if ( q.endCounts[i] > 300 ) break;
         bin_->getOverlaps( overlaps, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], drxn );
     }
     sort( overlaps.begin(), overlaps.end(), []( const Overlap &a, const Overlap &b ) { 
@@ -179,6 +227,7 @@ vector<Overlap> Querier::getOverlaps( string &seq, uint16_t minOver, uint8_t &ma
     int iLast = 0;
     for ( int i ( 0 ); i < q.endOverlaps.size() && overlaps.size() < maxSeqs_; i++ )
     {
+        if ( q.endCounts[i] > 300 ) break;
         bin_->getOverlaps( overlaps, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], drxn );
         iLast = i;
     }

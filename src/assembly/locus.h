@@ -41,8 +41,9 @@ public:
     Locus( Querier &bwt, ifstream &fh );
     virtual ~Locus();
     
-    void locusTest();
+//    void locusTest();
     void addNode( Node* node, int drxn );
+    void deleteNodes( NodeSet &delSet );
     void deleteNodes( NodeSet &delSet, bool drxn );
     void deleteNodes( NodeSet &delSet, NodeSet &goodSet, bool drxn );
     NodeListList exportNodes();
@@ -194,6 +195,7 @@ private:
     int32_t limits_[2], validLimits_[2], reliable_[2], forkLimits_[2];
     bool completed_[2], harsh_[2], finished_[2], leapFar_[2], finalise_;
     Querier &bwt_;
+    bool calibrate_;
 };
 
 #endif /* LOCUS_H */

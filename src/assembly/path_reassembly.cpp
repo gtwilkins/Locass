@@ -7,8 +7,8 @@
 #include "path_reassembly.h"
 #include <algorithm>
 
-Reassemble::Reassemble( Node* node, PathVars &pv, bool invalid )
-: fork_( node ), invalid_( invalid )
+Reassemble::Reassemble( Node* node, PathVars &pv, bool invalid, bool calibrate )
+: fork_( node ), invalid_( invalid ), calibrate_( calibrate )
 {
     if ( invalid )
     {
@@ -208,6 +208,7 @@ bool Reassemble::reassemble( PathVars &pv, NodeSet &delSet, bool isAlleleFork )
         removeDubious( pv );
         if ( !invalid_ && tryGap( pv ) ) return true;
         if ( tryMap( pv ) ) return true;
+        if ( calibrate_ ) return false;
         
         return trySlice( pv, delSet, isAlleleFork );
     }
@@ -295,6 +296,7 @@ void Reassemble::setWeakspot()
     for ( SeqPathReassemble* seq : seqs_ ) nodes.insert( seq->nodes.begin(), seq->nodes.end() );
     
     int len = estLimits_[1] - estLimits_[0];
+    assert( len );
     int cover[len]{0};
     
     for ( Node* node : nodes )
@@ -381,6 +383,28 @@ bool Reassemble::tryBridge( PathVars &pv )
     }
     delete mn;
     return didBridge;
+}
+
+bool Reassemble::tryComplete( PathVars &pv )
+{    
+    vector<ReadEndMap*> mapReads;
+    for ( int i : { 0, 1 } )
+    {
+        for ( SeqPathReassemble* s : seqs_ )
+        {
+            for ( ReadEndMap* read : s->reads[i] )
+            {
+                read->doMap = true;
+                mapReads.push_back( read );
+            }
+        }
+    }
+    
+    removeRedundant( mapReads );
+    bool didMap = false;
+    for ( SeqPathReassemble* s : seqs_ ) didMap = s->doMap( pv ) || didMap;
+    
+    return didMap;
 }
 
 bool Reassemble::tryGap( PathVars &pv )

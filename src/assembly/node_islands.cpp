@@ -978,6 +978,7 @@ bool Node::overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, 
                                     splitCoord = drxn ? max( splitCoord, read.second[1] ) : min( splitCoord, read.second[0] );
                                 }
                             }
+                            if ( splitCoord == currNodes[i]->ends_[!drxn] ) continue;
                             currNodes[i]->splitNode( splitCoord, nodes, !drxn, !drxn );
                         }
                     }

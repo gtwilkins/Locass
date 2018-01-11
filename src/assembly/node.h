@@ -219,12 +219,26 @@ private:
     void isMergeDualLocus( ExtVars &ev, MergeHit &merge, bool drxn );
     bool isMergeFwd( ExtVars &ev, MergeHit &merge, bool drxn );
     bool isMergeSelf( ExtVars &ev, MergeHit &merge );
-//    void mergeDrxn( ExtVars &ev, bool drxn );
     Node* mergeNode( NodeList &nodes, int32_t coord, bool subGraph );
     Node* mergeNode( NodeList &nodes, Coords* coords, bool subGraph, bool drxn );
     void removeReExtensions( vector<Extension> &exts, bool drxn, bool inclSelf=false );
     void setExtVars( ExtVars &ev, bool drxn );
     Node* splitNodeDual( int32_t* coords, NodeList &nodes, int subGraph );
+    
+// NodeFilling
+public:
+    void checkClones();
+    void clearDupes();
+    void clearReads();
+    void fillReads( Querier &bwt, NodeSet &delSet );
+    static void graphCover( string filename, NodeList &nodes );
+    static void graphPairs( string filename, NodeList &nodes );
+    void mapMates( Querier &bwt, int &count );
+    static void mergeAll( NodeList* nodes, NodeSet &delSet );
+    void mergeDrxn( NodeSet &delSet, bool drxn );
+    void recoil();
+    void recoil( int32_t diff, bool drxn );
+    static void remapGenes( Querier &bwt, NodeList &nodes );
     
 // NodeFolding
 public:

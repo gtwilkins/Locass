@@ -316,8 +316,8 @@ void Node::addEdge( Node* node, int overlap, bool drxn, bool doOffset, bool isLe
     assert( node != this );
     assert( overlap <= ends_[1] - ends_[0] );
     bool didAdd = false;
-    if ( drxn_ == 1 ) assert( node->drxn_ != 0 );
-    if ( drxn_ == 0 ) assert( node->drxn_ != 1 );
+//    if ( drxn_ == 1 ) assert( node->drxn_ != 0 );
+//    if ( drxn_ == 0 ) assert( node->drxn_ != 1 );
     for ( Edge &e : edges_[drxn] )
     {
         if ( node == e.node )

@@ -147,7 +147,54 @@ NodeOffsetMap Node::getDrxnNodesOffset( bool drxn, int32_t limitDist, bool inclS
             ? ( drxn ? ends_[1] + limitDist : ends_[0] - limitDist ) 
             : ( drxn ? numeric_limits<int32_t>::max() : numeric_limits<int32_t>::min() ) );
     
-    getDrxnNodesOffset( nodes, drxn, limitDist );
+    NodeSet fwdSet;
+    getDrxnNodes( fwdSet, drxn, limitDist );
+    NodeSet currSet = { this };
+    bool didAdvance = false;
+    while ( !currSet.empty() )
+    {
+        didAdvance = false;
+        NodeSet nxtSet;
+        
+        for ( Node* curr : currSet )
+        {
+            for ( Edge &e : curr->edges_[!drxn] )
+            {
+                if ( fwdSet.find( e.node ) != fwdSet.end() && nodes.find( e.node ) == nodes.end() )
+                {
+                    nxtSet.insert( curr );
+                    continue;
+                }
+            }
+            didAdvance = true;
+            int32_t currOff[2]{0};
+            auto it = nodes.find( curr );
+            if ( it != nodes.end() )
+            {
+                currOff[0] = it->second.first;
+                currOff[1] = it->second.second;
+            }
+            for ( Edge &e : curr->edges_[drxn] )
+            {
+                if ( fwdSet.find( e.node ) == fwdSet.end() ) continue;
+                int32_t offset = drxn ? e.node->ends_[0] + e.overlap - curr->ends_[1]
+                                      : e.node->ends_[1] - e.overlap - curr->ends_[0];
+                int32_t eOff[2] = { currOff[0] + offset, currOff[1] + offset };
+                auto r = nodes.insert( make_pair( e.node, make_pair( eOff[0], eOff[1] ) ) );
+                if ( !r.second )
+                {
+                    r.first->second.first = min( r.first->second.first, eOff[0] );
+                    r.first->second.second = max( r.first->second.second, eOff[1] );
+                }
+                nxtSet.insert( e.node );
+            }
+        }
+        
+        currSet = nxtSet;
+        assert( didAdvance );
+    }
+    
+//    getDrxnNodesOffset( nodes, drxn, limitDist );
     
     return nodes;
 }
@@ -156,22 +203,30 @@ void Node::getDrxnNodesOffset( NodeOffsetMap &nodes, bool drxn, int32_t &limit )
 {
     if ( drxn ? ends_[1] < limit : limit < ends_[0] )
     {
+        int32_t thisOffsets[2]{0};
+        auto it = nodes.find( this );
+        if ( it != nodes.end() )
+        {
+            thisOffsets[0] = it->second.first;
+            thisOffsets[1] = it->second.second;
+        }
         for ( Edge &e : edges_[drxn] )
         {
             int32_t offset = drxn 
                     ? e.node->ends_[0] + e.overlap - ends_[1]
                     : e.node->ends_[1] - e.overlap - ends_[0];
-            auto result = nodes.insert( make_pair( e.node, make_pair( offset, offset ) ) );
+            int32_t offsets[2] = { offset + thisOffsets[0], offset + thisOffsets[1] };
+            auto result = nodes.insert( make_pair( e.node, make_pair( offsets[0], offsets[1] ) ) );
             if ( !result.second )
             {
-                if ( offset < result.first->second.first )
+                if ( offsets[0] < result.first->second.first )
                 {
-                    result.first->second.first = offset;
+                    result.first->second.first = offsets[0];
                     result.second = true;
                 }
-                if ( result.first->second.second < offset )
+                if ( result.first->second.second < offsets[1] )
                 {
-                    result.first->second.second = offset;
+                    result.first->second.second = offsets[1];
                     result.second = true;
                 }
             }

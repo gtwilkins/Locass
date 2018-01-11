@@ -110,6 +110,7 @@ void BwtCycler::finish( uint8_t cycle )
     fns->setCyclerFinal( inBwt, outBwt, inEnd, outEnd, cycle );
     prepIn();
     prepOutFinal();
+//    dupes = fopen( "/media/glen/ssd/3kdupes", "wb" );
     
     for ( int i ( 0 ); i < 4; i++ )
     {
@@ -597,6 +598,7 @@ void BwtCycler::writeBwtByte( uint8_t c )
 void BwtCycler::writeEnd()
 {
     ReadId thisSap = 1;
+//    bool isDupe = nextSame;
     if ( nextSame )
     {
         if ( pInIns == BWT_BUFFER ) readInsertBuff();
@@ -612,6 +614,13 @@ void BwtCycler::writeEnd()
     
     writeRun( 4, thisSap );
     
+//    ReadId dupeCount = 1;
+//    ReadId dupeArray[thisSap + 1];
+//    if ( isDupe )
+//    {
+//        dupeArray[0] = thisSap;
+//    }
+    
     while ( thisSap-- )
     {
         if ( pInIds[4] == IDS_BUFFER )
@@ -625,8 +634,14 @@ void BwtCycler::writeEnd()
             pOutEnd = 0;
         }
         
+//        dupeArray[dupeCount++] = inIdsBuff[4][ pInIds[4] ];
         outEndBuff[ pOutEnd++ ] = inIdsBuff[4][ pInIds[4]++ ];
     }
+    
+//    if ( isDupe )
+//    {
+//        fwrite( &dupeArray, 4, dupeCount, dupes );
+//    }
 }
 
 void BwtCycler::writeInsBuff( uint8_t i )

@@ -39,14 +39,15 @@ struct Parameters {
     Parameters();
     
     void checkReady();
-    bool isReadPe( SeqNum &readId );
+    bool isReadPe( ReadId &readId );
     int32_t getFurthestMpDist( int32_t coord, bool drxn );
     int32_t getFurthestPeDist( int32_t coord, bool drxn );
     int32_t getFurthestMpMean( int32_t coord, bool drxn );
     int32_t getFurthestPeMean( int32_t coord, bool drxn );
-    Lib* getLib( const SeqNum &readId );
-    int32_t getLibSize( SeqNum &readId );
-    SeqNum getPairId( const SeqNum readId );
+    Lib* getLib( const ReadId &readId );
+    int32_t getLibSize( ReadId &readId );
+    ReadId getPairId( const ReadId readId );
+    ReadId getRevId( const ReadId readId );
     void set();
     void setLimits( int32_t &limit );
     

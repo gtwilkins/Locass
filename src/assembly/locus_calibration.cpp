@@ -23,6 +23,7 @@
 
 void Locus::calibrate( LocusLibraryCount &lib )
 {
+    calibrate_ = true;
     for ( bool drxn : { 0, 1 } )
     {
         endNodes_[drxn] = originEnds_[drxn];
@@ -94,4 +95,6 @@ void Locus::calibrate( LocusLibraryCount &lib )
         }
         cutoffLen -= coverages[i].second;
     }
+    
+    calibrate_ = false;
 }

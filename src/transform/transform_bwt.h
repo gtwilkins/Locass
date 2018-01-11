@@ -70,6 +70,7 @@ private:
     FILE* inIns,* outIns[4];
     FILE* inIds[5],* outIds[4][5];
     FILE* inEnd,* outEnd;
+//    FILE* dupes;
     CharId id;
     
     // Buffers

@@ -175,7 +175,6 @@ bool Locus::leapExtend( IslandVars &iv )
     NodeSet extSets[2];
     iv.round = 0;
     
-    locusTest();
     while ( leapSetExtend( iv, extSets ) )
     {
         for ( bool drxn : { iv.drxn, !iv.drxn } )
@@ -187,7 +186,6 @@ bool Locus::leapExtend( IslandVars &iv )
             }
         }
     }
-    locusTest();
     
     leapCleanup( iv );
 }
@@ -331,10 +329,8 @@ bool Locus::leapReview( IslandVars &iv )
     if ( !iv.merged[!iv.drxn].empty() )
     {
         clock_t startTime = clock();
-        locusTest();
         Node::reviewMerged( iv.ev, iv.merged[!iv.drxn], iv.drxn );
         debriefExtend( iv.ev, iv.drxn, true );
-        locusTest();
         revTime_ += (double)( clock() - startTime ) / (double) CLOCKS_PER_SEC;
         
         return true;
@@ -489,7 +485,6 @@ bool Locus::leapSetIslandClumps( IslandVars &iv, vector<ReadMark> &peClumps, uno
     {
         Node::seedIslandsSingle( iv, mark, readIds, iv.drxn );
         leptReads_[iv.drxn].insert( mark.id );
-        locusTest();
     }
     leapCleanup( iv );
     leapExtend( iv );

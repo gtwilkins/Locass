@@ -389,6 +389,8 @@ void SeqPathReassemble::setBridges( vector<SeqPathReassemble*> seqs, MapNode* mn
                 mod = min( mod, sqrt( mod ) );
                 score += bonus * mod;
                 
+                if ( abs( dist ) > 500 ) continue;
+                
                 if ( ( fromDrxn == 2 || drxns[fromDrxn] > 2 ) && score > bestScore )
                 {
                     ReadEndMap* olReads[2] = { drxn ? read : path.back(), drxn ? path.back() : read };

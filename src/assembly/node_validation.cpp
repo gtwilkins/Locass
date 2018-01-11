@@ -450,10 +450,19 @@ bool Node::validate( int32_t* limits )
                 fwd->setPairs( tNodes, drxn );
             }
             int32_t validLimit = ends_[!drxn];
+            NodeSet fwdSet = getDrxnNodes( drxn, false, true );
+            for ( Node* fwd : fwdSet )
+            {
+                if ( fwd->validated_ )
+                {
+                    validLimits_[1+drxn] = validLimits_[drxn * 3] = ends_[drxn];
+                    break;
+                }
+            }
             while( validLimit != validLimits_[1+drxn] )
             {
                 validLimit = validLimits_[1+drxn];
-                for ( Node* fwd : getDrxnNodes( drxn, false, true ) )
+                for ( Node* fwd : fwdSet )
                 {
                     fwd->setPairs( tSelf, drxn );
                 }

@@ -38,9 +38,9 @@ bool ConPath::doesConflict( AltPath &bck, bool drxn )
     return ( drxn ? limit < bck.limits[1] : bck.limits[1] < limit );
 }
 
-PathReview::PathReview( PathVars &pv, NodeList &path, int32_t* reliable, int32_t* forkLimits, bool anteFinished )
+PathReview::PathReview( PathVars &pv, NodeList &path, int32_t* reliable, int32_t* forkLimits, bool anteFinished, bool calibrate )
 : pv_( pv ), fork_( NULL ), truncate_( NULL ), path_( path ), pathSet_( path.begin(), path.end() )
-, drxn_( pv.drxn ), anteFinished_( anteFinished )
+, drxn_( pv.drxn ), anteFinished_( anteFinished ), calibrate_( calibrate )
 {
     path[0]->getDrxnNodes( pathSet_, !drxn_, params.getFurthestMpDist( path[0]->ends_[!drxn_], !drxn_ ) );
     NodeSet bckSet = { path_[0] };
@@ -120,7 +120,7 @@ bool PathReview::resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged )
     bool misassembled = false;
     if ( cover < params.cover * 1.5 && con.forks[!drxn_]->isMisassembled( pv_, con.forks[drxn_], forkSet, drxn_ ) )
     {
-        Reassemble re( con.forks[!drxn_], pv_, false );
+        Reassemble re( con.forks[!drxn_], pv_, false, calibrate_ );
         if ( re.reassemble( pv_, delSet, true ) ) return false;
         misassembled = true;
     }
@@ -179,7 +179,7 @@ bool PathReview::resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged )
         bckRatios[1] = min( (float)1, float(hits[1][!drxn_]) / float( max( 1, marks[1][!drxn_] ) ) );
     }
     
-    if ( cover > params.cover * 1.5 )
+    if ( false && cover > params.cover * 1.5 )
     {
         int scores[2] = { ( reli[0][!drxn_] - 1 ) * farDist[0], ( reli[1][!drxn_] - 1 ) * farDist[1] };
         if ( !scores[0] && ! scores[1] )
@@ -225,7 +225,7 @@ bool PathReview::resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged )
             pv_.misassEst[drxn_] = con.paths[!pref][0]->ends_[!drxn_];
             pv_.misassEst[!drxn_] = pv_.misassEst[drxn_] + ( drxn_ ? params.readLen - params.maxPeMean 
                                                                    : params.maxPeMean - params.readLen );
-            Reassemble re( con.paths[!pref][0], pv_, false );
+            Reassemble re( con.paths[!pref][0], pv_, false, calibrate_ );
             if ( re.reassemble( pv_, delSet ) ) return false;
         }
     }
@@ -737,7 +737,6 @@ bool PathReview::resolveForks( NodeSet &delSet )
             }
             
         }
-        if ( !drxn_ ) for ( Node* node : pv_.nds[1] ) assert( !node->edges_[0].empty() );
         if ( doErase || delSet.find( divs_[i].path[0] ) != delSet.end() )
         {
             divs_[i].path[0]->dismantleNode( delSet, drxn_ );
@@ -754,6 +753,48 @@ bool PathReview::resolveForks( NodeSet &delSet )
             else divs_[i].path[0]->dismantleNode( delSet, drxn_ );
             divs_.erase( divs_.begin() + i );
         } else i++;
+    }
+    
+    return true;
+}bool PathReview::resolveManual( NodeSet &delSet )
+{
+    bool diverged = false;
+    bool valid = true;
+    Node* conBgn = !cons_.empty() ? cons_[0].forks[!drxn_] : NULL;
+    Node* conEnd = NULL;
+    int conCurr = 0;
+    int32_t limit = path_.back()->ends_[drxn_];
+    if ( !divs_.empty() ) limit = divs_[0].fork->ends_[drxn_];
+    limit = limit + ( drxn_ ? - params.maxPeMean / 2 : params.maxPeMean / 2 );
+    for ( int i = 0; i < path_.size(); i++ )
+    {
+        if ( delSet.find( path_[i] ) != delSet.end() ) break;
+        if ( drxn_ ? limit < path_[i]->ends_[1] : path_[i]->ends_[0] < limit ) break;
+        if ( truncate_ == path_[i] ) return false;
+        if ( path_[i] == pv_.unspanned ) break;
+        valid = valid && path_[i]->isValidated();
+        
+        // Conclude convergence
+        if ( conEnd == path_[i] ) conEnd = NULL;
+        
+        // Scrutinise this homozygous node
+        if ( !conEnd && path_[i]->drxn_ != 2 && !diverged && valid )
+        {
+            bool valid = !path_[i]->isMisassembled( pv_, drxn_ );
+            Reassemble re( path_[i], pv_, valid, calibrate_ );
+            if ( re.reassemble( pv_, delSet ) ) return false;
+        }
+        
+        if ( !conEnd && !diverged && valid ) fork_ = path_[i];
+        
+        if ( path_[i] == conBgn )
+        {
+            if ( !resolveAlleles( cons_[conCurr], delSet, diverged ) ) return false;
+            conEnd = cons_[conCurr].forks[drxn_];
+            if ( ++conCurr < cons_.size() ) conBgn = cons_[conCurr].forks[!drxn_];
+        }
+        
+        diverged = diverged || ( !divs_.empty() && path_[i] ==  divs_[0].fork );
     }
     
     return true;
@@ -788,7 +829,7 @@ bool PathReview::resolveMisassembly( NodeSet &delSet )
             {
                 if ( abs( path_[i]->ends_[drxn_] - path_.back()->ends_[drxn_] ) < params.maxPeMean ) break;
                 valid = valid && path_[i] != pv_.weak;
-                Reassemble re( path_[i], pv_, path_[i] == pv_.weak );
+                Reassemble re( path_[i], pv_, path_[i] == pv_.weak, calibrate_ );
                 if ( re.reassemble( pv_, delSet ) ) return false;
             }
         }
@@ -869,4 +910,33 @@ void PathReview::reviewSpans( Path &path )
         i++;
     }
 }
+
+//void PathReview::test()
+//{
+//    for ( int i : { 0, 1 } )
+//    {
+//        for ( Node* node : pv_.nds[pv_.drxn] )
+//        {
+//            int32_t limits[2] = { node->ends_[1], node->ends_[0] };
+//            for ( auto &read : node->reads_ )
+//            {
+//                limits[0] = min( limits[0], read.second[0] );
+//                limits[1] = max( limits[1], read.second[1] );
+//            }
+//            if ( node->reads_.empty() ) continue;
+//            assert( limits[0] == node->ends_[0] );
+//            assert( limits[1] == node->ends_[1] );
+//            for ( Edge &e : node->edges_[i] )
+//            {
+//                if ( e.overlap <= 0 ) e.isLeap = true;
+//                if ( e.isLeap ) continue;
+//                Node* l = i ? node : e.node;
+//                Node* r = i ? e.node : node;
+//                string lSeq = l->seq_.substr( l->seq_.length() - e.overlap );
+//                string rSeq = r->seq_.substr( 0, e.overlap );
+//                assert( lSeq == rSeq );
+//            }
+//        }
+//    }
+//}
 

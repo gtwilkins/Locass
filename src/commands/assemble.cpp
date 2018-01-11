@@ -35,7 +35,7 @@ Assemble::Assemble( int argc, char** argv )
 {
     Filenames* fns = NULL;
     string inFile, outFile;
-    int32_t limit = 10000;
+    int32_t limit = 20000;
     int errorCount = 5;
     
     for ( int i ( 2 ); i < argc; )
@@ -151,6 +151,13 @@ Assemble::Assemble( int argc, char** argv )
     Querier bwt( ir, qb );
     params.checkReady();
     
+//    if ( true )
+//    {
+//        ifstream fh( "/media/glen/ssd/dump14" );
+//        Locus* locus = new Locus( bwt, fh );
+//        assert( false );
+//    }
+    
     cout << "Performing seeded locus assembly" << endl << endl;
     cout << "Error rate set to " << to_string( errorCount ) << "%" << endl;
     cout << "Extension limit set to " << to_string( limit ) << endl;
@@ -163,9 +170,11 @@ Assemble::Assemble( int argc, char** argv )
     int locusCount = 0, seedCount = 0;
     for ( int i = 0; i < seqs.size(); i++ )
     {
-//        if ( i < 49 ) continue;
         cout << "Assembling locus " << to_string( i + 1 ) << " of " << to_string( seqs.size() ) << endl;
         cout << "\tSearching for target loci... " << endl;
+//        string h = "x";
+//        string s = "AGACGACCACCGTAATCATAATCACACTGGAGGTCACCTCCACCATCATCATAACCAGACAGAAGAGTGGGACCAGGACAGGCCAGATATGAGGCCATTCC";
+//        Seed seed( h, s, bwt, errorCount );
         Seed seed( headers[i], seqs[i], bwt, errorCount );
         seedCount++;
         if ( seed.warning() ) continue;
@@ -226,6 +235,8 @@ void Assemble::readIn( ifstream &fh, vector<string> &headers, vector<string> &se
     string acceptedChars = "acgtACGT";
     while ( getline( fh, line ) && !line.empty() )
     {
+        size_t it = line.find( '\r' );
+        if ( it != line.npos ) line.erase( it, line.npos );
         if ( !lineNum )
         {
             isFasta = line[0] == '>';
@@ -242,6 +253,8 @@ void Assemble::readIn( ifstream &fh, vector<string> &headers, vector<string> &se
             }
             header = line.substr( 1 );
             getline( fh, line );
+            it = line.find( '\r' );
+            if ( it != line.npos ) line.erase( it, line.npos );
             ++lineNum;
         }
         
@@ -251,7 +264,7 @@ void Assemble::readIn( ifstream &fh, vector<string> &headers, vector<string> &se
         }
         if ( line.empty() ) break;
         
-        size_t it = line.find_first_not_of( acceptedChars );
+        it = line.find_first_not_of( acceptedChars );
         if ( it != line.npos )
         {
             cerr << "Error: invalid sequence character \"" << line[it] << "\" on line " << to_string( lineNum ) << " of input file." << endl;

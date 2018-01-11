@@ -44,7 +44,6 @@ void Locus::finalise()
 
 bool Locus::plot()
 {
-    locusTest();
     for ( bool drxn : { 0, 1 } )
     {
         if ( !completed_[drxn] )
@@ -81,7 +80,6 @@ bool Locus::plotPath( Path &path, bool drxn )
     path.reset( forkNodes_[drxn], drxn );
     setForkLimits();
     vector<Span> initSpans = path.spans;
-    locusTest();
     
     // Prepare branches for first loop
     BranchList branches;
@@ -116,16 +114,13 @@ bool Locus::plotPath( Path &path, bool drxn )
     {
         // Prune weak divergent branches and set side nodes
         NodeSet delSet;
-        locusTest();
-        PathReview review( pv, path.path, reliable_, forkLimits_, finished_[!drxn] );
+        PathReview review( pv, path.path, reliable_, forkLimits_, finished_[!drxn], calibrate_ );
         pv.rerun = !review.review( path, sideNodes_[drxn], delSet );
         deleteNodes( delSet, drxn );
-        locusTest();
     }
     
     // Set furthest fork
     plotPathUpdateFork( pv, path, drxn );
-    locusTest();
     
     if ( pv.rerun )
     {
@@ -136,12 +131,8 @@ bool Locus::plotPath( Path &path, bool drxn )
     // Set new end and delta nodes or determine if locus is complete in this direction
     plotPathSetEnds( pv, best, last, path, drxn );
     
-    assert( path.path.back()->drxn_ == 2 || find( nodes_[drxn].begin(), nodes_[drxn].end(), path.path.back() ) != nodes_[drxn].end() );
-    
     // Update spans for next round of pathing
     reviewSpans( drxn );
-    
-    assert( path.path.back()->drxn_ == 2 || find( nodes_[drxn].begin(), nodes_[drxn].end(), path.path.back() ) != nodes_[drxn].end() );
     
     return true;
 }

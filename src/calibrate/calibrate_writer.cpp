@@ -101,6 +101,7 @@ void CalibrateWriter::pairing()
         {
             int32_t limits[2]{0};
             NodeList nodes = { new Node( seqs_[i], exts[0], seqs_[i].length(), 1 ) };
+            nodes[0]->drxn_ = 2;
             ExtVars ev( nodes, dummy, limits, bwt_, false, false );
             ++i;
             if ( nodes[0]->calibrateSeed( ev ) )

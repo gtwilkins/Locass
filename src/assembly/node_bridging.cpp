@@ -1410,6 +1410,12 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
     mn->recoil();
     
     int32_t coords[2] = { mn->bridgeCoords[0][0], mn->bridgeCoords[1][0] };
+    if ( mn->bridges[!pv.drxn][0]->drxn_ == 2 )
+    {
+        Node* origin = mn->bridges[!pv.drxn][0];
+        if ( pv.drxn ? coords[0] <= origin->ends_[0] + params.readLen
+                     : origin->ends_[1] - params.readLen <= coords[1] ) return false;
+    }
     NodeList hitNodes[2];
     vector<int32_t> hitCoords[2][2];
     for ( int i : { 0, 1 } )
@@ -1419,16 +1425,17 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
         mn->bridges[i][0]->overlapExtend( pv.nds[pv.drxn], iCoords, hitNodes[i], hitCoords[i], pv.drxn, i );
         for ( int j = 0; j < hitNodes[i].size(); )
         {
-            if ( hitNodes[i][j]->drxn_ == !pv.drxn )
+            int ol = hitCoords[i][1][j] - hitCoords[i][0][j];
+            int thisOl = mapSeqOverlap( ( i ? mn->seq : hitNodes[i][j]->seq_ ), ( i ? hitNodes[i][j]->seq_ : mn->seq ), ol );
+            if ( ol != thisOl || hitNodes[i][j]->drxn_ == !pv.drxn )
             {
-                assert( false );
                 hitNodes[i].erase( hitNodes[i].begin() + j );
                 hitCoords[i][0].erase( hitCoords[i][0].begin() + j );
                 hitCoords[i][1].erase( hitCoords[i][1].begin() + j );
-                if ( hitNodes[i].empty() ) return false;
             }
             else j++;
         }
+        if ( hitNodes[i].empty() ) return false;
     }
     
     NodeList nodes;

@@ -22,7 +22,7 @@
 class Reassemble
 {
 public:
-    Reassemble( Node* node, PathVars &pv, bool invalid );
+    Reassemble( Node* node, PathVars &pv, bool invalid, bool calibrate );
     ~Reassemble();
     
     bool reassemble( PathVars &pv, NodeSet &delSet, bool isAlleleFork=false );
@@ -34,6 +34,7 @@ private:
     void removeRedundant( vector<ReadEndMap*> &reads );
     void setWeakspot();
     bool tryBridge( PathVars &pv );
+    bool tryComplete( PathVars &pv );
     bool tryGap( PathVars &pv );
     bool tryHalf( PathVars &pv, NodeSet &delSet, bool drxn );
     bool tryMap( PathVars &pv );
@@ -44,7 +45,7 @@ private:
     vector<SeqPathReassemble*> seqs_;
     int32_t est_, minCover_;
     int32_t estLimits_[2], markLimits_[2], good_[2], high_[2], limits_[2];
-    bool allHigh_, allGood_, invalid_;
+    bool allHigh_, allGood_, invalid_, calibrate_;
 };
 
 #endif /* PATH_REASSEMBLY_H */

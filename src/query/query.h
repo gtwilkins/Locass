@@ -33,6 +33,8 @@ public:
     Querier( IndexReader* ir, QueryBinaries* qb );
     ~Querier();
     
+    int countKmer( string seq );
+    void estimateCoverage( ofstream &fh, int kmerLen, int sampleSize );
     string getSequence( ReadId id );
     ReadId isExtendable( string &seq, uint16_t minLen, bool drxn );
     vector<Extension> mapExtensions( bool &noMatches, string &seq, bool drxn, uint16_t minOver=1 );
