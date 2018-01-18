@@ -61,10 +61,12 @@ bool PathReview::review( Path &path, NodeList &sideNodes, NodeSet &delSet )
     bool assembled = resolveForks( delSet );
     assembled = resolveEnd( delSet ) && assembled;
     assembled = resolveMisassembly( delSet ) && assembled;
-    if ( resolveUnspanned( path, delSet ) ) assembled = false;
+    if ( assembled && resolveUnspanned( path, delSet ) ) assembled = false;
+    if ( calibrate_ && resolveCalibrate( delSet ) ) assembled = false;
     
     // Set new fork
     if ( fork_ && delSet.find( path.fork ) == delSet.end() ) path.fork = fork_;
+    for ( Node* node : pv_.newSet ) if ( node->drxn_ != drxn_ ) path.fork = NULL;
     
     // Update status of spans and remove invalid ones
     if ( assembled && path.fork ) reviewSpans( path );
@@ -82,8 +84,14 @@ bool PathReview::review( Path &path, NodeList &sideNodes, NodeSet &delSet )
     }
     
     for ( Node* node : path.path ) if ( delSet.find( node ) != delSet.end() ) assembled = false;
+    path.alleleSet.clear();
+    for ( ConPath con : cons_ )
+    {
+        path.alleleSet.insert( con.paths[0].begin(), con.paths[0].end() );
+        path.alleleSet.insert( con.paths[1].begin(), con.paths[1].end() );
+    }
     
-    
+    for ( Node* node : delSet ) assert( node->drxn_ != 2 );
     return assembled;
 }
 
@@ -325,6 +333,39 @@ AltPath PathReview::resolveBranch( Node* node, NodeSet &tSet, NodeSet &delSet )
     }
     
     return ds;
+}
+
+bool PathReview::resolveCalibrate( NodeSet &delSet )
+{
+    for ( Node* node : path_ )
+    {
+        if ( delSet.find( node ) != delSet.end() ) return false;
+        if ( node->stop_[drxn_] ) return false;
+        if ( node->coverage_ > params.cover * 1.5 )
+        {
+            if ( node->drxn_ == 2 )
+            {
+                for ( Node* nxt : node->getNextNodes( drxn_ ) ) nxt->dismantleNode( delSet, drxn_ );
+            }
+            else
+            {
+                NodeSet bckSet = node->getDrxnNodes( !drxn_ );
+                for ( Node* bck : bckSet )
+                {
+                    if ( bck->drxn_ == !drxn_ ) continue;
+                    for ( Node* nxt : bck->getNextNodes( drxn_ ) )
+                    {
+                        if ( bckSet.find( nxt ) != bckSet.end() ) continue;
+                        nxt->dismantleNode( delSet, drxn_ );
+                    }
+                }
+            }
+            
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 void PathReview::resolveConverge( Node* forks[2], NodeSet &convSet, NodeSet &delSet )
@@ -870,7 +911,8 @@ bool PathReview::resolveUnspanned( Path &path, NodeSet &delSet )
         for ( Node* fwd : fwdSet )
         {
             if ( bckSet.find( fwd ) != bckSet.end() ) continue;
-            fwd->dismantleNode( delSet, drxn_ );
+            if ( fwd->drxn_ == 2 ) fwd->stop( 5, drxn_ );
+            else fwd->dismantleNode( delSet, drxn_ );
         }
     }
     

@@ -190,62 +190,6 @@ void PathBranch::setSpans( vector<Span> &spans, bool drxn )
     }
 }
 
-Allele::Allele( PathScore* scores )
-{
-    paths[0] = scores[0].path;
-    paths[1] = scores[1].path;
-    complete = false;
-}
-
-bool Allele::anyInSet( NodeSet &nodes )
-{
-    bool found[2] = { false, false };
-    anyInSet( nodes, found );
-    return found[0] && found[1];
-}
-
-void Allele::anyInSet( NodeSet &nodes, bool* found )
-{
-    for ( int i : { 0, 1 } )
-    {
-        for ( Node* node : paths[i] )
-        {
-            if ( nodes.find( node ) != nodes.end() )
-            {
-                found[i] = true;
-                break;
-            }
-        }
-    }
-}
-
-//void Path::addSpan( Node* bgn, Node* nd, bool drxn )
-//{
-//    bool doAdd = true;
-//    for ( auto it = spans.begin(); it != spans.end(); )
-//    {
-//        if ( bgn->isFurther( (*it).begin->ends_[!drxn], !drxn, !drxn ) )
-//        {
-//            spans.erase( it, spans.end() );
-//            break;
-//        }
-//        if ( !(*it).end || bgn->isFurther( (*it).end->ends_[!drxn], !drxn, !drxn ) )
-//        {
-//            doAdd = false;
-//            if ( (*it).end && nd->isFurther( (*it).end->ends_[drxn], drxn, drxn ) )
-//            {
-//                (*it).end = NULL;
-//            }
-//            break;
-//        }
-//        it++;
-//    }
-//    if ( doAdd )
-//    {
-//        spans.push_back( Span( bgn ) );
-//    }
-//}
-
 void Path::completeSpan( Node* node, bool drxn )
 {
     bool doEnd = node->ends_[1] - node->ends_[0] > params.readLen * 2;
@@ -285,19 +229,6 @@ void Path::completeSpan( Node* node, bool drxn )
     }
     
     if ( allEnded ) isMulti = false;
-}
-
-void Path::getAllelesInSet( vector<Allele> &rAlleles, NodeSet &nodes )
-{
-    for ( Allele &allele : alleles )
-    {
-        bool found[2] = { false, false };
-        allele.anyInSet( nodes, found );
-        if ( found[0] && found[1] )
-        {
-            rAlleles.push_back( allele );
-        }
-    }
 }
 
 void Path::reset( NodeList forks, bool drxn )

@@ -66,24 +66,14 @@ struct PathScore
     bool isHaploid, notHaploid;
 };
 
-struct Allele
-{
-    Allele( PathScore* scores );
-    bool anyInSet( NodeSet &nodes );
-    void anyInSet( NodeSet &nodes, bool* found );
-    NodeList paths[2];
-    bool complete;
-};
-
 struct Path
 {
     void completeSpan( Node* node, bool drxn );
-    void getAllelesInSet( vector<Allele> &rAlleles, NodeSet &nodes );
     void reset( NodeList forks, bool drxn );
     
     Node* fork;
     NodeList path, convFork;
-    vector<Allele> alleles;
+    NodeSet alleleSet;
     vector<PathScore> convergents;
     BranchList divergent;
     vector<Span> spans;

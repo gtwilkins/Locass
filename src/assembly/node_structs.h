@@ -299,36 +299,17 @@ struct MappedReadEnd
     bool drxn, doMap;
 };
 
-//struct PathSeq
-//{
-//    PathSeq( Node* node );
-////    void clearEdges();
-//    bool doMap( PathVars &pv, int score, unordered_set<ReadId> &usedIds, bool drxn );
-//    static int getBest( PathVars &pv, vector<PathSeq> &pss, int &bestCount, int &bestOffset, bool bothDrxn );
-//    void getBest( int &count, int &offset, int32_t* coords, bool weakSpot, bool drxn );
-//    static void map( PathVars &pv, vector<PathSeq> &pss, Node* node, bool fromDrxn );
-//    void map( string q, ReadMark &mark, bool fromDrxn );
-//    void remap( vector<MappedReadEnd> (&hitReads)[2], string q, ReadMark &mark, bool fromDrxn );
-//    void removeDubious( PathVars &pv );
-//    void setEdges();
-//    static bool setWeakspot( vector<PathSeq> &pss, int32_t estimate[2] );
-//    void sortReads();
-//    bool tryBridge( PathVars &pv, int mapCount, int mapOffset, bool drxn );
-//    bool tryComplete( PathVars &pv, unordered_set<ReadId> &usedIds );
-//    bool tryMap( PathVars &pv, unordered_set<ReadId> &usedIds, bool remap, bool drxn );
-//    bool tryRemap( PathVars &pv, unordered_set<ReadId> &usedIds );
-//    
-//    vector<Coords> nodeCoords;
-//    vector<MappedReadEnd> reads[2];
-//    vector<MappedReadEnd> edges[2];
-//    unordered_set<ReadId> usedIds[2];
-//    NodeList nodes;
-//    NodeSet added;
-//    string seq;
-//    int32_t ends[2], highLimits[2], goodLimits[2], estimate, minCover;
-//    int dist;
-//    bool contMapping, allHigh, allGood, exhausted;
-//};
+struct PathRead
+{
+    PathRead(){ edges[0] = edges[1] = NULL; ols[0] = ols[1] = 0; };
+    static void offset( vector<PathRead*> reads, int offset );
+    static void setOverlaps( vector<PathRead*> &reads );
+    string seq;
+    int32_t coord;
+    vector<ReadId> ids;
+    PathRead* edges[2];
+    int ols[2];
+};
 
 #endif /* NODESTRUCTS_H */
 

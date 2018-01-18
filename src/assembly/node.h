@@ -119,6 +119,7 @@ private:
     static bool bridgeIslandSetOffsets( IslandVars &iv, NodeList &islandEnds, NodeList &tNodes );
     void bridgeIslandTrimEnd( ExtVars &ev, int32_t coord, bool doTruncate, bool drxn );
     void cloneBridge( PathVars &pv, NodeList &hitNodes );
+    static bool originBridge( PathVars &pv, NodeList edgeNodes[2], NodeList &newNodes );
     
 // NodeBypassing
 public:
@@ -426,6 +427,7 @@ public:
     void getMarksCount( int counts[2] );
     bool offsetNode( bool drxn );
     void resetMarks();
+    void resetUnmarked( bool drxn );
 private:
     void addMark( SeqNum readId, Coords &coords );
     void addRead( Overlap &read, int32_t anchor, bool olDrxn );
@@ -436,7 +438,6 @@ private:
     vector<ReadMark> getMarksBase( int drxn );
     void reAddMark( SeqNum readId, Coords &coords );
     void reAddMarks( vector<SeqNum> &readIds );
-    void resetUnmarked( bool drxn );
     void removeMark( SeqNum &readId );
     void removeMarks( unordered_set<SeqNum> &readIds, bool pushLimits, bool isPair, bool drxn );
     void sortMarks( vector<ReadMark> &marks, bool drxn );

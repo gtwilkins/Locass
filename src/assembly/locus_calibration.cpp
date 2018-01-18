@@ -43,35 +43,44 @@ void Locus::calibrate( LocusLibraryCount &lib )
         plot();
     }
     
+    finalise();
+    for ( int i : { 0, 1 } )
+    {
+        assert( paths_[i][0].path[0]->drxn_ == 2 );
+    }
+    
     NodeList nodes = getAllNodes();
     Node::calibrate( nodes, lib );
+    for ( int i : { 0, 1 } )
+    {
+        assert( paths_[i][0].path[0]->drxn_ == 2 );
+    }
     
     vector< pair<float, int> > coverages;
     
     int totalLen = 0;
     if ( !paths_[0][0].path.empty() && !paths_[1][0].path.empty() )
     {
-        NodeSet fwdSet = paths_[0][0].path.back()->getDrxnNodes( 1 );
-        NodeSet bckSet = paths_[1][0].path.back()->getDrxnNodes( 0 );
         NodeSet alleleSet;
-        for ( bool drxn : { 0, 1 } )
+        NodeSet pathSet;
+        for ( int i : { 0, 1 } )
         {
-            for ( Allele &allele : paths_[drxn][0].alleles )
-            {
-                alleleSet.insert( allele.paths[0].begin(), allele.paths[0].end() );
-                alleleSet.insert( allele.paths[1].begin(), allele.paths[1].end() );
-            }
+            assert( paths_[i][0].path[0]->drxn_ == 2 );
+            pathSet.insert( paths_[i][0].path.begin(), paths_[i][0].path.end() );
+            pathSet.insert( paths_[i][0].alleleSet.begin(), paths_[i][0].alleleSet.end() );
+            alleleSet.insert( paths_[i][0].alleleSet.begin(), paths_[i][0].alleleSet.end() );
         }
         
-        for ( Node* node : fwdSet )
+        for ( Node* node : pathSet )
         {
             int nodeLen = max( 1, node->ends_[1] - node->ends_[0] - params.readLen );
             if ( alleleSet.find( node ) != alleleSet.end() )
             {
+                nodeLen = max( 1, nodeLen / 2 );
                 coverages.push_back( make_pair( node->coverage_ * 2, nodeLen ) );
                 totalLen += nodeLen;
             }
-            else if ( bckSet.find( node ) != bckSet.end() )
+            else
             {
                 coverages.push_back( make_pair( node->coverage_, nodeLen ) );
                 totalLen += nodeLen;

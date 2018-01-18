@@ -199,8 +199,7 @@ bool Reassemble::reassemble( PathVars &pv, NodeSet &delSet, bool isAlleleFork )
     {
         if ( estLimits_[1] <= estLimits_[0] )
         {
-            fork_->dismantleNode( delSet, pv.drxn );
-            return true;
+            return false;
         }
         if ( tryBridge( pv ) ) return true;
         if ( tryHalf( pv, delSet, !pv.drxn ) ) return true;

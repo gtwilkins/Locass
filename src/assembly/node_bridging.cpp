@@ -1508,6 +1508,7 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
         {
             nodes.back()->addEdge( hitNodes[pv.drxn][i], hitCoords[pv.drxn][1][i] - hitCoords[pv.drxn][0][i], pv.drxn );
         }
+        if ( Node::originBridge( pv, hitNodes, nodes ) ) return true;
         int32_t dummy[2] = { params.locusLimits[0], params.locusLimits[1] };
         nodes[0]->propagateValidation( dummy, pv.drxn );
         pv.newSet.insert( nodes.begin(), nodes.end() );
@@ -1516,112 +1517,82 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
     return false;
 }
 
-//bool Node::mapBridge( PathVars &pv, Node* target, MapNode* mn, int32_t* coords, bool drxn )
-//{
-//    pv.bwt.mapSequence( mn->seq, mn->ids, mn->coords );
-//    mn->recoil();
-//    
-//    NodeList hitNodes[2];
-//    vector<int32_t> hitCoords[2][2];
-//    NodeSet cloneSet;
-//    for ( int i : { 0, 1 } )
-//    {
-//        int32_t iCoords[2]{ coords[i], coords[i] };
-//        iCoords[i] = iCoords[!i] + ( i ? mn->bridgeOverlaps[i][0] : -mn->bridgeOverlaps[i][0] );
-//        mn->bridges[i][0]->overlapExtend( pv.nodes, iCoords, hitNodes[i], hitCoords[i], pv.drxn, i );
-//        cloneSet = target->getDrxnNodes( drxn, true, true );
-//        target->getDrxnNodes( cloneSet, !drxn, true );
-//        for ( int j = 0; j < hitNodes[i].size(); )
-//        {
-//            if ( cloneSet.find( hitNodes[i][j] ) == cloneSet.end() )
-//            {
-//                hitNodes[i].erase( hitNodes[i].begin() + j );
-//                hitCoords[i][0].erase( hitCoords[i][0].begin() + j );
-//                hitCoords[i][1].erase( hitCoords[i][1].begin() + j );
-//                if ( hitNodes[i].empty() ) return false;
-//            }
-//            else j++;
-//        }
-//    }
-//    
-//    NodeSet fwdSet( hitNodes[drxn].begin(), hitNodes[drxn].end() );
-//    for ( Node* node : hitNodes[drxn] )
-//    {
-//        node->getDrxnNodes( fwdSet, drxn );
-//    }
-//    for ( Node* node : hitNodes[!drxn] )
-//    {
-//        assert( fwdSet.find( node ) == fwdSet.end() );
-//    }
-//    
-//    NodeList nodes;
-//    NodeSet newSet;
-//    vector<int> overlaps;
-//    setBridge( pv, newSet, nodes, overlaps, mn, pv.drxn );
-//    if ( !nodes.empty() )
-//    {
-//        if ( !pv.drxn )
-//        {
-//            reverse( nodes.begin(), nodes.end() );
-//            reverse( overlaps.begin(), overlaps.end() );
-//        }
-//        
-//        for ( Node* &node : nodes )
-//        {
-//            if ( newSet.find( node ) == newSet.end() )
-//            {
-//                if ( cloneSet.find( node ) != cloneSet.end() )
-//                {
-//                    node = new Node( node );
-//                    newSet.insert( node );
-//                }
-//                else
-//                {
-//                    node->clearEdges( !pv.drxn );
-//                    cloneSet.insert( node );
-//                    if ( node->drxn_ > 2 )
-//                    {
-//                        node->clearEdges( pv.drxn );
-//                        node->clearPairs();
-//                        node->drxn_ = pv.drxn ;
-//                        newSet.insert( node );
-//                        pv.islands.erase( remove( pv.islands.begin(), pv.islands.end(), node ), pv.islands.end() );
-//                        pv.nodes.push_back( node );
-//                    }
-//                }
-//            }
-//            else pv.nodes.push_back( node );
-//        }
-//        
-//        for ( int i = 0; i < hitNodes[!pv.drxn].size(); i++ )
-//        {
-//            hitNodes[!pv.drxn][i]->addEdge( nodes[0], hitCoords[!pv.drxn][1][i] - hitCoords[!pv.drxn][0][i], pv.drxn );
-//            for ( int j = 0; j < hitNodes[pv.drxn].size(); j++ )
-//            {
-//                hitNodes[!pv.drxn][i]->removeEdge( hitNodes[pv.drxn][j], pv.drxn );
-//                hitNodes[pv.drxn][j]->removeEdge( hitNodes[!pv.drxn][i], !pv.drxn );
-//            }
-//        }
-//        for ( int i = 0; i < overlaps.size(); i++ )
-//        {
-//            nodes[i]->addEdge( nodes[i+1], overlaps[i], pv.drxn );
-//        }
-//        for ( int i = 0; i < hitNodes[pv.drxn].size(); i++ )
-//        {
-//            NodeSet fwdSet = nodes.back()->getDrxnNodes( pv.drxn );
-//            if ( fwdSet.find( hitNodes[pv.drxn][i] ) == fwdSet.end() )
-//            {
-//                nodes.back()->addEdge( hitNodes[pv.drxn][i], hitCoords[pv.drxn][1][i] - hitCoords[pv.drxn][0][i], pv.drxn );
-//            }
-//        }
-//        for ( Node* node : nodes )
-//        {
-//            node->setValid();
-//        }
-//        return true;
-//    }
-//    return false;
-//}
+bool Node::originBridge( PathVars &pv, NodeList edgeNodes[2], NodeList &newNodes )
+{
+    bool isOriginBridge = false;
+    bool doEraseNew = false;
+    for ( Node* node : edgeNodes[!pv.drxn] )
+    {
+        if ( node->drxn_ == 2 )
+        {
+            if ( node->coverage_ > params.cover * 1.3 ) doEraseNew = true;
+            isOriginBridge = true;
+        }
+    }
+    if ( !isOriginBridge ) return false;
+    
+    NodeSet midSet;
+    int maxEdges[2]{0};
+    {
+        NodeSet fwdSet;
+        for ( Node* node : edgeNodes[!pv.drxn] ) node->getDrxnNodes( fwdSet, pv.drxn );
+        for ( Node* node : edgeNodes[pv.drxn] ) node->getDrxnNodesInSet( midSet, fwdSet, !pv.drxn );
+        for ( int i : {0,1} )
+        {
+            for ( Node* node : edgeNodes[i] ) maxEdges[i] = max( maxEdges[i], node->getBestOverlap( !i ) );
+            maxEdges[i] = params.readLen - ( ( params.readLen - maxEdges[i] ) / 2 );
+        }
+    }
+    
+    int32_t limits[2] = { params.locusLimits[1], params.locusLimits[0] };
+    int readSize = 0;
+    for ( Node* node : midSet )
+    {
+        limits[0] = min( limits[0], node->ends_[0] );
+        limits[1] = max( limits[1], node->ends_[1] );
+        readSize += node->reads_.size() * params.readLen;
+    }
+    
+    int32_t len = limits[1] - limits[0] + params.readLen - maxEdges[0] - maxEdges[1];
+    float cover = float(readSize) / float( len );
+    if ( cover > params.cover * 1.3 ) doEraseNew = true;
+    
+    if ( doEraseNew )
+    {
+        for ( Node* node : newNodes )
+        {
+            node->dismantleNode();
+            pv.nds[pv.drxn].erase( remove( pv.nds[pv.drxn].begin(), pv.nds[pv.drxn].end(), node ), pv.nds[pv.drxn].end() );
+            delete node;
+        }
+        
+        for ( Node* node : edgeNodes[!pv.drxn] )
+        {
+            if ( node->drxn_ != 2 ) continue;
+            bool doReassign = true;
+            for ( int i : {0,1} ) for ( Node* nxt : node->getNextNodes( i ) ) if ( nxt->drxn_ == 2 ) doReassign = false;
+            if ( !doReassign || node->edges_[pv.drxn].size() != 1 ) continue;
+            node->drxn_ = !pv.drxn;
+            pv.nds[2].erase( remove( pv.nds[2].begin(), pv.nds[2].end(), node ), pv.nds[2].end() );
+            pv.nds[!pv.drxn].push_back( node );
+            node->reliable_ = false;
+            node->isReliable( true );
+            pv.newSet.insert( node );
+            
+            for ( Node* nxt : node->getNextNodes( pv.drxn ) )
+            {
+                pv.nds[pv.drxn].erase( remove( pv.nds[pv.drxn].begin(), pv.nds[pv.drxn].end(), nxt ), pv.nds[pv.drxn].end() );
+                pv.nds[2].push_back( nxt );
+                nxt->drxn_ = 2;
+                nxt->reliable_ = true;
+                pv.newSet.insert( nxt );
+            }
+        }
+        
+        return true;
+    }
+    return false;
+}
 
 void Node::setBridge( PathVars &pv, NodeSet &newSet, NodeList &nodes, vector<int> &overlaps, MapNode* mn, bool drxn )
 {

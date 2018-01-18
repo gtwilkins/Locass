@@ -41,6 +41,9 @@ void Extend::extend( vector<Locus*> loci )
         double startTime = clock();
         locus->extendLocus();
         locus->finalise();
+//        ofstream align( "/media/glen/ssd/pdalign.fa" );
+//        ofstream dump( "/media/glen/ssd/pddump" );
+//        locus->exportLocus( align, dump );
         
         string header, origin, lft, rght;
         locus->getExtends( header, origin, lft, rght );

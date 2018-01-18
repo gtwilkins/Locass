@@ -55,6 +55,7 @@ public:
 private:
     bool resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged );
     AltPath resolveBranch( Node* node, NodeSet &tSet, NodeSet &delSet );
+    bool resolveCalibrate( NodeSet &delSet );
     void resolveConverge( Node* forks[2], NodeSet &convSet, NodeSet &delSet );
     bool resolveConverge( Node* fork, NodeSet &delSet );
     AltPath resolveDiverge( Node* fork, NodeSet &delSet );

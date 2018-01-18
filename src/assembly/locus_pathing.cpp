@@ -36,7 +36,6 @@ void Locus::finalise()
         for ( Path &path : paths_[drxn] )
         {
             path.spans.clear();
-            path.alleles.clear();
             while( !plotPath( path, drxn ) );
         }
     }
@@ -87,7 +86,6 @@ bool Locus::plotPath( Path &path, bool drxn )
     PathBranch best, last;
     PathVars pv( bwt_, nodes_, remappedReads_[drxn], finalise_, drxn );
     plotPathGetFirst( pv, best, path, branches, drxn );
-    
     while ( best.branch )
     {
         // Parse converging paths
@@ -1165,6 +1163,19 @@ void Locus::plotPathTrimPrep( PathVars &pv, Path &path, bool drxn )
 
 void Locus::plotPathUpdateFork( PathVars &pv, Path &path, bool drxn )
 {
+    for ( Node* node : pv.newSet )
+    {
+        if ( node->drxn_ != pv.drxn )
+        {
+            setOriginEnds();
+            forkNodes_[0] = originEnds_[0];
+            forkNodes_[1] = originEnds_[1];
+            return;
+        }
+    }
+    
+    if ( finalise_ ) return;
+    
     if ( path.fork )
     {
         forkNodes_[drxn].clear();

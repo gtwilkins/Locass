@@ -35,7 +35,7 @@ Assemble::Assemble( int argc, char** argv )
 {
     Filenames* fns = NULL;
     string inFile, outFile;
-    int32_t limit = 20000;
+    int32_t limit = 10000;
     int errorCount = 5;
     
     for ( int i ( 2 ); i < argc; )
@@ -119,13 +119,6 @@ Assemble::Assemble( int argc, char** argv )
     {
         int i = 0;
         outFile = "locass-out.fa";
-//        ifstream testout( outFile );
-//        while ( testout )
-//        {
-//            testout.close();
-//            outFile = "locass-out-" + to_string( ++i ) + ".fa";
-//            testout.open( outFile );
-//        }
     }
     
     if ( limit > 200000 )
@@ -151,13 +144,6 @@ Assemble::Assemble( int argc, char** argv )
     Querier bwt( ir, qb );
     params.checkReady();
     
-//    if ( true )
-//    {
-//        ifstream fh( "/media/glen/ssd/dump14" );
-//        Locus* locus = new Locus( bwt, fh );
-//        assert( false );
-//    }
-    
     cout << "Performing seeded locus assembly" << endl << endl;
     cout << "Error rate set to " << to_string( errorCount ) << "%" << endl;
     cout << "Extension limit set to " << to_string( limit ) << endl;
@@ -172,9 +158,6 @@ Assemble::Assemble( int argc, char** argv )
     {
         cout << "Assembling locus " << to_string( i + 1 ) << " of " << to_string( seqs.size() ) << endl;
         cout << "\tSearching for target loci... " << endl;
-//        string h = "x";
-//        string s = "AGACGACCACCGTAATCATAATCACACTGGAGGTCACCTCCACCATCATCATAACCAGACAGAAGAGTGGGACCAGGACAGGCCAGATATGAGGCCATTCC";
-//        Seed seed( h, s, bwt, errorCount );
         Seed seed( headers[i], seqs[i], bwt, errorCount );
         seedCount++;
         if ( seed.warning() ) continue;

@@ -87,253 +87,243 @@ Locus::Locus( Querier &bwt, NodeList* nodes )
     Node::seedValidate( seedSet, dummy, validLimits_, ends_, false );
 }
 
-Locus::Locus( Querier &bwt, ifstream &fh )
-: Locus( bwt )
-{
-    int32_t limits[2];
-    NodeSet seedSet, dummy, delSet;
-    NodeSet nxtSets[2];
-    for ( Node* node : Node::importNodes( fh ) )
-    {
-        if ( delSet.find( node ) == delSet.end() && node->reads_.empty() )
-        {
-            node->dismantleNode();
-            delete node;
-            continue;
-        }
-        nodes_[node->drxn_].push_back( node );
-        seedSet.insert( node );
-//        if ( node->id_ == "341" )
+//Locus::Locus( Querier &bwt, ifstream &fh )
+//: Locus( bwt )
+//{
+//    int32_t limits[2];
+//    NodeSet seedSet, dummy, delSet;
+//    NodeSet nxtSets[2];
+//    for ( Node* node : Node::importNodes( fh ) )
+//    {
+//        if ( delSet.find( node ) == delSet.end() && node->reads_.empty() )
 //        {
-//            limits[0] = node->ends_[0];
-//            limits[1] = node->ends_[1];
-//            node->getNextNodes( nxtSets[0], 0 );
-//            node->getNextNodes( nxtSets[1], 1 );
-//            node->clearEdges( 1 );
 //            node->dismantleNode();
-//            delSet.insert( node );
+//            delete node;
+//            continue;
 //        }
-        
-        node->stop_[0] = node->edges_[0].empty();
-        node->stop_[1] = node->edges_[1].empty();
-//        node->clearReads();
-    }
-//    deleteNodes( delSet, 1 );
-    deleteNodes( delSet );
-    delSet.clear();
-    nodes_[2][0]->offsetForward( 1, false, true );
-    nodes_[2][0]->offsetForward( 0, false, true );
-    
-    NodeList nodes = getAllNodes();
-//    Node::graphCover( "/media/glen/ssd/HtCoverage.csv", nodes );
-//    Node::graphPairs( "/media/glen/ssd/HtPairing.csv", nodes );
-    Node::remapGenes( bwt, nodes );
-    
-//    setOriginEnds();
-//    MapNode* mn1 = new MapNode();
-//    mn1->seq = "ACAACAACAACAACAAACAACTGCACACGGATATGATTACAGCCTATACAGTTTCATTCAGTTTGATGATGCTACTGTTCTGACAGTCATTTTTATCAACACAAGTGAGGCAAATTATAAACAGTCACGTATTTTGGTGCAATATACCATGCTCCGTGATGAGATTTCATGACTTTGCCTAACAAAATTATATAACTTTATTACTCCCTTACAGTTCATGCACTAAGTGAACGGAGAGAAAGAGGAAATGGCAGGGGACTAGGTCGCTTCGGAGGAAGGCCAGGATCTGATAGACCCCAAATGATGGTCGGACCTAGGCAAGATGGACCACCAATGGGCGGAAGGAGGTTTGATGGCCTTGGACAAGGTGACCCACTGATCGGTGGACGTGGACAAAATGGCTGGCCGATGGGCGGTAGGAGGTTTGATGGCCCTGGACAAGATGACCCAGTGATCGGTGGACGTGGACCAAATGGCGGACCAGTGGGCGGTAGGAGGTTTGATGGACCTGGATTTGGTGGCTTCAGACCCGAAGGTATAGGGAGACCTTTCTTCGGTCACGGAGGAAGGCATGCTGACGGAGAAGGAGAAATGGAGGCTGCTCAACCAATCGGTGATGGTCAAGGATGGCCCGATCGTTTCGATGGTCCTGGACGATTTTCCGGACGTCCTCACCCAGGCCGTGGTGGCTATTATGGACATCACCATAGTCCTCCCCATGACCTGCAAACCGACGAACAACCGTTCGGTCAGTACAACGACAGCAGCAGCGAGGAGGATGGCCGACCTCACCCTCATCCTCACCCTCTCCATCACCCCCATCCTCCCCATCACCCTCCACCACTACATCACCCTCCCCATCACCCTCCCCATCACCCTCCACCACCCCATCACCCTCCCCATCACCCTCCACCTCCCCCTCACTCTTACCACCACCATCTCCACCACCATGACCATCATAACAAGACAGACGACCACCGTAATCATAATCACACTGGAGGTCACCTCCACCATCATCATAACCAGACAGAAGAGTGGGACCAGGACAGGCCAGATATGAGGCCATTCCGGTTCAATTCTTTCGATAGCCAGGAGGATGGCCGACCTTACCCTCACCCTTACCCTCCCCATCACCCACCCCATTACCC";
-//    bwt.mapSequence( mn1->seq, mn1->ids, mn1->coords );
-//    Node* node1 = new Node( mn1, 0, mn1->ids.size()-1, 1 );
-//    MapNode* mn2 = new MapNode();
-//    mn2->seq = "CCCCATCACCCTCCACCACCCCACCCCCCTCCCCATCACCCTCCACCTCCCCATCACCCTCCCCATCACCCTCACTCTCACCACCACCACCATGACCATCATAACAAGACAGACGACCACCGTAATCATAATCACACGGCAGGCCACATCCACCATCATCATAACCAGACAGAAGAGTGGGACCAGGACAGACCAGAGATGAGGCCATTCTGGTTCAATCCTTTCGGTCGCAAGCCTTTCGGACGACGTCCATTTGGCAGACGCTACCACACCGAAGAGGGATTTCCCAGGCGCGATGGACACCGTCATCCTCATGGCATGCATGGCAACCGAGGACGTTGGGATGAGAATGAAAATGAGGAGGAAGAACATCTCCCGACTGAAAGAATGACAACCTCTGCAATGCCTAAAGTGGTCGAAATCGATATCACCGAAATAGACAACAACGTCATCGACAAAGTGTAGACTTTGTCAAGAAATTTTTTGCTTTTGAGTAAACGAACTATTGTCAGGGGCGTCGGTCCGTTTTTCGGAGGGGGGGGGGGGGATAAAGAGAGCCTAATAATACCCCTCATGATTTGTTAACGCCTCTTAATTATGCTAATTACCAGCTTCTACCCGGAGCGAGTGGAGCGGAGCGAGCGGCAAAATTGAAGTCTGATCGTGTAATACATTTTATATTTCATTGTTTGGAAGGTTTCATTTCCCGAGTTTTGCATCATTTTCCCTTTTTTTATTGTACACCTCCGGGTTCATTGGTGGGGCAAAACGATATGTTTGCCTCCAAATTTTTTTTTGTGGGGGCAACTGCCCCCTACCACCCCACAATCGACGCCCCTGACTATTATCAATGTGCGGCTGGCAGATGCTAGGGCGTTTAACGATTTGCACCTTTCTGCTAAACGTAACGAGTACCATTTCGTTTAGCAAAAGGTCGTTGGCACTAATATCTTAAAAATGTATGATTATTTTTGATACAAAACTATATGTACTAAAATTGGGTAGTTACCATTTTCACTTTTTTATTAGTCGATAAAGAGAGAAATCCCTGTCATGTTTCGAAAATGGAATACAGAGCGATCAAAACCTTAGAAGCGAGTTACGAGAAAATTGATTTATGGCATGCTCGCGTGCCTAAAGTCATTCTGTCTTTTCCATTAACAGTATTCCAGAAATTCAATGCCATGTTCATAACATTCGAAAGTCTACCATTTTATTACAAACTCAAAGAGACTAGAAGGTGAAACCAACAAATTGAAATTATAATTTCCATTTGCACGGTATTGTATATGTGAAATAAAGATATATCGCAATTCATTACAAAATGATAATTATGTAGCTTTTATTTTATTATGTAGGCCTTGATATTTTCAATCGTGACTGAACTGAGTATACTCTTTTCTTTTTTTATTTTTTTTTTCATCCTTCTTAGTCATAAATACTAGGATCTATTAAATAATATATTATTAATAGATCCTAGTATTTATGACGAAGAAGAAGGATGAGAAAAATAAGAAAAAAAA";
-//    bwt.mapSequence( mn2->seq, mn2->ids, mn2->coords );
-//    Node* node2 = new Node( mn2, 0, mn2->ids.size()-1, 1 );
+//        nodes_[node->drxn_].push_back( node );
+//        seedSet.insert( node );
+//        
+//        node->stop_[0] = node->edges_[0].empty();
+//        node->stop_[1] = node->edges_[1].empty();
+////        node->clearReads();
+//    }
+////    deleteNodes( delSet, 1 );
+//    deleteNodes( delSet );
+//    delSet.clear();
+//    nodes_[2][0]->offsetForward( 1, false, true );
+//    nodes_[2][0]->offsetForward( 0, false, true );
 //    
-//    node2->offset( 1200 );
-//    cout << ">node1" << endl;
-//    cout << node1->seq_ << endl;
-//    cout << ">node2" << endl;
-//    cout << node2->seq_ << endl;
-//    node1->addEdge( node2, -80, 1, true, true );
+//    NodeList nodes = getAllNodes();
+////    Node::graphCover( "/media/glen/ssd/HtCoverage.csv", nodes );
+////    Node::graphPairs( "/media/glen/ssd/HtPairing.csv", nodes );
+//    Node::remapGenes( bwt, nodes );
+//    
+////    setOriginEnds();
+////    MapNode* mn1 = new MapNode();
+////    mn1->seq = "ACAACAACAACAACAAACAACTGCACACGGATATGATTACAGCCTATACAGTTTCATTCAGTTTGATGATGCTACTGTTCTGACAGTCATTTTTATCAACACAAGTGAGGCAAATTATAAACAGTCACGTATTTTGGTGCAATATACCATGCTCCGTGATGAGATTTCATGACTTTGCCTAACAAAATTATATAACTTTATTACTCCCTTACAGTTCATGCACTAAGTGAACGGAGAGAAAGAGGAAATGGCAGGGGACTAGGTCGCTTCGGAGGAAGGCCAGGATCTGATAGACCCCAAATGATGGTCGGACCTAGGCAAGATGGACCACCAATGGGCGGAAGGAGGTTTGATGGCCTTGGACAAGGTGACCCACTGATCGGTGGACGTGGACAAAATGGCTGGCCGATGGGCGGTAGGAGGTTTGATGGCCCTGGACAAGATGACCCAGTGATCGGTGGACGTGGACCAAATGGCGGACCAGTGGGCGGTAGGAGGTTTGATGGACCTGGATTTGGTGGCTTCAGACCCGAAGGTATAGGGAGACCTTTCTTCGGTCACGGAGGAAGGCATGCTGACGGAGAAGGAGAAATGGAGGCTGCTCAACCAATCGGTGATGGTCAAGGATGGCCCGATCGTTTCGATGGTCCTGGACGATTTTCCGGACGTCCTCACCCAGGCCGTGGTGGCTATTATGGACATCACCATAGTCCTCCCCATGACCTGCAAACCGACGAACAACCGTTCGGTCAGTACAACGACAGCAGCAGCGAGGAGGATGGCCGACCTCACCCTCATCCTCACCCTCTCCATCACCCCCATCCTCCCCATCACCCTCCACCACTACATCACCCTCCCCATCACCCTCCCCATCACCCTCCACCACCCCATCACCCTCCCCATCACCCTCCACCTCCCCCTCACTCTTACCACCACCATCTCCACCACCATGACCATCATAACAAGACAGACGACCACCGTAATCATAATCACACTGGAGGTCACCTCCACCATCATCATAACCAGACAGAAGAGTGGGACCAGGACAGGCCAGATATGAGGCCATTCCGGTTCAATTCTTTCGATAGCCAGGAGGATGGCCGACCTTACCCTCACCCTTACCCTCCCCATCACCCACCCCATTACCC";
+////    bwt.mapSequence( mn1->seq, mn1->ids, mn1->coords );
+////    Node* node1 = new Node( mn1, 0, mn1->ids.size()-1, 1 );
+////    MapNode* mn2 = new MapNode();
+////    mn2->seq = "CCCCATCACCCTCCACCACCCCACCCCCCTCCCCATCACCCTCCACCTCCCCATCACCCTCCCCATCACCCTCACTCTCACCACCACCACCATGACCATCATAACAAGACAGACGACCACCGTAATCATAATCACACGGCAGGCCACATCCACCATCATCATAACCAGACAGAAGAGTGGGACCAGGACAGACCAGAGATGAGGCCATTCTGGTTCAATCCTTTCGGTCGCAAGCCTTTCGGACGACGTCCATTTGGCAGACGCTACCACACCGAAGAGGGATTTCCCAGGCGCGATGGACACCGTCATCCTCATGGCATGCATGGCAACCGAGGACGTTGGGATGAGAATGAAAATGAGGAGGAAGAACATCTCCCGACTGAAAGAATGACAACCTCTGCAATGCCTAAAGTGGTCGAAATCGATATCACCGAAATAGACAACAACGTCATCGACAAAGTGTAGACTTTGTCAAGAAATTTTTTGCTTTTGAGTAAACGAACTATTGTCAGGGGCGTCGGTCCGTTTTTCGGAGGGGGGGGGGGGGATAAAGAGAGCCTAATAATACCCCTCATGATTTGTTAACGCCTCTTAATTATGCTAATTACCAGCTTCTACCCGGAGCGAGTGGAGCGGAGCGAGCGGCAAAATTGAAGTCTGATCGTGTAATACATTTTATATTTCATTGTTTGGAAGGTTTCATTTCCCGAGTTTTGCATCATTTTCCCTTTTTTTATTGTACACCTCCGGGTTCATTGGTGGGGCAAAACGATATGTTTGCCTCCAAATTTTTTTTTGTGGGGGCAACTGCCCCCTACCACCCCACAATCGACGCCCCTGACTATTATCAATGTGCGGCTGGCAGATGCTAGGGCGTTTAACGATTTGCACCTTTCTGCTAAACGTAACGAGTACCATTTCGTTTAGCAAAAGGTCGTTGGCACTAATATCTTAAAAATGTATGATTATTTTTGATACAAAACTATATGTACTAAAATTGGGTAGTTACCATTTTCACTTTTTTATTAGTCGATAAAGAGAGAAATCCCTGTCATGTTTCGAAAATGGAATACAGAGCGATCAAAACCTTAGAAGCGAGTTACGAGAAAATTGATTTATGGCATGCTCGCGTGCCTAAAGTCATTCTGTCTTTTCCATTAACAGTATTCCAGAAATTCAATGCCATGTTCATAACATTCGAAAGTCTACCATTTTATTACAAACTCAAAGAGACTAGAAGGTGAAACCAACAAATTGAAATTATAATTTCCATTTGCACGGTATTGTATATGTGAAATAAAGATATATCGCAATTCATTACAAAATGATAATTATGTAGCTTTTATTTTATTATGTAGGCCTTGATATTTTCAATCGTGACTGAACTGAGTATACTCTTTTCTTTTTTTATTTTTTTTTTCATCCTTCTTAGTCATAAATACTAGGATCTATTAAATAATATATTATTAATAGATCCTAGTATTTATGACGAAGAAGAAGGATGAGAAAAATAAGAAAAAAAA";
+////    bwt.mapSequence( mn2->seq, mn2->ids, mn2->coords );
+////    Node* node2 = new Node( mn2, 0, mn2->ids.size()-1, 1 );
+////    
+////    node2->offset( 1200 );
+////    cout << ">node1" << endl;
+////    cout << node1->seq_ << endl;
+////    cout << ">node2" << endl;
+////    cout << node2->seq_ << endl;
+////    node1->addEdge( node2, -80, 1, true, true );
+//////    ExtVars ev( nodes_[1], nodes_[4], validLimits_, bwt_ );
+//////    IslandVars iv( ev, 1 );
+//////    iv.origin.push_back( nodes_[2][0] );
+//////    node1->extendCount_ = 20;
+//////    node1->extendIsland( iv, 0 );
+////    node1->drxn_ = 1;
+////    node2->drxn_ = 1;
+////    nodes_[1].push_back( node1 );
+////    nodes_[1].push_back( node2 );
+//////    node2->extendCount_ = 20;
+//////    node2->extendNode( ev, 1 );
+////    for ( Node* prv : nxtSets[0] )
+////    {
+////        int ol = mapSeqOverlap( prv->seq_, node1->seq_, 5 );
+////        prv->addEdge( node1, ol, 1, true, false );
+////    }
+////    for ( Node* nxt : nxtSets[1] )
+////    {
+////        int ol = mapSeqOverlap( node2->seq_, nxt->seq_, 5 );
+////        node2->addEdge( nxt, ol, 1, true, false );
+////    }
+//    
+////    for ( ReadMark &mark : node1->marks_[0] )
+////    {
+////        if ( !params.isReadPe( mark.id ) ) continue;
+////        if ( node1->reads_.find( mark.id ) != node1->reads_.end() ) continue;
+////        if ( node2->reads_.find( mark.id ) != node2->reads_.end() ) continue;
+////        cout << ">" << mark.id << endl;
+////        cout << string( mark.estimate - 101, '-' ) << bwt.getSequence( mark.id ) << endl;
+////    }
+////    for ( ReadMark &mark : node2->marks_[1] )
+////    {
+////        if ( !params.isReadPe( mark.id ) ) continue;
+////        if ( node1->reads_.find( mark.id ) != node1->reads_.end() ) continue;
+////        if ( node2->reads_.find( mark.id ) != node2->reads_.end() ) continue;
+////        cout << ">" << mark.id << endl;
+////        cout << string( mark.estimate, '-' ) << bwt.getSequence( mark.id ) << endl;
+////    }
+//    
+////    vector<int> offsets;
+////    for ( ReadMark &mark : node1->marks_[0] )
+////    {
+////        if ( !params.isReadPe( mark.id ) ) continue;
+////        auto it = node2->reads_.find( mark.id );
+////        if ( it != node2->reads_.end() )
+////        {
+////            int32_t coord = it->second[1];
+////            offsets.push_back( mark.estimate - it->second[1] );
+////        }
+////    }
+////    
+////    assert( false );
+////    
+////    MapNode* mn = new MapNode();
+////    mn->seq = "CCCTCCCCATCACCCTCCACCTCCCCATCACCCTCCCCATCACCCTCACTCTCACCACCACCACCATGACCATCATAACAAGACAGACGACCACCGTAATCATAAT";
+//////    mn->seq = "CTTACCACCACCATCTCCACCACCATGACCATCATAACAAGACAGACGACCACCGTAATCATAATCACACTGGAGGTCACCTCCACCATCATCATAACCAGACAGAAGAGTGGGACCAGGACAGGCCAGATATGAGGCCATTCCGGTTCAATTCTTTCGATAGCCAGGAGGATGGCCGACCTTACCCTCACCCTTACCCTCCCCATCACCCACCCCATTACCC";
+////    bwt.mapSequence( mn->seq, mn->ids, mn->coords );
+////    mn->recoil();
+////    Node* newNode = new Node( mn, 0, mn->ids.size()-1, 1 );
 ////    ExtVars ev( nodes_[1], nodes_[4], validLimits_, bwt_ );
 ////    IslandVars iv( ev, 1 );
 ////    iv.origin.push_back( nodes_[2][0] );
-////    node1->extendCount_ = 20;
-////    node1->extendIsland( iv, 0 );
-//    node1->drxn_ = 1;
-//    node2->drxn_ = 1;
-//    nodes_[1].push_back( node1 );
-//    nodes_[1].push_back( node2 );
-////    node2->extendCount_ = 20;
-////    node2->extendNode( ev, 1 );
-//    for ( Node* prv : nxtSets[0] )
-//    {
-//        int ol = mapSeqOverlap( prv->seq_, node1->seq_, 5 );
-//        prv->addEdge( node1, ol, 1, true, false );
-//    }
-//    for ( Node* nxt : nxtSets[1] )
-//    {
-//        int ol = mapSeqOverlap( node2->seq_, nxt->seq_, 5 );
-//        node2->addEdge( nxt, ol, 1, true, false );
-//    }
-    
-//    for ( ReadMark &mark : node1->marks_[0] )
-//    {
-//        if ( !params.isReadPe( mark.id ) ) continue;
-//        if ( node1->reads_.find( mark.id ) != node1->reads_.end() ) continue;
-//        if ( node2->reads_.find( mark.id ) != node2->reads_.end() ) continue;
-//        cout << ">" << mark.id << endl;
-//        cout << string( mark.estimate - 101, '-' ) << bwt.getSequence( mark.id ) << endl;
-//    }
-//    for ( ReadMark &mark : node2->marks_[1] )
-//    {
-//        if ( !params.isReadPe( mark.id ) ) continue;
-//        if ( node1->reads_.find( mark.id ) != node1->reads_.end() ) continue;
-//        if ( node2->reads_.find( mark.id ) != node2->reads_.end() ) continue;
-//        cout << ">" << mark.id << endl;
-//        cout << string( mark.estimate, '-' ) << bwt.getSequence( mark.id ) << endl;
-//    }
-    
-//    vector<int> offsets;
-//    for ( ReadMark &mark : node1->marks_[0] )
-//    {
-//        if ( !params.isReadPe( mark.id ) ) continue;
-//        auto it = node2->reads_.find( mark.id );
-//        if ( it != node2->reads_.end() )
-//        {
-//            int32_t coord = it->second[1];
-//            offsets.push_back( mark.estimate - it->second[1] );
-//        }
-//    }
-//    
-//    assert( false );
-//    
-//    MapNode* mn = new MapNode();
-//    mn->seq = "CCCTCCCCATCACCCTCCACCTCCCCATCACCCTCCCCATCACCCTCACTCTCACCACCACCACCATGACCATCATAACAAGACAGACGACCACCGTAATCATAAT";
-////    mn->seq = "CTTACCACCACCATCTCCACCACCATGACCATCATAACAAGACAGACGACCACCGTAATCATAATCACACTGGAGGTCACCTCCACCATCATCATAACCAGACAGAAGAGTGGGACCAGGACAGGCCAGATATGAGGCCATTCCGGTTCAATTCTTTCGATAGCCAGGAGGATGGCCGACCTTACCCTCACCCTTACCCTCCCCATCACCCACCCCATTACCC";
-//    bwt.mapSequence( mn->seq, mn->ids, mn->coords );
-//    mn->recoil();
-//    Node* newNode = new Node( mn, 0, mn->ids.size()-1, 1 );
-//    ExtVars ev( nodes_[1], nodes_[4], validLimits_, bwt_ );
-//    IslandVars iv( ev, 1 );
-//    iv.origin.push_back( nodes_[2][0] );
-//    newNode->extendCount_ = 20;
-//    newNode->extendIsland( iv, 0 );
-//    nodes_[1].push_back( newNode );
-//    for ( Node* n : iv.merged[0] ) n->drxn_ = 1;
-//    newNode->extendNode( ev, 1 );
-//    for ( bool drxn : { 0, 1 } )
-//    {
-//        for ( ReadMark &mark : newNode->marks_[drxn] )
-//        {
-//            if ( !params.isReadPe( mark.id ) ) continue;
-//            cout << ">" << mark.id << endl;
-//            cout << string( ( mark.estimate - newNode->ends_[0] )+600, '-' ) << bwt.getSequence( mark.id ) << endl;
-//        }
-//    }
-//    assert( false );
-//    for ( Node* nxt : newNode->getNextNodes( 1 ) )
-//    {
-//        nxt->extendCount_ = 20;
-//        nxt->extendNode( ev, 1 );
-//        if ( nxt->stop_[1] == 1 )
-//        {
-//            nxt->dismantleNode();
-//            delSet.insert( nxt );
-//            deleteNodes( delSet );
-//            delSet.clear();
-//        }
-//    }
-//    
-//    assert( false );
-    
-//    NodeList allNodes = getAllNodes();
-////    limits[0] -= 300;
-////    limits[1] += 300;
-//    int j = 0;
-//    for ( Node* n : allNodes )
-//    {
-//        for ( int i : { 0, 1 } )
-//        {
-//            for ( ReadMark &mark : n->marks_[i] )
-//            {
-//                if ( mark.estimate < limits[0] || limits[1] < mark.estimate ) continue;
-//                if ( !params.isReadPe( mark.id ) ) continue;
-//                bool doAdd = true;
-//                for ( Node* n2 : allNodes )
-//                {
-//                    if ( n2->reads_.find( mark.id ) != n2->reads_.end() )
-//                    {
-//                        doAdd = false;
-//                        break;
-//                    }
-//                }
-//                if ( !doAdd ) continue;
-//                string seq = bwt_.getSequence( mark.id );
-//                cout << ">" << j << endl;
-//                cout << string( mark.estimate - limits[0], '-' ) << seq << endl;
-//                j++;
-//            }
-//        }
-//    }
-//    
-//    assert( false );
-////    ExtVars ev( nodes_[0], nodes_[3], validLimits_, bwt_ );
-////    IslandVars iv( ev, 0 );
-////    iv.origin.push_back( nodes_[2][0] );
-//    for ( Node* node : nodes_[1] )
-//    {
-//        if ( node->id_ != "589" ) continue;
-//        int ol = mapSeqOverlap( node->seq_, newNode->seq_, 5 );
-//        node->addEdge( newNode, ol, 1 );
-//    }
-//    for ( Node* node : nodes_[1] )
-//    {
-//        if ( node->id_ != "297" ) continue;
-//        int ol = mapSeqOverlap( newNode->seq_, node->seq_, 5 );
-//        newNode->addEdge( node, ol, 1 );
-//    }
-//    nodes_[1].push_back( newNode );
-    
-//    newNode->drxn_ = 3;
-//    newNode->extendCount_ = 20;
-//    newNode->extendIsland( iv, 1 );
-//    for ( Node* nxt : newNode->getNextNodes( 1 ) )
-//    {
-//        nxt->extendCount_ = 20;
-//        nxt->extendIsland( iv, 1 );
-//    }
-//    newNode->drxn_ = 0;
-//    newNode->extendCount_ = 20;
-//    newNode->extendNode( ev, 0 );
-//    for ( Node* nxt : newNode->getNextNodes( 0 ) )
-//    {
-//        if ( !nxt->isContinue( 0 ) ) continue;;
-//        nxt->extendCount_ = 20;
-//        nxt->extendNode( ev, 0 );
-//    }
-//    for ( Node* node : nodes_[0] )
-//    {
-//        if ( node->seq_.find( "TGGTCATACCCCCGCCCCCAGTTGAAAAGAAATTATTGCAT" ) == node->seq_.npos ) continue;
-//        NodeSet nxtSet = node->getNextNodes( 1 );
-////        node->clearEdges( 1 );
-//        int ol = mapSeqOverlap( node->seq_, newNode->seq_, 15 );
-////        if ( !ol ) ol = -1;
-//        node->addEdge( newNode, -22, 0, true, true );
-////        for ( Node* nxt : nxtSet )
+////    newNode->extendCount_ = 20;
+////    newNode->extendIsland( iv, 0 );
+////    nodes_[1].push_back( newNode );
+////    for ( Node* n : iv.merged[0] ) n->drxn_ = 1;
+////    newNode->extendNode( ev, 1 );
+////    for ( bool drxn : { 0, 1 } )
+////    {
+////        for ( ReadMark &mark : newNode->marks_[drxn] )
 ////        {
-////            ol = mapSeqOverlap( newNode->seq_, nxt->seq_, 15 );
-////            newNode->addEdge( nxt, ol, 1 );
+////            if ( !params.isReadPe( mark.id ) ) continue;
+////            cout << ">" << mark.id << endl;
+////            cout << string( ( mark.estimate - newNode->ends_[0] )+600, '-' ) << bwt.getSequence( mark.id ) << endl;
 ////        }
-////        break;
-//    }
-    
-//    Node::seedValidate( seedSet, dummy, validLimits_, ends_, false );
-//    int count = 0;
-//    for ( Node* node : getAllNodes() )
-//    {
-//        node->mapMates( bwt_, count );
-//    }
+////    }
+////    assert( false );
+////    for ( Node* nxt : newNode->getNextNodes( 1 ) )
+////    {
+////        nxt->extendCount_ = 20;
+////        nxt->extendNode( ev, 1 );
+////        if ( nxt->stop_[1] == 1 )
+////        {
+////            nxt->dismantleNode();
+////            delSet.insert( nxt );
+////            deleteNodes( delSet );
+////            delSet.clear();
+////        }
+////    }
+////    
+////    assert( false );
+//    
+////    NodeList allNodes = getAllNodes();
+//////    limits[0] -= 300;
+//////    limits[1] += 300;
+////    int j = 0;
+////    for ( Node* n : allNodes )
+////    {
+////        for ( int i : { 0, 1 } )
+////        {
+////            for ( ReadMark &mark : n->marks_[i] )
+////            {
+////                if ( mark.estimate < limits[0] || limits[1] < mark.estimate ) continue;
+////                if ( !params.isReadPe( mark.id ) ) continue;
+////                bool doAdd = true;
+////                for ( Node* n2 : allNodes )
+////                {
+////                    if ( n2->reads_.find( mark.id ) != n2->reads_.end() )
+////                    {
+////                        doAdd = false;
+////                        break;
+////                    }
+////                }
+////                if ( !doAdd ) continue;
+////                string seq = bwt_.getSequence( mark.id );
+////                cout << ">" << j << endl;
+////                cout << string( mark.estimate - limits[0], '-' ) << seq << endl;
+////                j++;
+////            }
+////        }
+////    }
+////    
+////    assert( false );
+//////    ExtVars ev( nodes_[0], nodes_[3], validLimits_, bwt_ );
+//////    IslandVars iv( ev, 0 );
+//////    iv.origin.push_back( nodes_[2][0] );
+////    for ( Node* node : nodes_[1] )
+////    {
+////        if ( node->id_ != "589" ) continue;
+////        int ol = mapSeqOverlap( node->seq_, newNode->seq_, 5 );
+////        node->addEdge( newNode, ol, 1 );
+////    }
+////    for ( Node* node : nodes_[1] )
+////    {
+////        if ( node->id_ != "297" ) continue;
+////        int ol = mapSeqOverlap( newNode->seq_, node->seq_, 5 );
+////        newNode->addEdge( node, ol, 1 );
+////    }
+////    nodes_[1].push_back( newNode );
+//    
+////    newNode->drxn_ = 3;
+////    newNode->extendCount_ = 20;
+////    newNode->extendIsland( iv, 1 );
+////    for ( Node* nxt : newNode->getNextNodes( 1 ) )
+////    {
+////        nxt->extendCount_ = 20;
+////        nxt->extendIsland( iv, 1 );
+////    }
+////    newNode->drxn_ = 0;
+////    newNode->extendCount_ = 20;
+////    newNode->extendNode( ev, 0 );
+////    for ( Node* nxt : newNode->getNextNodes( 0 ) )
+////    {
+////        if ( !nxt->isContinue( 0 ) ) continue;;
+////        nxt->extendCount_ = 20;
+////        nxt->extendNode( ev, 0 );
+////    }
+////    for ( Node* node : nodes_[0] )
+////    {
+////        if ( node->seq_.find( "TGGTCATACCCCCGCCCCCAGTTGAAAAGAAATTATTGCAT" ) == node->seq_.npos ) continue;
+////        NodeSet nxtSet = node->getNextNodes( 1 );
+//////        node->clearEdges( 1 );
+////        int ol = mapSeqOverlap( node->seq_, newNode->seq_, 15 );
+//////        if ( !ol ) ol = -1;
+////        node->addEdge( newNode, -22, 0, true, true );
+//////        for ( Node* nxt : nxtSet )
+//////        {
+//////            ol = mapSeqOverlap( newNode->seq_, nxt->seq_, 15 );
+//////            newNode->addEdge( nxt, ol, 1 );
+//////        }
+//////        break;
+////    }
+//    
+////    Node::seedValidate( seedSet, dummy, validLimits_, ends_, false );
+////    int count = 0;
+////    for ( Node* node : getAllNodes() )
+////    {
+////        node->mapMates( bwt_, count );
+////    }
+////    assert( false );
+////    this->plot();
+////    Node::mergeAll( nodes_, delSet );
+////    deleteNodes( delSet );
+////    delSet.clear();
+////    ofstream dump( "/media/glen/ssd/dump15" );
+////    ofstream align( "/media/glen/ssd/align2.fa" );
+//    this->exportLocus( align, dump );
 //    assert( false );
-//    this->plot();
-//    Node::mergeAll( nodes_, delSet );
-//    deleteNodes( delSet );
-//    delSet.clear();
-    ofstream dump( "/media/glen/ssd/dump15" );
-    ofstream align( "/media/glen/ssd/align2.fa" );
-    this->exportLocus( align, dump );
-    assert( false );
-}
+//}
 
 Locus::~Locus()
 {

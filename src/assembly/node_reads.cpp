@@ -319,11 +319,17 @@ void Node::resetUnmarked( bool drxn )
 {
     if ( getPairHitsTotal() < marks_[0].size() + marks_[1].size() )
     {
+        NodeList nodes;
+        for ( auto &np : pairs_ ) nodes.push_back( np.first );
         unordered_set<ReadId> ids;
         for ( ReadMark const &mark : marks_[drxn] ) ids.insert( mark.id );
         for ( ReadMark const &mark : getMarksBase( drxn ) )
-            if ( ids.find( mark.id ) == ids.end() ) 
-                marks_[drxn].push_back( mark );
+        {
+            bool doAdd = true;
+            if ( ids.find( mark.id ) != ids.end() ) continue;
+            for ( Node* t : nodes ) if ( t->reads_.find( mark.id ) != t->reads_.end() ) doAdd = false;
+            if ( doAdd ) marks_[drxn].push_back( mark );
+        }
         sortMarks( marks_[drxn], drxn );
     }
 }

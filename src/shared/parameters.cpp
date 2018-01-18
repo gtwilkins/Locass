@@ -222,12 +222,12 @@ void Parameters::set()
         }
     }
     
+    if ( totalPe ) avgPeMean = totalPeMean / totalPe;
     if ( isCalibrated )
     {
         peCover = ( (float)totalPe / (float)seqCount ) * cover;
         peRatio = peCover / cover;
         queryMpCutoff = 5 + ( peRatio > 0.9 ? 1 : ( log( 5000.0 ) / log( 1.0 / ( 1.0 - peRatio ) ) ) );
-        avgPeMean = totalPeMean / totalPe;
         readSpacing = (float)readLen / cover;
         isSet = true;
     }

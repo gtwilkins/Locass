@@ -80,9 +80,131 @@ void Locus::exportLocus( ofstream &align, ofstream &dump )
         return a->ends_[0] < b->ends_[0];
     });
     
+    bool addMarks = true;
+    if ( addMarks ) ends[0] -= params.maxMpMean;
+    
+    vector<PathRead*> reads;
     for ( Node* node : nodes )
     {
+        node->resetUnmarked( 0 );
+        node->resetUnmarked( 1 );
         node->exportNodeAlign( align, ends[0] );
+        if ( !node->isValidated() && node->pairs_.empty() ) continue;
+        for ( int i : { 0, 1 } )
+        {
+            for ( ReadMark mark : node->marks_[i] )
+            {
+                PathRead* read = new PathRead();
+                read->seq = bwt_.getSequence( mark.id );
+                read->coord = mark.estimate - ( !i ? params.readLen : 0 );
+                read->ids.push_back( mark.id );
+                reads.push_back( read );
+            }
+        }
+    }
+    PathRead::setOverlaps( reads );
+    
+    unordered_set<PathRead*> usedReads;
+    vector< vector<PathRead*> > paths;
+    for ( PathRead* read : reads )
+    {
+        if ( ( read->edges[0] && read->edges[0]->edges[1] != read )
+                || ( !read->edges[0] && read->edges[1] ) )
+        {
+            vector<PathRead*> path = { read };
+            usedReads.insert( read );
+            int len = read->seq.length();
+            vector<int> estimates;
+            for ( int i = 0; i < read->ids.size(); i++ ) estimates.push_back( read->coord );
+            while ( path.back()->edges[1] 
+                    && usedReads.find( path.back()->edges[1] ) == usedReads.end()
+                    && path.back()->edges[1]->edges[0] == path.back() )
+            {
+                path.push_back( path.back()->edges[1] );
+                len -= path.back()->ols[0];
+                for ( int i = 0; i < path.back()->ids.size(); i++ ) estimates.push_back( path.back()->coord + len );
+                path.back()->coord = path[0]->coord + len;
+                len += path.back()->seq.length();
+            }
+            
+            int estimate = 0;
+            for ( int est : estimates ) estimate += est;
+            estimate /= (int)estimates.size();
+            int offset = estimate - path[0]->coord;
+            PathRead::offset( path, offset );
+            paths.push_back( path );
+        }
+    }
+    
+    bool didOffset = true;
+    usedReads.clear();
+    for ( vector<PathRead*> &path : paths )
+    {
+        if ( !path[0]->edges[0] && !path.back()->edges[1] )
+        {
+            usedReads.insert( path.begin(), path.end() );
+        }
+    }
+    while ( didOffset )
+    {
+        didOffset = false;
+        for ( vector<PathRead*> &path : paths )
+        {
+            if ( usedReads.find( path[0] ) != usedReads.end() ) continue;
+            if ( usedReads.find( path[0]->edges[0] ) != usedReads.end() )
+            {
+                usedReads.insert( path.begin(), path.end() );
+                int coord = path[0]->edges[0]->coord + path[0]->edges[0]->seq.length();
+                int offset = coord - path[0]->coord;
+                if ( !offset ) continue;
+                didOffset = true;
+                PathRead::offset( path, offset );
+            }
+            else if ( usedReads.find( path.back()->edges[1] ) != usedReads.end() )
+            {
+                usedReads.insert( path.begin(), path.end() );
+                int coord = path.back()->coord + path.back()->seq.length() - path.back()->ols[1];
+                int offset = path.back()->edges[1]->coord - coord;
+                if ( !offset ) continue;
+                didOffset = true;
+                PathRead::offset( path, offset );
+            }
+        }
+    }
+    
+    sort( paths.begin(), paths.end(), []( vector<PathRead*> const &a, vector<PathRead*> const &b ){
+        return a[0]->coord < b[0]->coord;
+    } );
+    
+    usedReads.clear();
+    for ( vector<PathRead*> path : paths )
+    {
+        for ( PathRead* read : path )
+        {
+            usedReads.insert( read );
+            for ( ReadId id : read->ids )
+            {
+                align << ">" << id << endl;
+                align << string( max( 0, read->coord - ends[0] ), '-' ) << read->seq << endl;
+            }
+        }
+    }
+    
+    sort( reads.begin(), reads.end(), []( PathRead* a, PathRead* b ){
+        return a->coord < b->coord;
+    } );
+    
+    for ( PathRead* read : reads )
+    {
+        if ( usedReads.find( read ) == usedReads.end() )
+        {
+            for ( ReadId id : read->ids )
+            {
+                align << ">" << id << endl;
+                align << string( max( 0, read->coord - ends[0] ), '-' ) << read->seq << endl;
+            }
+        }
+        delete read;
     }
 }
 
