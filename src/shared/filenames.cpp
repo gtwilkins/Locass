@@ -20,10 +20,15 @@
 
 #include "filenames.h"
 #include <iostream>
+#include <cassert>
+#include <sys/stat.h>
 
 Filenames::Filenames( string inPrefix )
 : prefix( inPrefix )
 {
+    string folder = inPrefix.substr( 0, inPrefix.find_last_of( '/' ) );
+    makeFolder( folder );
+    
     bin = prefix + "-bin.dat";
     bwt = prefix + "-bwt.dat";
     ids = prefix + "-ids.dat";
@@ -79,6 +84,30 @@ ofstream Filenames::getWriteStream( string &filename )
 FILE* Filenames::getBinary( bool doRead, bool doEdit )
 {
     return ( doRead ? getReadPointer( bin, doEdit ) : getWritePointer( bin )  );
+}
+
+bool Filenames::isFolder( string folder )
+{
+    struct stat st;
+    return ( stat( folder.c_str(), &st ) == 0 && ( S_ISDIR( st.st_mode ) ) );
+}
+
+void Filenames::makeFolder( string folder )
+{
+    if ( isFolder( folder ) ) return;
+    size_t it = folder.find_last_of( '/' );
+    if ( it != folder.npos )
+    {
+        string parent = folder.substr( 0, it );
+        if ( !isFolder( parent ) ) makeFolder( parent );
+    }
+    
+    const int dir_err = mkdir( folder.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH );
+    if ( dir_err == -1 )
+    {
+        cerr << "Error creating directory \"" << folder << "\"!" << endl;
+        exit(1);
+    }
 }
 
 void Filenames::removeFile( string &filename )
@@ -192,6 +221,7 @@ void PreprocessFiles::setCyclerFinal( FILE* &inBwt, FILE* &outBwt, FILE* &inEnd,
     
     inBwt = getReadPointer( tmpBwt[iIn], false );
     outBwt = getWritePointer( bwt );
+    inEnd = getReadPointer( tmpEnd[iIn], false );
     outEnd = getWritePointer( ids );
 }
 

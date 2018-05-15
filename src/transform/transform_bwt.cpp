@@ -158,6 +158,7 @@ void BwtCycler::finishIter( uint8_t i )
     {
         writeRun( splitChar, splitRun );
         currSplit = false;
+        if ( splitChar == 4 ) rewriteEnd( splitRun );
     }
     
     while ( currPos < charSizes[i] )
@@ -310,12 +311,13 @@ void BwtCycler::prepOutFinal()
     isFinal = true;
     if ( !writeEndBwt ) setWriteEnds();
     
+    endCount = 0;
     uint8_t bwtBegin = 57, idsBegin = 9;
-    CharId endCount = basePos[0] + basePos[1] + basePos[2] + basePos[3];
+    CharId finalEndCount = basePos[0] + basePos[1] + basePos[2] + basePos[3];
     fwrite( &bwtBegin, 1, 1, outBwt );
     fwrite( &id, 8, 1, outBwt );
     fwrite( &bwtCount, 8, 1, outBwt );
-    fwrite( &endCount, 8, 1, outBwt );
+    fwrite( &finalEndCount, 8, 1, outBwt );
     fwrite( &charCounts, 8, 4, outBwt );
     
     fwrite( &idsBegin, 1, 1, outEnd );
@@ -410,10 +412,12 @@ void BwtCycler::readNextPos()
         {
             ReadId thisRun = nextPos - currPos;
             splitRun -= thisRun;
+            if ( splitChar == 4 ) rewriteEnd( thisRun );
             writeRun( splitChar, thisRun );
         }
         else
         {
+            if ( splitChar == 4 ) rewriteEnd( splitRun );
             writeRun( splitChar, splitRun );
             currSplit = false;
         }
@@ -437,6 +441,27 @@ void BwtCycler::run( uint8_t* inChars, uint8_t* inEnds, uint8_t cycle )
     
     assert( !bwtLeft );
     flush( cycle );
+}
+
+void BwtCycler::rewriteEnd( ReadId runLen )
+{
+    assert( runLen );
+    while ( runLen-- )
+    {
+        if ( pInEnd == IDS_BUFFER )
+        {
+            fread( inEndBuff, 4, min( endLeft, IDS_BUFFER ), inEnd );
+            pInEnd = 0;
+        }
+        if ( pOutEnd == IDS_BUFFER )
+        {
+            fwrite( outEndBuff, 4, IDS_BUFFER, outEnd );
+            pOutEnd = 0;
+        }
+        outEndBuff[ pOutEnd++ ] = inEndBuff[ pInEnd++ ];
+        ++endCount;
+        --endLeft;
+    }
 }
 
 void BwtCycler::runIter( uint8_t i )
@@ -469,6 +494,7 @@ void BwtCycler::runIter( uint8_t i )
     {
         writeRun( splitChar, splitRun );
         currSplit = false;
+        if ( splitChar == 4 ) rewriteEnd( splitRun );
     }
     
     while ( currPos < charSizes[i] )
@@ -562,25 +588,7 @@ void BwtCycler::writeBwt()
     }
     
     writeRun( c, runLen );
-    
-    if ( c == 4 )
-    {
-        while ( runLen-- )
-        {
-            if ( pInEnd == IDS_BUFFER )
-            {
-                fread( inEndBuff, 4, min( endLeft, IDS_BUFFER ), inEnd );
-                pInEnd = 0;
-            }
-            if ( pOutEnd == IDS_BUFFER )
-            {
-                fwrite( outEndBuff, 4, IDS_BUFFER, outEnd );
-                pOutEnd = 0;
-            }
-            outEndBuff[ pOutEnd++ ] = inEndBuff[ pInEnd++ ];
-            --endLeft;
-        }
-    }
+    if ( c == 4 ) rewriteEnd( runLen );
 }
 
 void BwtCycler::writeBwtByte( uint8_t c )

@@ -440,6 +440,12 @@ bool Node::offset( int32_t off )
     return false;
 }
 
+void Node::offsetEdge( Edge &e, bool drxn )
+{
+    int32_t off = ends_[drxn] - e.node->ends_[!drxn] + ( drxn ? -e.overlap : e.overlap );
+    e.node->offset( off );
+}
+
 void Node::offsetForward( bool drxn, bool sameGraph, bool notSelf )
 {
     if ( !notSelf )
@@ -494,16 +500,12 @@ void Node::offsetForward( NodeSet &currSet, NodeSet &alreadySet, NodeSet &fwdSet
                 bool first = true;
                 for ( Edge &e : curr->edges_[!drxn] )
                 {
-                    if ( fwdSet.find( e.node ) != fwdSet.end() )
-                    {
-                        valid = valid && alreadySet.find( e.node ) != alreadySet.end();
-                        if ( valid )
-                        {
-                            int32_t edgeOffset = e.node->ends_[drxn] - curr->ends_[!drxn] + ( drxn ? -e.overlap : e.overlap );
-                            off = first ? edgeOffset : ( drxn ? max( off, edgeOffset ) : min( off, edgeOffset ) );
-                            first = false;
-                        }
-                    }
+                    if ( fwdSet.find( e.node ) == fwdSet.end() ) continue;
+                    valid = valid && alreadySet.find( e.node ) != alreadySet.end();
+                    if ( !valid ) continue;
+                    int32_t edgeOffset = e.node->ends_[drxn] - curr->ends_[!drxn] + ( drxn ? -e.overlap : e.overlap );
+                    off = first ? edgeOffset : ( drxn ? max( off, edgeOffset ) : min( off, edgeOffset ) );
+                    first = false;
                 }
 
                 if ( valid )
@@ -529,6 +531,8 @@ void Node::offsetForward( NodeSet &currSet, NodeSet &alreadySet, NodeSet &fwdSet
                 nxtSet.insert( curr );
             }
         }
+        
+        if ( !didAdvance ) break;
         assert( didAdvance );
         currSet = nxtSet;
     }

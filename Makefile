@@ -1,6 +1,7 @@
 PREFIX = /usr/local/bin/
-INC=-Isrc -Isrc/assembly -Isrc/calibrate -Isrc/commands -Isrc/index -Isrc/query -Isrc/shared -Isrc/transform
-VPATH=src:src/assembly:src/calibrate:src/assembly:src/commands:src/index:src/query:src/shared:src/transform
+DBG=-g
+INC=-Isrc -Isrc/assembly -Isrc/calibrate -Isrc/commands -Isrc/index -Isrc/query -Isrc/shared -Isrc/transform -Isrc/correct
+VPATH=src:src/assembly:src/calibrate:src/assembly:src/commands:src/index:src/query:src/shared:src/transform:src/correct
 
 SRCS =  \
 	locass.cpp \
@@ -13,6 +14,8 @@ SRCS =  \
 	transform_structs.cpp \
 	transform.cpp \
 	transform_binary.cpp \
+	correct.cpp \
+	correct_structs.cpp \
 	calibrate_writer.cpp \
 	calibrate_structs.cpp \
 	timer.cpp \
@@ -57,6 +60,7 @@ SRCS =  \
 	path_merge.cpp \
 	path_reassembly.cpp \
 	path_review.cpp \
+	path_seed.cpp \
 	path_sequence.cpp \
 	query_state.cpp \
 	query_binary.cpp \
@@ -68,9 +72,9 @@ SRCS =  \
 # C++ compiler
 CXX = g++
 # C++ flags; passed to compiler
-CXXFLAGS = -std=c++11 -g
+CXXFLAGS = -std=c++11
 # Linker flags; passed to compiler
-LDFLAGS = -std=c++11 -g
+LDFLAGS = -std=c++11
 # Dependency flags; passed to compiler
 DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.Td
 # Objects directory
@@ -85,9 +89,9 @@ OBJS = $(patsubst %,$(OBJDIR)/%.o,$(basename $(SRCS)))
 DEPS = $(patsubst %,$(DEPDIR)/%.d,$(basename $(SRCS)))
 
 # Generic link executable
-LINK.o = $(CXX) $(LDFLAGS) -o $@
+LINK.o = $(CXX) $(LDFLAGS) $(DBG) -o $@
 # Generic compile object
-COMPILE.cc = $(CXX) $(DEPFLAGS) $(CXXFLAGS) $(INC) -c -o $@
+COMPILE.cc = $(CXX) $(DEPFLAGS) $(CXXFLAGS) $(DBG) $(INC) -c -o $@
 POSTCOMPILE = @mv -f $(DEPDIR)/$*.Td $(DEPDIR)/$*.d && touch $@
 
 all: locass

@@ -48,6 +48,7 @@ private:
     void readNextId();
     void readNextPos();
     void readNextSap();
+    void rewriteEnd( ReadId runLen );
     void runIter( uint8_t i );
     void setReadEnds();
     void setWriteEnds();

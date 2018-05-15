@@ -23,6 +23,62 @@
 
 extern Parameters params;
 
+int QueryState::setFirst()
+{
+    int base = 0;
+    int thisBase = 0;
+    bool isGood = q[0] < 4;
+    int bestLen = isGood ? 1 : -1;
+    int pos = 0;
+    while ( ++pos < params.readLen )
+    {
+        if ( q[pos] < 4 )
+        {
+            if ( !isGood )
+            {
+                thisBase = pos;
+                isGood = true;
+            }
+            else if ( pos - thisBase > bestLen )
+            {
+                base = thisBase;
+                bestLen = pos - thisBase;
+            }
+        }
+        else isGood = false;
+    }
+    if ( bestLen < 13 ) return -1;
+    
+    if ( base )
+    {
+        for ( int i = 0; i < params.readLen; i++ )
+        {
+            q[i] = i + base < params.readLen ? q[i + base] : 6;
+        }
+    }
+    
+    return base;
+}
+
+void QueryState::updateSeq( string &seq, int off, bool drxn )
+{
+    for ( int i = 0; i < seqLen - off; i++ )
+    {
+        if ( i > seq.length() && q[i] > 3 ) return;
+        char c = drxn ? ( q[i] == 0 ? 'T' : ( q[i] == 3 ? 'A' : ( q[i] == 1 ? 'G' : 'C' ) ) )
+                      : ( q[i] == 0 ? 'A' : ( q[i] == 3 ? 'T' : ( q[i] == 1 ? 'C' : 'G' ) ) );
+        
+        if ( seq.length() - off < i )
+        {
+            if ( drxn ) seq = c + seq;
+            else seq += c;
+            continue;
+        }
+        int j = drxn ? seq.length() - 1 - i - off : i + off;
+        if ( seq[j] == 'N' ) seq[j] = c;
+    }
+}
+
 QuerySeedState::QuerySeedState( string &seq, MappedSeqs &ms, int errorRate )
 : len( seq.length() ), ms( ms )
 {
@@ -85,7 +141,7 @@ bool QuerySeedState::advance( int it, int k, int &thisErrors, bool drxn )
 {
     i = it + 1;
     
-    if ( i + 1 >= len )
+    if ( i >= len )
     {
         if ( !thisErrors ) iError = len;
         j = k;

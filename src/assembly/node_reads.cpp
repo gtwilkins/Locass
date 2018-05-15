@@ -52,8 +52,9 @@ void Node::addRead( Overlap &read, int32_t anchor, bool olDrxn )
     addMark( read.readId, coords );
 }
 
-void Node::addRead( SeqNum readId, int32_t bgn, int32_t nd, bool isRedundant )
+bool Node::addRead( SeqNum readId, int32_t bgn, int32_t nd, bool isRedundant, bool notClones )
 {
+    if ( clones_ && notClones ) return false;
     Coords coords( bgn, nd, isRedundant );
     auto r = reads_.insert( make_pair( readId, coords ) );
     if ( !r.second )
@@ -62,6 +63,23 @@ void Node::addRead( SeqNum readId, int32_t bgn, int32_t nd, bool isRedundant )
         r.first->second = coords;
     }
     addMark( readId, coords );
+    if ( clones_ )
+    {
+        for ( Node* clone : *clones_ )
+        {
+            int32_t offset = clone->ends_[0] - ends_[0];
+            Coords cloneCoords( bgn + offset, nd + offset, isRedundant );
+            r = clone->reads_.insert( make_pair( readId, cloneCoords ) );
+            if ( !r.second )
+            {
+                clone->removeMark( readId );
+                r.first->second = cloneCoords;
+            }
+            clone->addMark( readId, cloneCoords );
+        }
+    }
+    
+    return true;
 }
 
 void Node::addRead( NodeMapRead &mapRead, bool drxn )
@@ -169,7 +187,7 @@ bool Node::findOverlap( Node* &hitNode, int32_t* coords, string &seq, NodeList &
 bool Node::findRead( SeqNum &readId, Coords *&coords, bool inclRedundant )
 {
     auto hit = reads_.find( readId );
-    if ( hit != reads_.end() && ( inclRedundant || !hit->second.redundant ) )
+    if ( hit != reads_.end() && ( inclRedundant || !isRedundant( &hit->second ) ) )
     {
         coords = &hit->second;
         return true;
@@ -221,6 +239,21 @@ void Node::getMarksCount( int counts[2] )
             counts[drxn]++;
         }
     }
+}
+
+bool Node::isRedundant( Coords* coords )
+{
+    if ( coords->redundant
+            || (*coords)[1] <= ends_[0] + getBestOverlap( 0 ) 
+            || ends_[1] - getBestOverlap( 1 ) <= (*coords)[0] ) return true;
+    int len = (*coords)[1] - (*coords)[0];
+    for ( auto &read : reads_ )
+    {
+        if ( len >= read.second[1] - read.second[0] ) continue;
+        if ( read.second[0] <= (*coords)[0] && (*coords)[1] <= read.second[1] ) return true;
+    }
+    
+    return false;
 }
 
 bool Node::offsetNode( bool drxn )

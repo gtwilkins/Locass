@@ -37,6 +37,7 @@ Assemble::Assemble( int argc, char** argv )
     string inFile, outFile;
     int32_t limit = 10000;
     int errorCount = 5;
+    bool drxns[2] = { false, false };
     
     for ( int i ( 2 ); i < argc; )
     {
@@ -88,6 +89,23 @@ Assemble::Assemble( int argc, char** argv )
             limit = stoi( argv[i+1] );
             i += 2;
         }
+        else if ( !strcmp( argv[i], "--haploid" ) )
+        {
+            params.haploid = true;
+            i++;
+        }
+        else if ( !strcmp( argv[i], "--right" ) )
+        {
+            drxns[1] = true;
+            params.drxns[0] = false;
+            i++;
+        }
+        else if ( !strcmp( argv[i], "--left" ) )
+        {
+            drxns[0] = true;
+            params.drxns[0] = true;
+            i++;
+        }
         else
         {
             cerr << "Unrecognised argument: \"" << argv[i] << "\"" << endl << endl;
@@ -95,6 +113,8 @@ Assemble::Assemble( int argc, char** argv )
             exit( EXIT_FAILURE );
         }
     }
+    
+    if ( drxns[0] && drxns[1] ) params.drxns[0] = params.drxns[1] = true;
     
     if ( argc <= 2 )
     {
@@ -157,16 +177,16 @@ Assemble::Assemble( int argc, char** argv )
     for ( int i = 0; i < seqs.size(); i++ )
     {
         cout << "Assembling locus " << to_string( i + 1 ) << " of " << to_string( seqs.size() ) << endl;
-        cout << "\tSearching for target loci... " << endl;
+        cout << "    Searching for target loci... " << endl;
         Seed seed( headers[i], seqs[i], bwt, errorCount );
         seedCount++;
         if ( seed.warning() ) continue;
         seed.assemble();
         vector<Locus*> loci = seed.getLoci();
-        cout << ( loci.empty() ? "\tNo target loci found." : "\tTarget loci found!" ) << endl;
+        cout << ( loci.empty() ? "    No target loci found." : "    tTarget loci found!" ) << endl;
         if ( !loci.empty() )
         {
-            cout << "\tExtending seeded loci... " << endl;
+            cout << "    Extending seeded loci... " << endl;
             extend.extend( loci );
             cout << "\tExtension complete!" << endl;
             locusCount+= loci.size();

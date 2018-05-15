@@ -458,14 +458,17 @@ void Node::mergeDrxn( NodeSet &delSet, bool drxn )
         if ( edges_[drxn][0].overlap <= 0 ) edges_[drxn][0].isLeap = true;
         if ( edges_[drxn][0].isLeap ) return;
         Node* node = edges_[drxn][0].node;
-        if ( clones_ || node->clones_ ) return;
+        if ( clones_ || node->clones_ || dontExtend_ || node->dontExtend_ ) return;
         int ol = edges_[drxn][0].overlap;
         if ( node->edges_[!drxn].size() != 1 ) return;
+        int seqLen = node->seq_.length();
         
         for ( auto &read : node->reads_ )
         {
-            if ( reads_.find( read.first ) != reads_.end() )
+            if ( reads_.find( read.first ) != reads_.end() && !node->isRedundant( &read.second ) )
             {
+                auto it = reads_.find( read.first );
+                int32_t coords[2] = { it->second[0], it->second[1] };
                 return;
             }
         }
@@ -475,7 +478,6 @@ void Node::mergeDrxn( NodeSet &delSet, bool drxn )
         int32_t offset = drxn ? ends_[1] - ol - node->ends_[0]
                               : ends_[0] - node->ends_[1] + ol;
         assert( node->seq_.length() == node->ends_[1] - node->ends_[0] );
-        int reads[3] = { (int)l->reads_.size(), (int)r->reads_.size(), int(l->reads_.size() + r->reads_.size()) };
         node->clearPairs();
         string lSeq = l->seq_.substr( l->seq_.length() - ol );
         string rSeq = r->seq_.substr( 0, ol );
@@ -497,7 +499,7 @@ void Node::mergeDrxn( NodeSet &delSet, bool drxn )
         {
             x[0] = min( x[0], read.second[0] );
             x[1] = max( x[1], read.second[1] );
-            this->addRead( read.first, read.second[0] + offset, read.second[1] + offset, read.second.redundant );
+            addRead( read.first, read.second[0] + offset, read.second[1] + offset, read.second.redundant );
         }
         int32_t limits[2] = { ends_[1], ends_[0] };
         for ( auto &read : reads_ )
@@ -505,9 +507,14 @@ void Node::mergeDrxn( NodeSet &delSet, bool drxn )
             limits[0] = min( limits[0], read.second[0] );
             limits[1] = max( limits[1], read.second[1] );
         }
-        assert( reads[2] == reads_.size() );
+        
         assert( limits[0] == ends_[0] );
-        assert( limits[1] == ends_[1] );
+        if ( limits[1] < ends_[1] )
+        {
+            assert( edges_[1].empty() );
+            ends_[1] = limits[1];
+            seq_ = seq_.substr( 0, ends_[1] - ends_[0] );
+        }
         node->dismantleNode();
         delSet.insert( node );
     }
@@ -546,6 +553,19 @@ void Node::recoil( int32_t diff, bool drxn )
     {
         this->addEdge( eNodes[i], ols[i], drxn, false, ols[i] <= 0 );
     }
+}
+
+void Node::remap( Querier &bwt )
+{
+    clearReads();
+    vector<ReadId> ids;
+    vector<int32_t> coords[2];
+    bwt.mapSequence( seq_, ids, coords );
+    for ( int i = 0; i < ids.size(); i++ )
+    {
+        addRead( ids[i], ends_[0] + coords[0][i], ends_[0] + coords[1][i], false );
+    }
+    setCoverage();
 }
 
 void Node::remapGenes( Querier &bwt, NodeList &nodes )

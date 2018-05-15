@@ -29,12 +29,13 @@ public:
     
 private:
     bool doesSpanOrigin( PathVars &pv );
-    void map(PathVars &pv );
+    void map( PathVars &pv );
     void removeDubious( PathVars &pv );
     void removeRedundant( vector<ReadEndMap*> &reads );
     void setWeakspot();
     bool tryBridge( PathVars &pv );
     bool tryComplete( PathVars &pv );
+    bool tryExact( PathVars &pv );
     bool tryGap( PathVars &pv );
     bool tryHalf( PathVars &pv, NodeSet &delSet, bool drxn );
     bool tryMap( PathVars &pv );

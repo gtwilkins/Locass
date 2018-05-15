@@ -45,14 +45,16 @@ void MappedSeqs::setBest( string &seq )
         }
     }
     
+    string bestSeq = bestRead.seq.substr( max( 0, -bestRead.coords[0] ), seq.length() - max( 0, bestRead.coords[0] ) );
     int limits[2] = { max( -bestRead.coords[0], 0 ), min( (int)bestRead.seq.length(), bestRead.coords[1] ) - bestRead.coords[0] };
+    int32_t coords[2] = { max( 0, bestRead.coords[0] ), max( 0, bestRead.coords[0] ) + (int)bestSeq.length() };
     vector<ReadStruct> newReads, falseReads;
     for ( ReadStruct &read : reads )
     {
-        int diff = read.coords[0] - bestRead.coords[0];
-        int i = max( limits[0], max( 0, diff ) );
-        int j = min( limits[1], (int)read.seq.length() + diff );
-        while ( bestRead.seq[i] == read.seq[i - diff] && i < j )
+        int diff = read.coords[0] - coords[0];
+        int i = max( coords[0], max( 0, diff ) );
+        int j = min( coords[1], (int)read.seq.length() + diff );
+        while ( bestSeq[i] == read.seq[i - diff] && i < j )
         {
             i++;
         }

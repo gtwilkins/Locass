@@ -236,13 +236,10 @@ bool Locus::extendNodes( bool drxn )
 {
     for ( Node* node : toExtend_[drxn] )
     {
-        if ( doExtendNode( node, drxn ) )
-        {
-            ExtVars ev( nodes_[drxn], nodes_[drxn + 3], validLimits_, bwt_ );
-            node->extendNode( ev, drxn );
-            forkCount_[drxn] += node->edges_[drxn].size();
-            if ( !debriefExtend( ev, drxn ) ) break;
-        }
+        ExtVars ev( nodes_[drxn], nodes_[drxn + 3], validLimits_, bwt_ );
+        node->extendNode( ev, drxn );
+        forkCount_[drxn] += node->edges_[drxn].size();
+        if ( !debriefExtend( ev, drxn ) ) break;
     }
 }
 
@@ -577,9 +574,16 @@ bool Locus::updateExtension( bool drxn )
     setExtend( drxn );
 //    summarise( drxn );
     int overLimit = 0;
+    int32_t limit = 0;
     for ( Node* node : toExtend_[drxn] )
     {
-        overLimit += !doExtendNode( node, drxn );
+        int32_t dist = drxn ? node->ends_[1] - limits_[1] : limits_[0] - node->ends_[0];
+        limit = max( dist, limit );
+        overLimit += dist >= 0;
     }
-    return overLimit >= 2 && toExtend_[drxn].size() != overLimit;
+    if ( overLimit > 5 ) return false;
+    if ( limit > min( params.maxPeMax, params.maxMpMean ) / max( 1, overLimit ) ) return false;
+    if ( toExtend_[drxn].size() > 50 ) return false;
+    
+    return true;
 }

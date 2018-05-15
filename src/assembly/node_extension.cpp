@@ -206,15 +206,13 @@ void Node::addExtensionMerge( MergeHit &merge, Extension &ext, ExtVars &ev, bool
     {
         thisNode->validateMerge( mergeNode, drxn );
     }
-    
-    assert( ev.offset.find( mergeNode ) == ev.offset.end() || mergeNode->edges_[!drxn].size() > 1 || !ev.doOffset );
 }
 
 void Node::addExtensions( vector<Extension> &exts, ExtVars &ev, bool doesBranch, bool drxn )
 {
     int32_t endCoord = ends_[drxn];
     
-    doesBranch = doesBranch || exts.size() > 1 || !edges_[drxn].empty() || clones_;
+    doesBranch = doesBranch || exts.size() > 1 || !edges_[drxn].empty() || clones_ || dontExtend_;
     vector<MergeHit> selfMerges;
     for ( Extension &ext : exts )
     {
@@ -425,10 +423,7 @@ void Node::extendNode( ExtVars &ev, bool drxn )
     {
         bool noMatches, doesBranch = false;
         vector<Extension> extensions = ev.bwt.mapExtensions( noMatches, seq_, drxn );
-        if ( noMatches && reads_.size() > 1 )
-        {
-            reEnd( ev, drxn );
-        }
+        if ( noMatches && reads_.size() > 1 ) reEnd( ev, drxn );
         else
         {
             addExtensions( extensions, ev, doesBranch, drxn );
@@ -439,58 +434,22 @@ void Node::extendNode( ExtVars &ev, bool drxn )
     debriefExtension( ev, drxn );
 }
 
-bool Node::extendOrigin( ExtVars &ev, bool drxn )
-{
-    int endMisses = getEndMarks( drxn );   
-//    PairingVars pv; 
-//    pv.tNodes = getTargetNodes( drxn, true );
-//    
-//    cout << "Extending origin" << endl;
-//    while( isContinue( drxn ) && endMisses < 30 && abs( ends_[drxn] ) < abs( params.locusLimits[drxn] ) )
-//    {
-//        int markCount = readMarks_.size();
-//        
-//        // Extend
-//        bool doesBranch = false;
-//        vector<Extension> extensions = ev.bwt.mapExtensions( seq_, drxn );
-//        addExtensions( extensions, ev, doesBranch, drxn );
-//        
-//        // Check for pairing with new marks
-//        vector<ReadMark> newMarks = { readMarks_.begin() + markCount, readMarks_.end() };
-//        pv.marks = &newMarks;
-//        setPairs( pv, drxn );
-//        
-//        // Update pairs and misses
-//        if ( !pv.pairs.empty() )
-//        {
-//            addPairs( pv.pairs, pv.hitIds, drxn );
-//            pv.pairs.clear();
-//            pv.hitIds.clear();
-//            endMisses = 0;
-//        }
-//        else
-//        {
-//            endMisses += newMarks.size();
-//        }
-//    }
-//    debriefExtension( ev, drxn );
-    return endMisses >= 30;
-}
-
 void Node::extendSeed( ExtVars &ev, bool drxn )
 {
-    setExtVars( ev, drxn );
+    extendCount_ = 100;
     while( isContinue( drxn ) )
     {
-        vector<Extension> extensions = ev.bwt.mapExtensions( seq_, drxn );
-        if ( extensions.size() != 1 )
+        bool noMatches, doesBranch = false;
+        vector<Extension> extensions = ev.bwt.mapExtensions( noMatches, seq_, drxn );
+        if ( noMatches && reads_.size() > 1 ) reEnd( ev, drxn );
+        else
         {
-            pause( drxn );
-            break;
+            addExtensions( extensions, ev, doesBranch, drxn );
+            extendCount_--;
         }
-        bool doesBranch = false;
-        addExtensions( extensions, ev, doesBranch, drxn );
     }
+    
+    setCoverage();
 }
 
 int32_t Node::getBestMergeClone( MergeHit &merge, int32_t fromEnd, bool drxn )
@@ -549,7 +508,7 @@ bool Node::isMergeCis( ExtVars &ev, MergeHit &merge, bool drxn )
         }
     }
     
-    if ( ev.ante.find( merge.node ) == ev.ante.end() && !merge.node->edges_[!drxn].empty() )
+    if ( ev.ante.find( merge.node ) == ev.ante.end() )
     {
         if ( abs( ends_[drxn] - ( drxn ? merge.overlap : -merge.overlap ) - (*merge.coords)[!drxn] ) >= 200 )
         {
@@ -655,20 +614,22 @@ void Node::reEnd( ExtVars &ev, bool drxn )
     for ( int i : { 0, 1 } )
     {
         int32_t coords[2] = { ends_[1], ends_[0] };
+        if ( !edges_[drxn].empty() ) coords[!drxn] += ( drxn ? -getBestOverlap( 1 ) : getBestOverlap( 0 ) );
+        
         for ( auto &read : reads_ )
         {
-            if ( drxn ? read.second[1] < limit && coords[drxn] < read.second[1] 
-                      : limit < read.second[0] && read.second[0] < coords[drxn] )
-            {
-                coords[drxn] = read.second[drxn];
-            }
-            if ( read.second[drxn] == limit )
-            {
-                coords[!drxn] = drxn ? min( coords[!drxn], read.second[0] ) : max( coords[!drxn], read.second[1] );
-            }
+            
+            if ( read.second[drxn] != limit ) continue;
+            coords[!drxn] = drxn ? min( coords[0], read.second[0] ) 
+                                 : max( coords[1], read.second[1] );
         }
-        
-        if ( coords[drxn] == ends_[!drxn] || coords[!drxn] == ends_[!drxn] || coords[!drxn] == ends_[drxn] ) break;
+        if ( coords[!drxn] == ends_[!drxn] || coords[!drxn] == ends_[drxn] ) break;
+        for ( auto &read : reads_ )
+        {
+            if ( drxn ? coords[0] <= read.second[0] : read.second[1] <= coords[1] ) continue;
+            coords[drxn] = drxn ? max( read.second[1], coords[1] ) : min( read.second[0], coords[0] );
+        }
+        if ( coords[drxn] == ends_[!drxn] || coords[drxn] == ends_[drxn] ) break;
         
         string seq = drxn ? seq_.substr( 0, coords[1] - ends_[0] ) : seq_.substr( coords[0] - ends_[0] );
         vector<Extension> exts = ev.bwt.mapExtensions( seq, drxn );
@@ -730,6 +691,8 @@ Node* Node::splitNode( int32_t splitBegin, NodeList &nodes, bool subGraph, bool 
     {
         return this;
     }
+    
+    assert( abs( ends_[drxn] - splitBegin ) >= this->getBestOverlap( drxn ) );
     
     // Create split node and trim this node
     clearPairs();

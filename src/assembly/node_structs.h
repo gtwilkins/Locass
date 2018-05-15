@@ -241,6 +241,7 @@ struct MapNode
     void addEdge( MapNode* mapNode, int overlap, bool drxn );
     void addEdge( Node* edgeNode, int overlap, bool drxn );
     void checkLoop();
+    bool checkRedundantOverlaps( NodeList &edges, vector<int32_t> coords[2], bool drxn );
     static void collapse( vector<MapNode*> &mapNodes, vector<MapNode*> &mapEdges );
     static void fold( MapNode* mapNode, vector<MapNode*> &mapNodes, bool drxn );
     bool getSecondSeq( string &secondSeq, bool drxn );
@@ -248,12 +249,14 @@ struct MapNode
     void removeEdge( MapNode* mn, bool drxn );
     void removeEdges( bool drxn );
     void setEdgeSeq();
+    void setRedundant();
     void setSecondSeq( bool drxn );
     void splitEdge( Node* node, int i, bool drxn );
     string seq;
     Node* node;
     vector<ReadId> ids;
     vector<int32_t> coords[2];
+    vector<bool>redundant;
     vector<MapNode*> edges[2];
     vector<int> edgeOverlaps[2], bridgeOverlaps[2], bridgeCoords[2];
     vector<Node*> bridges[2];
@@ -309,6 +312,33 @@ struct PathRead
     vector<ReadId> ids;
     PathRead* edges[2];
     int ols[2];
+};
+
+
+struct GoodPair
+{
+    GoodPair( int32_t x, int32_t y, bool z, bool pe ):isPe(pe){ coords[!z] = x; coords[z] = y; };
+    int32_t coords[2];
+    bool isPe;
+};
+
+struct BadPair
+{
+    BadPair(){ edges[0] = edges[1] = NULL; redundant = false; };
+    ReadId id;
+    string seq;
+    BadPair* edges[2];
+    int ols[2];
+    int32_t ests[2];
+    bool redundant;
+};
+    
+struct PairPath
+{
+    PairPath():olTotal(0){};
+    vector<BadPair*> path;
+    int olTotal;
+    string seq;
 };
 
 #endif /* NODESTRUCTS_H */

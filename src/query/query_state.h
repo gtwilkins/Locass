@@ -28,6 +28,8 @@
 struct QueryState
 {
     QueryState( uint8_t* query, int seqLength, int minOverlap ) : q( query ), seqLen( seqLength ), minOver( minOverlap ){};
+    int setFirst();
+    void updateSeq( string &seq, int off, bool drxn );
     uint8_t* q;
     int seqLen, minOver;
     vector<uint8_t> endOverlaps;

@@ -22,6 +22,7 @@
 #include "parameters.h"
 #include <cassert>
 #include <iostream>
+#include <string.h>
 
 extern Parameters params;
 
@@ -79,6 +80,120 @@ QueryBinaries::QueryBinaries( Filenames* fns )
     params.set();
     set();
 }
+
+//void QueryBinaries::dumpSorted( Filenames* fns )
+//{
+//    ReadId seqLeft = params.seqCount;
+//    ReadId chunkSize = ( ( 1024*1024*1024 ) / lineLen_ ) * lineLen_;
+//    ReadId pMax = 65536;
+//    ReadId* idsBuff = new ReadId[pMax];
+//    uint8_t* ordBuff = new uint8_t[chunkSize]{0};
+//    
+//    uint8_t comp[4] = { 3, 2, 1, 0 };
+//    
+//    ReadId chunkBegin = 0;
+//    ReadId chunkEnd = 0;
+//    ReadId maxPos = 0;
+//    fseek( bin_, binBegin_, SEEK_SET );
+//    while ( seqLeft )
+//    {
+//        fseek( ids_, idsBegin_, SEEK_SET );
+//        ReadId p = pMax;
+//        
+//        ReadId thisChunk = min( chunkSize, seqLeft * lineLen_ );
+//        ReadId currPos = 0;
+//        ReadId currWritten = 0;
+//        chunkEnd = chunkBegin + thisChunk;
+//        fread( ordBuff, 1, thisChunk, bin_ );
+//        
+//        ReadId idsLeft = params.seqCount;
+//        
+//        while ( idsLeft )
+//        {
+//            if ( p == pMax )
+//            {
+//                fread( idsBuff, 4, min( pMax, idsLeft ), ids_ );
+//                p = 0;
+//            }
+//            
+//            if ( chunkBegin <= idsBuff[p] && idsBuff[p] < chunkEnd )
+//            {
+//                ReadId advPos = maxPos - currWritten;
+//                if ( advPos )
+//                {
+//                    fseek( bin_, advPos * lineLen_, SEEK_CUR );
+//                    currWritten += advPos;
+//                }
+//                advPos = currPos - currWritten;
+//                if ( advPos )
+//                {
+//                    fwrite( ordBuff, lineLen_, advPos, ord );
+//                    currWritten += advPos;
+//                }
+//                
+//                bool isRev = idsBuff[p] & 0x1;
+//                ReadId id = idsBuff[p] / 2;
+//                
+//                uint8_t c;
+//                uint8_t line[lineLen_]{0};
+//                uint8_t linecpy[lineLen_]{0};
+//                ReadId i = id * lineLen_, ii = 1;
+//                memcpy( linecpy, &ordBuff[i], lineLen_ );
+//                uint8_t b = 6, bb = 6;
+//                line[0] = ordBuff[i];
+//                string seq;
+//                ++i;
+//                if ( isRev )
+//                {
+//                    for ( uint8_t j = 0; j < line[0]; j++ )
+//                    {
+//                        c = comp[ ( ordBuff[i] >> b ) & 0x3 ];
+//                        
+//                        seq += ( c == 3 ? 'T' : ( c == 2 ? 'G' : ( c == 1 ? 'C' : 'A' ) ) );
+//                        
+//                        line[ii] &= ( c << bb );
+//                        
+//                        if ( !b ) { i++; ii++; b = 6; bb = 6; }
+//                        else b -= 2;
+//                    }
+//                }
+//                else
+//                {
+//                    i += ( line[0] + 3 ) / 4;
+//                    b = ( 3 - ( line[0] % 4 ) ) * 2;
+//                    for ( uint8_t j = 0; j < line[0]; j++ )
+//                    {
+//                        c = ( ordBuff[ i ] >> b ) & 0x3;
+//                        seq += ( c == 3 ? 'T' : ( c == 2 ? 'G' : ( c == 1 ? 'C' : 'A' ) ) );
+//                        
+//                        line[ii] &= ( c << bb );
+//                        
+//                        if ( b == 6 ) { --i; bb = 0; }
+//                        else b += 2;
+//                        
+//                        if ( !bb ) { ii++; b = 6; }
+//                        else b -= 2;
+//                    }
+//                }
+//                
+//                cout << seq << endl;
+//                
+//                fwrite( line, 1, lineLen_, ord );
+//                ++currWritten;
+//                maxPos = max( maxPos, currWritten );
+//            }
+//            
+//            ++currPos;
+//            ++p;
+//            assert( currPos >= currWritten );
+//            --idsLeft;
+//        }
+//        
+//        chunkBegin = chunkEnd;
+//    }
+//    
+//    fclose( ord );
+//}
 
 void QueryBinaries::decodeSequence( uint8_t* line, string &seq, uint8_t extLen, bool isRev, bool drxn )
 {
@@ -166,7 +281,6 @@ void QueryBinaries::getOverlaps( vector<Overlap> &overlaps, CharId rank, CharId 
         fseek( bin_, seekId, SEEK_SET );
         fread( &line, 1, lineLen_, bin_ );
         int extLen = line[0] - overlap;
-        assert( extLen < 70 );
         if ( extLen > 0 )
         {
             Overlap ol( ( id - idRev + isRev ), overlap, extLen );

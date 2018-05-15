@@ -23,7 +23,7 @@
 #include <limits>
 
 Node::Node()
-: edges_( 2 ), drxn_( 2 ), clones_( NULL ), extendCount_( 0 ), coverage_( 0 ), validated_( false ), reliable_( false ), unreliable_( false )
+: edges_( 2 ), drxn_( 2 ), clones_( NULL ), extendCount_( 0 ), coverage_( 0 ), validated_( false ), reliable_( false ), unreliable_( false ), dontExtend_( false )
 {
     paired_ = new NodeSet;
     stop_[0] = stop_[1] = 0;
@@ -72,6 +72,7 @@ Node::Node( string seq, Extension &ext, int32_t prevEnd, bool drxn )
     appendNode( ext, drxn );
     setValid( !drxn );
     setCoverage();
+    readTest();
 }
 
 // Split node
@@ -202,16 +203,17 @@ Node::Node( NodeMapRead &mapRead, bool drxn )
 Node::Node( MapNode* mn, int i, int j, int drxn )
 : Node()
 {
+    mn->setRedundant();
     drxn_ = drxn;
-    int limits[2] = { mn->coords[0][i], mn->coords[1][j] };
-    seq_ = mn->seq.substr( limits[0], limits[1] - limits[0] );
-    ends_[0] = mn->coords[0][i];
-    ends_[1] = ends_[0] + seq_.length();
+    ends_[0] = ends_[1] = mn->coords[0][i];
     while ( i <= j )
     {
-        reads_.insert( make_pair( mn->ids[i], Coords( mn->coords[0][i], mn->coords[1][i], false ) ) );
+        reads_.insert( make_pair( mn->ids[i], Coords( mn->coords[0][i], mn->coords[1][i], mn->redundant[i] ) ) );
+        ends_[0] = min( ends_[0], mn->coords[0][i] );
+        ends_[1] = max( ends_[1], mn->coords[1][i] );
         i++;
     }
+    seq_ = mn->seq.substr( ends_[0], ends_[1] - ends_[0] );
     resetMarks();
     setCoverage();
 }
@@ -256,18 +258,19 @@ Node::Node( string seq, ReadId id, int32_t estimate, int drxn )
 //    assert( false );
 //}
 //
-//void Node::readTest()
-//{
-//    bool limitsGood[2] = { false, false };
-//    for ( auto &read : reads_ )
-//    {
-//        limitsGood[0] = limitsGood[0] || read.second[0] == ends_[0];
-//        limitsGood[1] = limitsGood[1] || read.second[1] == ends_[1];
-//        if ( limitsGood[0] && limitsGood[1] ) break;
-//    }
-//    
-//    assert( limitsGood[0] && limitsGood[1] );
-//}
+void Node::readTest()
+{
+    bool limitsGood[2] = { false, false };
+    for ( auto &read : reads_ )
+    {
+        assert( ends_[0] <= read.second[0] && read.second[1] <= ends_[1] );
+        limitsGood[0] = limitsGood[0] || read.second[0] == ends_[0];
+        limitsGood[1] = limitsGood[1] || read.second[1] == ends_[1];
+        if ( limitsGood[0] && limitsGood[1] ) break;
+    }
+    
+    assert( limitsGood[0] && limitsGood[1] );
+}
 //
 //void Node::offsetTest( bool drxn )
 //{
@@ -310,11 +313,12 @@ void Node::addEdge( Node* node, bool drxn, bool isLeap )
 
 void Node::addEdge( Node* node, int overlap, bool drxn, bool doOffset, bool isLeap )
 {
-    NodeSet bckSet = getDrxnNodes( !drxn );
-    assert( bckSet.find( node ) == bckSet.end() );
-    assert( overlap < 200 );
+//    NodeSet bckSet = getDrxnNodes( !drxn );
+//    assert( bckSet.find( node ) == bckSet.end() );
+    assert( overlap < params.readLen );
     assert( node != this );
     assert( overlap <= ends_[1] - ends_[0] );
+    assert( overlap <= node->ends_[1] - node->ends_[0] );
     bool didAdd = false;
 //    if ( drxn_ == 1 ) assert( node->drxn_ != 0 );
 //    if ( drxn_ == 0 ) assert( node->drxn_ != 1 );
@@ -331,7 +335,7 @@ void Node::addEdge( Node* node, int overlap, bool drxn, bool doOffset, bool isLe
         edges_[drxn].push_back( Edge( node, overlap, isLeap ) );
         node->edges_[!drxn].push_back( Edge( this, overlap, isLeap ) );
     }
-    if ( doOffset )
+    if ( doOffset && node->drxn_ != 2 )
     {
         if ( drxn ? drxn_ == 0 : drxn_ == 1 )
         {
@@ -578,6 +582,7 @@ bool Node::inheritEdges( bool drxn )
                 {
                     Node* bck = ( drxn_ == drxn ? prv : nxt );
                     Node* fwd = ( drxn_ == drxn ? nxt : prv );
+                    if ( bck == fwd ) continue;
                     NodeSet bckFwdSet = bck->getDrxnNodes( drxn_ );
                     NodeSet fwdFwdSet = fwd->getDrxnNodes( drxn_ );
                     if ( bckFwdSet.find( fwd ) != bckFwdSet.end() ) continue;
@@ -692,10 +697,12 @@ void Node::propagateOffset( NodeSet &propagated, bool drxn )
     {
         for ( Edge &edge : edges_[drxn] )
         {
-            if ( propagated.find( edge.node ) == propagated.end() )
+            if ( edge.node->drxn_ == 2 )
             {
-                edge.node->propagateOffset( propagated, drxn );
+                int x = 0;
             }
+            if ( propagated.find( edge.node ) != propagated.end() || edge.node->drxn_ == 2 ) continue;
+            edge.node->propagateOffset( propagated, drxn );
         }
     }
 }
@@ -758,6 +765,19 @@ void Node::trimEnd( bool drxn )
     }
     mark = drxn ? min( mark, ends_[1] ) : max( mark, ends_[0] );
     trimSeq( mark, drxn );
+}
+
+void Node::trimEnd( int32_t coord, NodeList &nodes, bool drxn )
+{
+    NodeSet delSet;
+    for ( Node* nxt : getNextNodes( drxn ) ) nxt->dismantleNode( delSet, drxn );
+    for ( int i = 0; i < nodes.size(); )
+    {
+        if ( delSet.find( nodes[i] ) != delSet.end() ) nodes.erase( nodes.begin() + i );
+        else i++;
+    }
+    for ( Node* del : delSet ) delete del;
+    trimSeq( coord, drxn );
 }
 
 void Node::trimSeq( int32_t coord, bool drxn, bool stop )
@@ -836,10 +856,9 @@ void Node::dismantleNode( NodeSet &delSet, bool drxn )
         }
     }
     pairs_.clear();
-    assert( drxn_ <= 2 );
+    assert( drxn_ != 2 );
     for ( Edge edge : edges_[!drxn] )
     {
-        assert( edge.node->drxn_ <= 2 );
         edge.node->removeEdge( this, drxn );
         if ( edge.node->edges_[drxn].empty() )
         {
@@ -848,7 +867,7 @@ void Node::dismantleNode( NodeSet &delSet, bool drxn )
     }
     for ( Edge edge : edges_[drxn] )
     {
-        assert( edge.node->drxn_ <= 2 );
+        assert( edge.node->drxn_ != 2 );
         edge.node->removeEdge( this, !drxn );
         if ( edge.node->edges_[!drxn].empty() )
         {

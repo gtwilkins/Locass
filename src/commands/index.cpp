@@ -34,6 +34,7 @@ Index::Index( int argc, char** argv )
     PreprocessFiles* fns = NULL;
     bool isResume = false;
     bool isNew = false;
+    int minScore = 0;
     
     for ( int i ( 2 ); i < argc; )
     {
@@ -81,6 +82,11 @@ Index::Index( int argc, char** argv )
             fns = new PreprocessFiles( prefix );
             i += 2;
         }
+        else if ( !strcmp( argv[i], "-s" ) )
+        {
+            minScore = stoi( argv[i+1] );
+            i += 2;
+        }
         else if ( !strcmp( argv[i], "--resume" ) )
         {
             isResume = true;
@@ -116,7 +122,7 @@ Index::Index( int argc, char** argv )
     }
     else if ( isNew )
     {
-        newTransform( fns, infile );
+        newTransform( fns, minScore, infile );
     }
     else if ( isResume )
     {
@@ -130,13 +136,13 @@ Index::Index( int argc, char** argv )
     }
     
     cout << "Preprocessing step 3 of 3: indexing transformed data..." << endl;
-    IndexWriter idx( fns );
+    IndexWriter idx( fns, 1024, 20000 );
     
     cout << endl << "Preprocessing completed!" << endl;
     cout << "Total time taken: " << getDuration( preprocessStartTime ) << endl;
 }
 
-void Index::newTransform( PreprocessFiles* fns, ifstream &infile )
+void Index::newTransform( PreprocessFiles* fns, int minScore, ifstream &infile )
 {
     uint8_t fileCount = 0, pairedLibCount = 0;
     
@@ -164,12 +170,12 @@ void Index::newTransform( PreprocessFiles* fns, ifstream &infile )
             if ( ( args.size() == 2 || args.size() == 3 ) && args[0] == "paired" )
             {
                 vector<ReadFile*> lib;
-                readFile = new ReadFile( args[1] );
+                readFile = new ReadFile( args[1], 0, minScore );
                 fileCount++;
                 lib.push_back( readFile );
                 if ( args.size() == 3 )
                 {
-                    readFile = new ReadFile( args[2] );
+                    readFile = new ReadFile( args[2], 0, minScore );
                     fileCount++;
                 }
                 lib.push_back( readFile );
@@ -178,7 +184,7 @@ void Index::newTransform( PreprocessFiles* fns, ifstream &infile )
             }
             else if ( args.size() == 2 && args[0] == "single" )
             {
-                readFile = new ReadFile( args[1] );
+                readFile = new ReadFile( args[1], 0, minScore );
                 fileCount++;
                 vector<ReadFile*> lib = { readFile };
                 libs.push_back( lib );

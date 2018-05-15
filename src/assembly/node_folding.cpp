@@ -62,22 +62,21 @@ bool Node::foldAlleles( NodeList &nodes, Node* forks[2], NodeList paths[2], Node
     int reads[2]{0};
     int minOl[2] = { params.readLen, params.readLen };
     int pref;
-    bool anyClones = false;
     for ( int i : { 0, 1 } )
     {
         for ( int j = 0; j < paths[i].size(); j++ )
         {
             if ( paths[i][j]->edges_[0].size() > 1 ) return false;
             if ( paths[i][j]->edges_[1].size() > 1 ) return false;
+            if ( paths[i][j]->clones_ ) return false;
             reads[i] += paths[i][j]->reads_.size();
             minOl[i] = min( minOl[i], paths[i][j]->getBestOverlap( 0 ) );
             minOl[i] = min( minOl[i], paths[i][j]->getBestOverlap( 1 ) );
-            anyClones = anyClones || paths[i][j]->clones_;
         }
         if ( reads[i] > reads[!i] ) pref = i;
     }
     
-    if ( anyClones || ( minOl[0] < 0 && minOl[1] < 0 ) ) return false;
+    if ( minOl[0] < 0 && minOl[1] < 0 ) return false;
     
     int bestOls[2] = { max( forks[0]->getOverlap( paths[0][0], 1 )
                           , forks[0]->getOverlap( paths[1][0], 1 ) )
@@ -135,7 +134,7 @@ bool Node::foldAlleles( NodeList &nodes, Node* forks[2], NodeList paths[2], Node
                     }
                     readLimits[0] = min( readLimits[0], readCoords[0] );
                     readLimits[1] = max( readLimits[1], readCoords[1] );
-                    node->addRead( read.first, readCoords[0], readCoords[1], i != pref );
+                    node->addRead( read.first, readCoords[0], readCoords[1], i != pref, false );
                     assert( fromEnds[0] >= 0 && fromEnds[1] >= 0 );
                 }
                 if ( j+1 < paths[i].size() ) offset += paths[i][j]->seq_.length() - paths[i][j]->getOverlap( paths[i][j+1], 1 );
@@ -1098,6 +1097,7 @@ bool Node::getNextReadCoord( int32_t &coord, bool coordDrxn, bool readDrxn )
         if ( readDrxn ? read.second[coordDrxn] < nxtCoord && coord <= read.second[coordDrxn]
                       : nxtCoord < read.second[coordDrxn] && read.second[coordDrxn] <= coord )
         {
+            if ( isRedundant( &read.second ) ) continue;
             nxtCoord = read.second[coordDrxn];
         }
     }

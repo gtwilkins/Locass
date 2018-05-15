@@ -34,6 +34,8 @@ struct Filenames
     ofstream getWriteStream( string &filename );
     
     FILE* getBinary( bool doRead, bool doEdit );
+    bool isFolder( string folder );
+    void makeFolder( string folder );
     void removeFile( string &filename );
     void setIndex( FILE* &inBin, FILE* &inBwt, FILE* &inIdx );
     

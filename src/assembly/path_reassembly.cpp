@@ -79,9 +79,10 @@ Reassemble::Reassemble( Node* node, PathVars &pv, bool invalid, bool calibrate )
     estLimits_[0] = max( estLimits_[0], pathLimits[0] + params.readLen );
     estLimits_[1] = min( estLimits_[1], pathLimits[1] - params.readLen );
     assert( !seqs_.empty() );
-    if ( estLimits_[1] < estLimits_[0] ) return;
+    if ( estLimits_[1] <= estLimits_[0] ) return;
     setWeakspot();
     map( pv );
+    if ( calibrate_ ) node->assembled_[pv.drxn] = true;
 }
 
 Reassemble::~Reassemble()
@@ -201,13 +202,14 @@ bool Reassemble::reassemble( PathVars &pv, NodeSet &delSet, bool isAlleleFork )
         {
             return false;
         }
-        if ( tryBridge( pv ) ) return true;
-        if ( tryHalf( pv, delSet, !pv.drxn ) ) return true;
+        if ( tryExact( pv ) ) return true;
+        if ( !params.haploid && tryBridge( pv ) ) return true;
+        if ( !params.haploid && tryHalf( pv, delSet, !pv.drxn ) ) return true;
         if ( tryHalf( pv, delSet, pv.drxn ) ) return true;
         removeDubious( pv );
         if ( !invalid_ && tryGap( pv ) ) return true;
         if ( tryMap( pv ) ) return true;
-        if ( calibrate_ ) return false;
+        if ( calibrate_ || params.haploid ) return false;
         
         return trySlice( pv, delSet, isAlleleFork );
     }
@@ -406,6 +408,29 @@ bool Reassemble::tryComplete( PathVars &pv )
     return didMap;
 }
 
+bool Reassemble::tryExact( PathVars &pv )
+{
+    vector<ReadEndMap*> mapReads;
+    for ( int i : { 0, 1 } )
+    {
+        for ( SeqPathReassemble* s : seqs_ )
+        {
+            for ( ReadEndMap* read : s->reads[i] )
+            {
+                if ( read->ol != read->seq.length() ) continue;
+                read->doMap = true;
+                mapReads.push_back( read );
+            }
+        }
+    }
+    
+    removeRedundant( mapReads );
+    bool didMap = false;
+    for ( SeqPathReassemble* s : seqs_ ) didMap = s->doMap( pv ) || didMap;
+    
+    return didMap;
+}
+
 bool Reassemble::tryGap( PathVars &pv )
 {
     int32_t limits[2] = { estLimits_[0], estLimits_[1] };
@@ -496,23 +521,25 @@ bool Reassemble::tryHalf( PathVars &pv, NodeSet &delSet, bool drxn )
     {
         pv.bwt.mapSequence( mn->seq, mn->ids, mn->coords );
         mn->recoil();
+        NodeList hitNodes;
+        vector<int32_t> hitCoords[2];
+        int32_t coords[2] = { mn->bridgeCoords[drxn][0], mn->bridgeCoords[drxn][0] };
+        mn->bridges[drxn][0]->overlapExtend( pv.nds[pv.drxn], coords, hitNodes, hitCoords, pv.drxn, drxn );
+        mn->checkRedundantOverlaps( hitNodes, hitCoords, drxn );
+        
         Node* node = new Node( mn, 0, mn->ids.size()-1, pv.drxn );
         pv.usedIds.insert( usedIds.begin(), usedIds.end() );
         
-        int32_t coords[2] = { mn->bridgeCoords[drxn][0], mn->bridgeCoords[drxn][0] };
         coords[drxn] = drxn ? coords[0] + mn->bridgeOverlaps[1][0] : coords[1] - mn->bridgeOverlaps[0][0];
         int32_t offset = coords[drxn] - node->ends_[drxn];
         node->offset( offset );
         
         if ( drxn == pv.drxn )
         {
-            didBridge = node->sliceOrBridge( pv, mn->bridges[drxn][0], coords, delSet );
+            didBridge = node->sliceOrBridge( pv, hitNodes, hitCoords, delSet );
         }
         else
         {
-            NodeList hitNodes;
-            vector<int32_t> hitCoords[2];
-            mn->bridges[drxn][0]->overlapExtend( pv.nds[pv.drxn], coords, hitNodes, hitCoords, pv.drxn, drxn );
             pv.nds[pv.drxn].push_back( node );
             pv.newSet.insert( node );
             int32_t dummy[2] = { params.locusLimits[0], params.locusLimits[1] };

@@ -30,12 +30,15 @@ class Seed
 public:
     Seed( string &header, string &seq, Querier &inBwt, int errorCount );
     void assemble();
+    void assembleGraph();
     vector<Locus*> getLoci();
     bool warning();
     virtual ~Seed();
 private:
+    void assembleHaploid();
     void checkDivergent( NodeList &path );
     void checkDivergentBack( NodeList &div, NodeSet &pathSet, bool drxn );
+    void deleteNodes( NodeSet &delSet );
     NodeList getLociGetPath( bool doForce );
     void getLociGetPath( Node* curr, NodeList &path, int &score, bool drxn );
     int getLociGetPathCurrScore( Node* curr, NodeList &path, bool drxn );
@@ -43,6 +46,8 @@ private:
     void getLociResolveDivergent( NodeIntMap &scores, NodeList &path, Node** forks );
     bool getLociSetConvergent( NodeList &path, Node** forks );
     bool getLociSetDivergent( NodeList &path, Node** forks );
+    void merge();
+    void plot();
     bool resolveBackFork( Node** forks, NodeSet &delSet );
     bool resolveBackForkBypass( Node* fork, NodeSet &delSet );
     bool resolveBackForkDouble( Node* fork, NodeSet &delSet );

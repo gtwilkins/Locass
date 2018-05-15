@@ -23,11 +23,13 @@
 
 #include "types.h"
 
+int getEndTrim( string &q, string trim, bool drxn );
 int getHomopolymerLen( string &s, bool drxn );
 int getHomopolymerScore( string &s );
 bool mapSeqCongruent( string &left, string &right, int offset );
 bool mapSeqEnd( string &q, string &t, int minLen, int32_t* coords, bool drxn );
 int mapSeqOverlap( string &left, string &right, int minLen );
+void revComp( string &seq );
 
 #endif /* SHARED_FUNCTIONS_H */
 

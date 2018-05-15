@@ -89,8 +89,8 @@ void Lib::setMinMax()
 
 Parameters::Parameters()
 {
-    isSet = false;
-    isCalibrated = false;
+    isSet = haploid = isCalibrated = false;
+    drxns[0] = drxns[1] = true;
 }
 
 void Parameters::checkReady()

@@ -18,24 +18,24 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef PREPROCESS_H
-#define PREPROCESS_H
+#ifndef CORRECT_STRUCTS_H
+#define CORRECT_STRUCTS_H
 
 #include "types.h"
-#include "transform.h"
-#include "index_writer.h"
+#include <fstream>
 
-class Index
+struct Fastq
 {
-public:
-    Index( int argc, char** argv );
+    Fastq( string line, uint8_t qualCutoff );
+    bool getSeq( string &seq, int nCoords[2], int qCoords[2], int i );
+    bool setNext();
     
-    void newTransform( PreprocessFiles* fns, int minScore, ifstream &infile );
-    void resumeTransform( PreprocessFiles* fns );
-    
-    void printUsage();
-private:
+    ifstream fp;
+    string seqs[2], quals[2];
+    uint8_t cutoff;
+    bool paired;
 };
 
-#endif /* PREPROCESS_H */
+
+#endif /* CORRECT_STRUCTS_H */
 

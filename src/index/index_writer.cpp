@@ -25,7 +25,8 @@
 #include <iostream>
 #include "timer.h"
 
-IndexWriter::IndexWriter( PreprocessFiles* fns )
+IndexWriter::IndexWriter( PreprocessFiles* fns, ReadId indexChunk, ReadId markChunk )
+: bwtPerIndex( indexChunk ), countsPerMark( markChunk )
 {
     fns->setIndexWrite( bwt, idx );
     fread( &bwtBegin, 1, 1, bwt );
@@ -36,8 +37,6 @@ IndexWriter::IndexWriter( PreprocessFiles* fns )
     
     contFlag = 1 << 7;
     contMask = ~contFlag;
-    bwtPerIndex = 4096;
-    countsPerMark = 20000;
     indexSize = 1 + bwtSize / bwtPerIndex;
     markSize = 1 + ( charCounts[0] + charCounts[1] + charCounts[2] + charCounts[3] + charCounts[4] ) / countsPerMark;
     

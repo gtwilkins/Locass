@@ -253,14 +253,15 @@ bool Node::slice( PathVars &pv, bool misassembled, bool drxn )
     return false;
 }
 
-bool Node::sliceOrBridge( PathVars &pv, Node* target, int32_t coords[2], NodeSet &delSet )
+bool Node::sliceOrBridge( PathVars &pv, NodeList &hitNodes, vector<int32_t> hitCoords[2], NodeSet &delSet )
 {
     drxn_ = pv.drxn + 3;
     NodeList islands = { this };
     int32_t dummy[2]{0};
     ExtVars ev( pv.nds[pv.drxn], islands, dummy, pv.bwt );
     IslandVars iv( ev, pv.drxn );
-    NodeSet tSet = target->getDrxnNodes( pv.drxn, false, true );
+    NodeSet tSet = { hitNodes.begin(), hitNodes.end() };
+    for ( Node* t : hitNodes ) t->getDrxnNodes( tSet, pv.drxn );
     NodeSet hitSet, notAgain;
     
     bool didBridge = false;
@@ -367,46 +368,18 @@ bool Node::sliceOrBridge( PathVars &pv, Node* target, int32_t coords[2], NodeSet
     // Do slice
     if ( hitSet.empty() )
     {
-        bool doSetUnreliable = false;
-        int32_t splitCoord = coords[!pv.drxn];
-        if ( target->getNextReadCoord( splitCoord, !pv.drxn, pv.drxn ) )
-        {
-            target = target->splitNode( splitCoord, pv.nds[pv.drxn], pv.drxn, pv.drxn );
-            doSetUnreliable = target->ends_[1] - target->ends_[0] < params.readLen * 2;
-        }
-        else
-        {
-            NodeList hitNodes;
-            vector<int32_t> hitCoords[2];
-            target->overlapExtend( pv.nds[pv.drxn], coords, hitNodes, hitCoords, pv.drxn, pv.drxn );
-            for ( int i = 0; i < hitNodes.size(); i++ )
-            {
-                addEdge( hitNodes[i], hitCoords[1][i] - hitCoords[0][i], pv.drxn );
-            }
-        }
-        
-        tSet.clear();
-        target->getDrxnNodes( tSet, pv.drxn );
-        
-        NodeSet badSet = getNextNodes( pv.drxn );
         for ( Node* t : tSet )
         {
             for ( Node* isl : islands )
             {
+                if ( delSet.find( t ) != delSet.end() || t->drxn_ != pv.drxn ) continue;
                 for ( ReadMark &mark : isl->marks_[!pv.drxn] )
                 {
                     if ( t->reads_.find( mark.id ) == t->reads_.end() ) continue;
-                    badSet.insert( t );
+                    t->dismantleNode( delSet, pv.drxn );
                     break;
                 }
             }
-        }
-        
-        clearEdges( pv.drxn );
-        for ( Node* bad : badSet )
-        {
-            if ( bad->drxn_ != pv.drxn ) continue;
-            bad->dismantleNode( delSet, pv.drxn );
         }
         
         for ( Node* isl : islands )
@@ -414,8 +387,6 @@ bool Node::sliceOrBridge( PathVars &pv, Node* target, int32_t coords[2], NodeSet
             isl->dismantleNode();
             delete isl;
         }
-        
-        if ( doSetUnreliable ) target->setUnreliable();
     }
     
     return true;

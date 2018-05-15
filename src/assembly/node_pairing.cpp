@@ -892,10 +892,6 @@ void Node::setPairs( Node* focus, Node* t, pair<int32_t, int32_t> &qOffset, pair
                         
                         usedIds.insert( mark.id );
                     }
-                    else
-                    {
-                        int x = 0;
-                    }
                 }
             }
         }

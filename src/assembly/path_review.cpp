@@ -120,7 +120,7 @@ bool PathReview::resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged )
     float cover = Node::getAlleleCoverage( con.forks, con.paths, drxn_ );
     
     // Attempt to fold a diminutive path
-    if ( cover < params.cover * 1.2 && Node::foldAlleles( pv_.nds[pv_.drxn], con.forks, con.paths, delSet, drxn_ ) ) return false;
+//    if ( cover < params.cover * 1.2 && Node::foldAlleles( pv_.nds[pv_.drxn], con.forks, con.paths, delSet, drxn_ ) ) return false;
     
     // Detect misassembly
     NodeSet forkSet( con.paths[0].begin(), con.paths[0].end() );
@@ -187,7 +187,7 @@ bool PathReview::resolveAlleles( ConPath &con, NodeSet &delSet, bool &diverged )
         bckRatios[1] = min( (float)1, float(hits[1][!drxn_]) / float( max( 1, marks[1][!drxn_] ) ) );
     }
     
-    if ( false && cover > params.cover * 1.5 )
+    if ( params.haploid || cover > params.cover * 1.5 )
     {
         int scores[2] = { ( reli[0][!drxn_] - 1 ) * farDist[0], ( reli[1][!drxn_] - 1 ) * farDist[1] };
         if ( !scores[0] && ! scores[1] )
@@ -360,6 +360,7 @@ bool PathReview::resolveCalibrate( NodeSet &delSet )
                     }
                 }
             }
+            node->stop_[drxn_] = 3;
             
             return true;
         }
@@ -628,47 +629,46 @@ AltPath PathReview::resolveDiverge( Node* fork, NodeSet &delSet )
 
 bool PathReview::resolveEnd( NodeSet &delSet )
 {
-    bool doesContinue = false;
+    if ( params.haploid ) return true;
+    
     for ( Node* fwd : path_.back()->getDrxnNodes( drxn_, true, true ) )
     {
-        doesContinue = doesContinue || fwd->isContinue( drxn_ );
+        if ( fwd->isContinue( drxn_ ) ) return true;
     }
-    if ( !doesContinue )
+    
+    for ( AltPath &ap : divs_ )
     {
-        for ( AltPath &ap : divs_ )
+        if ( drxn_ ? path_.back()->ends_[1] < ap.path.back()->ends_[1]
+                   : ap.path.back()->ends_[0] < path_.back()->ends_[0] )
         {
-            if ( drxn_ ? path_.back()->ends_[1] < ap.path.back()->ends_[1]
-                       : ap.path.back()->ends_[0] < path_.back()->ends_[0] )
+            NodeSet divSet = ap.path[0]->getDrxnNodes( drxn_, true, true );
+            NodeSet mainSet = ap.fork->getDrxnNodesNotInSet( divSet, drxn_ );
+            bool doMerge = false;
+            for ( Node* div : divSet )
             {
-                NodeSet divSet = ap.path[0]->getDrxnNodes( drxn_, true, true );
-                NodeSet mainSet = ap.fork->getDrxnNodesNotInSet( divSet, drxn_ );
-                bool doMerge = false;
-                for ( Node* div : divSet )
+                for ( Node* node : mainSet )
                 {
-                    for ( Node* node : mainSet )
+                    for ( ReadMark &mark : div->marks_[drxn_] )
                     {
-                        for ( ReadMark &mark : div->marks_[drxn_] )
-                        {
-                            doMerge = doMerge || node->reads_.find( mark.id ) != node->reads_.end();
-                            if ( doMerge ) break;
-                        }
+                        doMerge = doMerge || node->reads_.find( mark.id ) != node->reads_.end();
+                        if ( doMerge ) break;
                     }
                 }
-                auto it = find( path_.begin(), path_.end(), ap.fork );
-                if ( doMerge && it != path_.end() )
+            }
+            auto it = find( path_.begin(), path_.end(), ap.fork );
+            if ( doMerge && it != path_.end() )
+            {
+                NodeList path( it+1, path_.end() );
+                PathMerge merge( ap.fork, path, divSet, drxn_ );
+                if ( merge.merge( pv_, delSet, drxn_ ) )
                 {
-                    NodeList path( it+1, path_.end() );
-                    PathMerge merge( ap.fork, path, divSet, drxn_ );
-                    if ( merge.merge( pv_, delSet, drxn_ ) )
-                    {
-                        truncate_ = ap.fork;
-                        return false;
-                    }
-                    else if ( abs( ap.path.back()->ends_[drxn_] - path_.back()->ends_[drxn_] ) > params.maxPeMean )
-                    {
-                        ap.path[0]->dismantleNode( delSet, drxn_ );
-                        return false;
-                    }
+                    truncate_ = ap.fork;
+                    return false;
+                }
+                else if ( abs( ap.path.back()->ends_[drxn_] - path_.back()->ends_[drxn_] ) > params.maxPeMean )
+                {
+                    ap.path[0]->dismantleNode( delSet, drxn_ );
+                    return false;
                 }
             }
         }
@@ -679,6 +679,7 @@ bool PathReview::resolveEnd( NodeSet &delSet )
 
 bool PathReview::resolveForks( NodeSet &delSet )
 {
+    for ( Node* node : pv_.nds[pv_.drxn] ) if ( delSet.find( node ) == delSet.end() ) node->readTest();
     float expFar = ( params.avgPeMean * .9 ) - params.readLen;
     
     Node* forks[2] = { NULL, NULL };
@@ -752,6 +753,7 @@ bool PathReview::resolveForks( NodeSet &delSet )
         divs_.push_back( ds );
         usedSet_.insert( ds.path.begin(), ds.path.end() );
     }
+    for ( Node* node : pv_.nds[pv_.drxn] ) if ( delSet.find( node ) == delSet.end() ) node->readTest();
     
     for ( int i = 0; i < divs_.size(); )
     {
@@ -762,6 +764,7 @@ bool PathReview::resolveForks( NodeSet &delSet )
         
         bool doExtend = divs_[i].score > -30 && divs_[i].doesContinue;
         bool doErase = !doExtend && dist > 0 && !i && divs_[i].doesContinue;
+        if ( !doExtend && params.haploid ) doErase = true;
         if ( !divs_[i].doesContinue && ( divs_[i].score < 3 || divs_[i].hits < 3 ) ) doErase = true;
         
         if ( doExtend )
@@ -795,6 +798,7 @@ bool PathReview::resolveForks( NodeSet &delSet )
             divs_.erase( divs_.begin() + i );
         } else i++;
     }
+    for ( Node* node : pv_.nds[pv_.drxn] ) if ( delSet.find( node ) == delSet.end() ) node->readTest();
     
     return true;
 }bool PathReview::resolveManual( NodeSet &delSet )
@@ -892,7 +896,7 @@ bool PathReview::resolveMisassembly( NodeSet &delSet )
 
 bool PathReview::resolveUnspanned( Path &path, NodeSet &delSet )
 {
-    if ( !pv_.unspanned || pv_.unspanned->isEnded( drxn_ ) ) return false;
+    if ( !pv_.unspanned || pv_.unspanned->isEnded( drxn_ ) || params.haploid ) return false;
     
     for ( Node* nxt : pv_.unspanned->getNextNodes( drxn_ ) ) nxt->dismantleNode( delSet, drxn_ );
     pv_.unspanned->stop( 5, drxn_ );

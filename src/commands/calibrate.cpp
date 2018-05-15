@@ -64,19 +64,21 @@ Calibrate::Calibrate( int argc, char** argv )
     
     IndexReader* ir = new IndexReader( fns );
     QueryBinaries* qb = new QueryBinaries( fns );
+    params.cover = 0;
     Querier bwt( ir, qb );
+    
     cout << "Calibrating parameters for dataset with:" << endl << endl;
-    cout << "\t" << to_string( params.seqCount / 2 ) << " reads" << endl;
-    cout << "\t" << to_string( params.libs.size() ) << " paired libraries" << endl << endl;
+    cout << "    " << to_string( params.seqCount / 2 ) << " reads" << endl;
+    cout << "    " << to_string( params.libs.size() ) << " paired libraries" << endl << endl;
     CalibrateWriter cal ( bwt );
     
-    cout << "Calibrating read coverage... " << flush;
+    cout << "Calibrating read coverage... " << endl;
     cal.coverage();
-    cout << "complete!" << endl;
+    cout << "Calibrating read coverage... complete!" << endl;
     
-    cout << "Calibrating library specs... " << flush;
+    cout << "Calibrating library specs... " << endl;
     cal.pairing();
-    cout << "complete!" << endl;
+    cout << "Calibrating library specs... complete!" << endl;
     
     cout << "Calibration complete!" << endl << endl;
     cal.write( fns );

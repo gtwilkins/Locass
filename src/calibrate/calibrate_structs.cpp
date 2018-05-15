@@ -143,40 +143,79 @@ vector<int> SeedLibraryCounts::set( Parameters &params )
         }
     }
     
-    if ( bestCount > 100 )
+    bool anyGood = false, anyBad = false;
+    for ( int i ( 0 ); i < params.libs.size(); i++ )
     {
-        CharId totalCount = ffCounts[iBest] + frCounts[iBest] + rfCounts[iBest];
+        CharId totalCount = ffCounts[i] + frCounts[i] + rfCounts[i];
         CharId cutoff = totalCount * 0.8;
+        if ( totalCount < 100 ) continue;
         
-        if ( ffCounts[iBest] > cutoff )
+        if ( ffCounts[i] > cutoff )
         {
-            params.libs[iBest].size = (float)ffSum[iBest] / (float)ffCounts[iBest];
-            params.libs[iBest].orientation = 1;
+            params.libs[i].size = (float)ffSum[i] / (float)ffCounts[i];
+            params.libs[i].orientation = 1;
         }
-        else if ( frCounts[iBest] > cutoff )
+        else if ( frCounts[i] > cutoff )
         {
-            params.libs[iBest].size = (float)frSum[iBest] / (float)frCounts[iBest];
-            params.libs[iBest].orientation = 2;
+            params.libs[i].size = (float)frSum[i] / (float)frCounts[i];
+            params.libs[i].orientation = 2;
         }
-        else if ( rfCounts[iBest] > cutoff )
+        else if ( rfCounts[i] > cutoff )
         {
-            params.libs[iBest].size = (float)rfSum[iBest] / (float)rfCounts[iBest];
-            params.libs[iBest].orientation = 3;
+            params.libs[i].size = (float)rfSum[i] / (float)rfCounts[i];
+            params.libs[i].orientation = 3;
         }
-        else
-        {
-            cerr << endl << "Error: Read pairs appear to be randomly oriented, which locass does not support." << endl;
-            exit( EXIT_FAILURE );
-        }
+        else anyBad = true;
         
-        params.libs[iBest].setMinMax();
-        params.libs[iBest].isPe = true;
+        if ( params.libs[i].size )
+        {
+            params.libs[i].isPe = params.libs[i].size < 1000;
+            params.libs[i].setMinMax();
+            anyGood = true;
+        }
     }
-    else
+    
+    if ( !anyGood )
     {
-        cerr << endl << "Error: Could not find sufficient number of pairs." << endl;
+        if ( anyBad ) cerr << endl << "Error: Read pairs appear to be randomly oriented, which locass does not support." << endl;
+        else cerr << endl << "Error: Could not find sufficient number of pairs." << endl;
         exit( EXIT_FAILURE );
     }
+    
+//    if ( bestCount > 100 )
+//    {
+//        CharId totalCount = ffCounts[iBest] + frCounts[iBest] + rfCounts[iBest];
+//        CharId cutoff = totalCount * 0.8;
+//        
+//        if ( ffCounts[iBest] > cutoff )
+//        {
+//            params.libs[iBest].size = (float)ffSum[iBest] / (float)ffCounts[iBest];
+//            params.libs[iBest].orientation = 1;
+//        }
+//        else if ( frCounts[iBest] > cutoff )
+//        {
+//            params.libs[iBest].size = (float)frSum[iBest] / (float)frCounts[iBest];
+//            params.libs[iBest].orientation = 2;
+//        }
+//        else if ( rfCounts[iBest] > cutoff )
+//        {
+//            params.libs[iBest].size = (float)rfSum[iBest] / (float)rfCounts[iBest];
+//            params.libs[iBest].orientation = 3;
+//        }
+//        else
+//        {
+//            cerr << endl << "Error: Read pairs appear to be randomly oriented, which locass does not support." << endl;
+//            exit( EXIT_FAILURE );
+//        }
+//        
+//        params.libs[iBest].setMinMax();
+//        params.libs[iBest].isPe = true;
+//    }
+//    else
+//    {
+//        cerr << endl << "Error: Could not find sufficient number of pairs." << endl;
+//        exit( EXIT_FAILURE );
+//    }
     
     params.set();
     
@@ -209,66 +248,62 @@ void LocusLibraryCounts::set( Parameters &params )
 {
     for ( int i ( 0 ); i < params.libs.size(); i++ )
     {
-        if ( !params.libs[i].size )
+        CharId ffTotal = 0, frTotal = 0, rfTotal = 0;
+        CharId ffCounts = 0, frCounts = 0, rfCounts = 0;
+        for ( LocusLibraryCount &count : libs )
         {
-            CharId ffTotal = 0, frTotal = 0, rfTotal = 0;
-            CharId ffCounts = 0, frCounts = 0, rfCounts = 0;
-            for ( LocusLibraryCount &count : libs )
+            count.setMedians( params );
+            ffCounts += count.ffPairs[i].size();
+            for ( const int32_t &ffPair : count.ffPairs[i] )
             {
-                count.setMedians( params );
-                ffCounts += count.ffPairs[i].size();
-                for ( const int32_t &ffPair : count.ffPairs[i] )
-                {
-                    ffTotal += ffPair - min( ffPair, params.readLen );
-                }
-                frCounts += count.frPairs[i].size();
-                for ( const int32_t &frPair : count.frPairs[i] )
-                {
-                    frTotal += frPair - min( frPair, params.readLen );
-                }
-                rfCounts += count.rfPairs[i].size();
-                for ( const int32_t &rfPair : count.rfPairs[i] )
-                {
-                    rfTotal += rfPair - min( rfPair, params.readLen );
-                }
+                ffTotal += ffPair - min( ffPair, params.readLen );
             }
-            
-            bool isFf = ffTotal > frTotal && ffTotal > rfTotal;
-            bool isFr = frTotal > ffTotal && frTotal > rfTotal;
-            bool isRf = rfTotal > ffTotal && rfTotal > frTotal;
-            if ( !isFf && !isFr && !isRf ) continue;
-            int32_t maxMedian = 0;
-            int32_t maxLen = 0;
-            for ( LocusLibraryCount &count : libs )
+            frCounts += count.frPairs[i].size();
+            for ( const int32_t &frPair : count.frPairs[i] )
             {
-                maxMedian = max( maxMedian, count.getMedian( i, isFf, isFr, isRf ) );
-                maxLen = max( maxLen, count.lens[i] );
+                frTotal += frPair - min( frPair, params.readLen );
             }
-            int32_t lenCutoff = min( maxLen, int32_t(maxMedian * 1.5) );
-            
-            double divisor = 0;
-            double medianSum = 0;
-            vector<int32_t> minPairs, maxPairs;
-            int limitsCutoff = max( (CharId)1, ( isFf ? ffCounts : ( isFr ? frCounts : rfCounts ) ) / 40 );
-            for ( LocusLibraryCount &count : libs )
+            rfCounts += count.rfPairs[i].size();
+            for ( const int32_t &rfPair : count.rfPairs[i] )
             {
-                vector<int32_t>* whichVec = ( isFf ? &count.ffPairs[i] : ( isFr ? &count.frPairs[i] : &count.rfPairs[i] ) );
-                minPairs.insert( minPairs.end(), whichVec->begin(), whichVec->begin() + min( (int)whichVec->size(), limitsCutoff ) );
-                maxPairs.insert( maxPairs.end(), whichVec->end() - min( (int)whichVec->size(), limitsCutoff ), whichVec->end() );
-                if ( count.lens[i] >= lenCutoff )
-                {
-                    double thisDivisor = (double)count.lens[i] / (double)maxLen;
-                    divisor += thisDivisor;
-                    medianSum += thisDivisor * (double)count.getMedian( i, isFf, isFr, isRf );
-                }
+                rfTotal += rfPair - min( rfPair, params.readLen );
             }
-            sort( minPairs.begin(), minPairs.end() );
-            sort( maxPairs.begin(), maxPairs.end() );
-            params.libs[i].orientation = ( isFf ? 1 : ( isFr ? 2 : 3 ) );
-            params.libs[i].size = medianSum / divisor;
-            params.libs[i].minDist = min( params.libs[i].size, minPairs[ min( (int)maxPairs.size() - 1, limitsCutoff * 2 ) ] ) * 0.8;
-            params.libs[i].maxDist = max( params.libs[i].size, maxPairs[ max( 0, (int)maxPairs.size() - limitsCutoff ) ] ) * 1.2;
         }
+
+        bool isFf = ffTotal > frTotal && ffTotal > rfTotal;
+        bool isFr = frTotal > ffTotal && frTotal > rfTotal;
+        bool isRf = rfTotal > ffTotal && rfTotal > frTotal;
+        if ( !isFf && !isFr && !isRf ) continue;
+        int32_t maxMedian = 0;
+        int32_t maxLen = 0;
+        for ( LocusLibraryCount &count : libs )
+        {
+            maxMedian = max( maxMedian, count.getMedian( i, isFf, isFr, isRf ) );
+            maxLen = max( maxLen, count.lens[i] );
+        }
+        int32_t lenCutoff = min( maxLen, int32_t(maxMedian * 1.5) );
+
+        double divisor = 0;
+        double medianSum = 0;
+        vector<int32_t> minPairs, maxPairs;
+        int limitsCutoff = max( (CharId)1, ( isFf ? ffCounts : ( isFr ? frCounts : rfCounts ) ) / 40 );
+        for ( LocusLibraryCount &count : libs )
+        {
+            vector<int32_t>* whichVec = ( isFf ? &count.ffPairs[i] : ( isFr ? &count.frPairs[i] : &count.rfPairs[i] ) );
+            minPairs.insert( minPairs.end(), whichVec->begin(), whichVec->begin() + min( (int)whichVec->size(), limitsCutoff ) );
+            maxPairs.insert( maxPairs.end(), whichVec->end() - min( (int)whichVec->size(), limitsCutoff ), whichVec->end() );
+            if ( count.lens[i] >= lenCutoff )
+            {
+                divisor += whichVec->size();
+                medianSum += whichVec->size() * (double)count.getMedian( i, isFf, isFr, isRf );
+            }
+        }
+        sort( minPairs.begin(), minPairs.end() );
+        sort( maxPairs.begin(), maxPairs.end() );
+        params.libs[i].orientation = ( isFf ? 1 : ( isFr ? 2 : 3 ) );
+        params.libs[i].size = medianSum / divisor;
+        params.libs[i].minDist = min( params.libs[i].size, minPairs[ min( (int)maxPairs.size() - 1, limitsCutoff * 2 ) ] ) * 0.8;
+        params.libs[i].maxDist = max( params.libs[i].size, maxPairs[ max( 0, (int)maxPairs.size() - limitsCutoff ) ] ) * 1.2;
     }
     
     vector< pair<float, int> > coverages;

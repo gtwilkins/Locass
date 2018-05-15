@@ -486,6 +486,49 @@ void MapNode::checkLoop()
     }
 }
 
+bool MapNode::checkRedundantOverlaps( NodeList &edges, vector<int32_t> edgeCoords[2], bool drxn )
+{
+    vector<int> bases;
+    for ( int i = 0; i < edges.size(); i++ )
+    {
+        if ( drxn ) bases.push_back( edges[i]->ends_[0] + edgeCoords[1][i] - edgeCoords[0][i] - seq.length() );
+        else bases.push_back( edges[i]->ends_[1] - ( edgeCoords[1][i] - edgeCoords[0][i] ) );
+    }
+    
+    bool didAdd = false;
+    for ( int i = 0; i < ids.size(); )
+    {
+        bool found = false;
+        for ( Node* node : edges ) if ( node->reads_.find( ids[i] ) != node->reads_.end() ) found = true;;
+        for ( int j = found * edges.size(); j < edges.size(); j++ )
+        {
+            if ( drxn ? bases[j] + coords[0][i] < edges[j]->ends_[0] : edges[j]->ends_[1] < bases[j] + coords[1][i] ) continue;
+            edges[j]->addRead( ids[i], bases[j] + coords[0][i], bases[j] + coords[1][i], true );
+            found = true;
+            didAdd = true;
+        }
+        if ( found )
+        {
+            ids.erase( ids.begin() + i );
+            coords[0].erase( coords[0].begin() + i );
+            coords[1].erase( coords[1].begin() + i );
+        }
+        else i++;
+    }
+    
+    int len = seq.length();
+    if ( didAdd )
+    {
+        for ( Node* node : edges )
+        {
+            node->updatePairs();
+            node->setCoverage();
+        }
+    }
+    
+    return didAdd;
+}
+
 void MapNode::collapse( vector<MapNode*> &mapNodes, vector<MapNode*> &mapEdges )
 {
     while ( !mapEdges.empty() )
@@ -810,6 +853,30 @@ void MapNode::setEdgeSeq()
     
     edgeOverlaps[0][0] = edges[0][0]->seq.length() - edgeCoords[0];
     edgeOverlaps[1][0] = edgeCoords[1];
+}
+
+void MapNode::setRedundant()
+{
+    redundant.clear();
+    int limits[2]{0};
+    for ( int i = 0; i < ids.size(); i++ )
+    {
+        int iLen = coords[1][i] - coords[0][i];
+        bool isRedundant = iLen < limits[1] - limits[0] && coords[1][i] <= limits[1];
+        if ( coords[1][i] == limits[1] ) limits[0] = min( limits[0], coords[0][i] );
+        if ( limits[1] < coords[1][i] )
+        {
+            limits[1] = coords[1][i];
+            limits[0] = coords[0][i];
+        }
+        for ( int j = i+1; j < ids.size(); j++ )
+        {
+            if ( isRedundant ) break;
+            if ( coords[0][i] < coords[0][j] ) break;
+            if ( coords[1][i] < coords[1][j] ) isRedundant = true;
+        }
+        redundant.push_back( isRedundant );
+    }
 }
 
 void MapNode::setSecondSeq( bool drxn )

@@ -19,7 +19,35 @@
  */
 
 #include "shared_functions.h"
+#include <algorithm>
 #include <cassert>
+
+int getEndTrim( string &q, string trim, bool drxn )
+{
+    if ( trim.empty() ) return 0;
+    int len = min( q.length(), trim.length() );
+    if ( drxn )
+    {
+        for ( int i = q.length() - len; i < q.length(); i++ )
+        {
+            int j = 0;
+            while ( q[i+j] == trim[j] && j < len ) j++;
+            if ( i + j == q.length() ) return j;
+        }
+    }
+    else
+    {
+        assert( false );
+        for ( int i = len; --i >= 0; )
+        {
+            int j = 0;
+            while ( q[i-j] == trim[ trim.length() - j ] && i >= j ) j++;
+            if ( j > i ) return j;
+        }
+    }
+    
+    return 0;
+}
 
 int getHomopolymerLen( string &s, bool drxn )
 {
@@ -120,4 +148,21 @@ int mapSeqOverlap( string &left, string &right, int minLen )
         }
     }
     return 0;
+}
+
+void revComp( string &seq )
+{
+    reverse( seq.begin(), seq.end() );
+    for ( int i = 0; i < seq.length(); i++ )
+    {
+        if ( seq[i] == 'A' ) seq[i] = 'T';
+        else if ( seq[i] == 'T' ) seq[i] = 'A';
+        else if ( seq[i] == 'C' ) seq[i] = 'G';
+        else if ( seq[i] == 'G' ) seq[i] = 'C';
+        else if ( seq[i] == 'a' ) seq[i] = 't';
+        else if ( seq[i] == 't' ) seq[i] = 'a';
+        else if ( seq[i] == 'c' ) seq[i] = 'g';
+        else if ( seq[i] == 'g' ) seq[i] = 'c';
+        else seq[i] = 'N';
+    }
 }

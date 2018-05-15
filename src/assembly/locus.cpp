@@ -42,10 +42,9 @@ Locus::Locus( Querier &bwt )
         validLimits_[drxn] = 0;
         forkLimits_[drxn] = 0;
         desperation_[drxn] = 0;
-        completed_[drxn] = false;
-        finished_[drxn] = false;
+        completed_[drxn] = !params.drxns[drxn];
+        finished_[drxn] = !params.drxns[drxn];
         paths_[drxn].push_back( Path() );
-        dvs_[drxn] = new DrxnVars( bwt_, nodes_[drxn], nodes_[3+drxn], drxn );
     }
 }
 
@@ -61,12 +60,20 @@ Locus::Locus( Querier &bwt, Node* origin )
 Locus::Locus( Querier &bwt, NodeList* nodes )
 : Locus( bwt )
 {
-    NodeSet seedSet, dummy;
+    NodeSet seedSet, dummy, delSet;
+    Node::mergeAll( nodes, delSet );
     
     for ( int i : { 0, 1, 2 } )
     {
         for ( Node* node : nodes[i] )
         {
+            if ( delSet.find( node ) != delSet.end() )
+            {
+                node->dismantleNode();
+                delete node;
+                continue;
+            }
+            node->setCoverage();
             seedSet.insert( node );
             node->drxn_ = i;
             nodes_[i].push_back( node );
@@ -81,9 +88,11 @@ Locus::Locus( Querier &bwt, NodeList* nodes )
         }
     }
     
+    
     setOriginEnds();
     
     Node::resetPairing( seedSet );
+    for ( Node* node : nodes_[2] ) node->setValid();
     Node::seedValidate( seedSet, dummy, validLimits_, ends_, false );
 }
 
@@ -343,10 +352,6 @@ Locus::~Locus()
             delete ivs_[i];
             ivs_[i] = NULL;
         }
-        if ( dvs_[i] )
-        {
-            delete dvs_[i];
-        }
     }
 }
 
@@ -472,70 +477,70 @@ void Locus::rebootLocus()
     setExtend( 1 );
 }
 
-//void Locus::locusTest()
-//{
-//    for ( bool drxn : { 0, 1, 2 } )
+void Locus::locusTest()
+{
+    for ( bool drxn : { 0, 1, 2 } )
+    {
+        for ( Node* node : nodes_[drxn] )
+        {
+            node->readTest();
+//            assert( !node->farPairNodes_[0] || node->pairs_.find( node->farPairNodes_[0] ) != node->pairs_.end() );
+            
+//            assert( !node->reads_.empty() );
+//            if ( node->clones_ )
+//            {
+//                NodeSet cloneSet = node->getCloneSet( true );
+//                NodeListList cloneLists;
+//                for ( Node* clone : cloneSet )
+//                {
+//                    cloneLists.push_back( *clone->clones_ );
+//                }
+//                for ( Node* clone : *node->clones_ )
+//                {
+//                    assert( clone->reads_.size() == node->reads_.size() );
+//                }
+//            }
+        }
+    }
+    
+    
+    
+//    for ( bool drxn : { 0, 1 } )
 //    {
 //        for ( Node* node : nodes_[drxn] )
 //        {
-//            node->readTest();
-//            assert( !node->farPairNodes_[0] || node->pairs_.find( node->farPairNodes_[0] ) != node->pairs_.end() );
-//            
-////            assert( !node->reads_.empty() );
-////            if ( node->clones_ )
-////            {
-////                NodeSet cloneSet = node->getCloneSet( true );
-////                NodeListList cloneLists;
-////                for ( Node* clone : cloneSet )
-////                {
-////                    cloneLists.push_back( *clone->clones_ );
-////                }
-////                for ( Node* clone : *node->clones_ )
-////                {
-////                    assert( clone->reads_.size() == node->reads_.size() );
-////                }
-////            }
+////            node->farTest( drxn );
+////            assert( !node->edges_[!drxn].empty() );
+//            node->offsetTest( drxn );
 //        }
 //    }
-//    
-//    
-//    
-////    for ( bool drxn : { 0, 1 } )
-////    {
-////        for ( Node* node : nodes_[drxn] )
-////        {
-//////            node->farTest( drxn );
-//////            assert( !node->edges_[!drxn].empty() );
-////            node->offsetTest( drxn );
-////        }
-////    }
-//    
-////    for ( int i ( 0 ); i < 5; i++ )
-////    {
-////        for ( Node* node : nodes_[i] )
-////        {
-////            for ( bool drxn : {0,1} )
-////            {
-////                for ( Edge &f : node->edges_[drxn] )
-////                {
-////                    bool didFind = false;
-////                    int j = 0;
-////                    for ( Edge &r : f.node->edges_[!drxn] )
-////                    {
-////                        if ( r.node == node )
-////                        {
-////                            didFind = true;
-////                            break;
-////                        }
-////                        assert( j < 20 );
-////                        j++;
-////                    }
-////                    assert( didFind );
-////                }
-////            }
-////        }
-////    }
-//}
+    
+//    for ( int i ( 0 ); i < 5; i++ )
+//    {
+//        for ( Node* node : nodes_[i] )
+//        {
+//            for ( bool drxn : {0,1} )
+//            {
+//                for ( Edge &f : node->edges_[drxn] )
+//                {
+//                    bool didFind = false;
+//                    int j = 0;
+//                    for ( Edge &r : f.node->edges_[!drxn] )
+//                    {
+//                        if ( r.node == node )
+//                        {
+//                            didFind = true;
+//                            break;
+//                        }
+//                        assert( j < 20 );
+//                        j++;
+//                    }
+//                    assert( didFind );
+//                }
+//            }
+//        }
+//    }
+}
 
 //void Locus::locusTest( bool drxn )
 //{

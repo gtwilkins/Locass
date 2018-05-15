@@ -108,6 +108,7 @@ bool Locus::plotPath( Path &path, bool drxn )
         plotPathGetNext( pv, best, last, path, branches, drxn );
     }
     
+    assert( !finalise_ || path.path[0]->drxn_ == 2 );
     if ( !pv.rerun )
     {
         // Prune weak divergent branches and set side nodes
@@ -115,7 +116,9 @@ bool Locus::plotPath( Path &path, bool drxn )
         PathReview review( pv, path.path, reliable_, forkLimits_, finished_[!drxn], calibrate_ );
         pv.rerun = !review.review( path, sideNodes_[drxn], delSet );
         deleteNodes( delSet, drxn );
+        locusTest();
     }
+    assert( !finalise_ || path.path[0]->drxn_ == 2 );
     
     // Set furthest fork
     plotPathUpdateFork( pv, path, drxn );
@@ -131,6 +134,7 @@ bool Locus::plotPath( Path &path, bool drxn )
     
     // Update spans for next round of pathing
     reviewSpans( drxn );
+    assert( !finalise_ || path.path[0]->drxn_ == 2 );
     
     return true;
 }
@@ -877,7 +881,7 @@ void Locus::plotPathSetEnds( PathVars &pv, PathBranch &best, PathBranch &last, P
     {
         path.completed = true;
     }
-    else if ( desperation_[drxn] < 3 )
+    else if ( desperation_[drxn] < 3 || calibrate_ )
     {
         completed_[drxn] = false;
         desperation_[drxn]++;

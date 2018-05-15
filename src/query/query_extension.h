@@ -28,6 +28,7 @@ struct Overlap
 {
     Overlap( SeqNum readId, uint16_t overlapLen, uint16_t extendLen ) : readId( readId ), overLen( overlapLen ), extLen( extendLen ), redundant( false ){}
     void offset( int offset, bool drxn );
+    static void sortByExt( vector<Overlap> &ols );
     void truncate( bool drxn );
     SeqNum readId;
     string seq;
@@ -37,27 +38,30 @@ struct Overlap
 
 struct Extension {
     Extension( Overlap &overlap, int readCount, bool drxn );
-    Extension( Overlap &overlap, int readCount, bool drxn, vector<Extension> &fwdExts, bool doAdd );
+    Extension( Overlap &overlap, int readCount, bool drxn, vector<Extension> &fwdExts );
     
     virtual ~Extension() {};
     
+    void test();
 //    void addFwd( vector<Extension> &addFwdExts, bool drxn );
     void addOverlap( Overlap &overlap );
     bool canAdd( Overlap &overlap );
     bool checkLoop( Overlap &overlap );
-    bool getExtendSum() const;
-    bool getOverlapSum() const;
+    void cullFwd( int cutoff );
+    void getExtendLens( vector<int> &lens );
+//    bool getExtendSum() const;
+    int getExtendVolume( int minExt );
+//    bool getOverlapSum() const;
+    string getSeq( int extCount );
     bool isCongruent( Overlap &overlap );
     bool isRepeat( string &seq);
-    bool isSuperior( Extension &ext, uint16_t cutoff );
-    bool isSuperior( int minOver, int sumCutoff, int maxCount, bool valid=true );
+    bool isSuperior( Extension &ext, int minLen, float expectedPer, int cutoff );
 //    bool addGuide( Overlap &overlap, bool drxn );
     bool isValid();
     void offsetFwdExts( int offset );
-    bool operator<( const Extension &rhs ) const;
+//    bool operator<( const Extension &rhs ) const;
     void resetMaxOverLen();
     void setFullSeq( string &inSeq );
-    void setScores( int minOver, int overCount );
     void trimToExtLen( uint16_t extCutoff );
     bool trimToOverlap( uint16_t &overlapCutoff );
     bool trimToSeeds( vector<Overlap> &seedOverlaps, unordered_set<SeqNum> &seeds );

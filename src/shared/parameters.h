@@ -58,7 +58,7 @@ struct Parameters {
     float cover, readSpacing, branchMinHits, peCover, peRatio;
     SeqNum seqCount;
     uint8_t outMode;  // 0 = unitig, 1 = alleles
-    bool isSet, isCalibrated;
+    bool isSet, isCalibrated, haploid, drxns[2];
     
 };
 

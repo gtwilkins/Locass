@@ -33,10 +33,12 @@ public:
     Querier( IndexReader* ir, QueryBinaries* qb );
     ~Querier();
     
+    bool correct( string &seq );
     int countKmer( string seq );
     void estimateCoverage( ofstream &fh, int kmerLen, int sampleSize );
     string getSequence( ReadId id );
     ReadId isExtendable( string &seq, uint16_t minLen, bool drxn );
+    vector<Overlap> mapCorrection( uint8_t* query, int len );
     vector<Extension> mapExtensions( bool &noMatches, string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, unordered_set<SeqNum> &seeds, uint16_t minOver=1 );
@@ -45,11 +47,14 @@ public:
     void mapSequence( string &seq, vector<ReadId> &ids, vector<int32_t>* coords );
    
 private:
+    string getConsensusExtend( QueryState &q, bool drxn );
     vector<Overlap> getOverlaps( string &seq, uint16_t minOver, bool drxn );
     vector<Overlap> getOverlaps( string &seq, uint16_t minOver, uint8_t &maxConsidered, bool drxn );
     vector<Extension> compileExtensions( vector<Overlap> &overlaps, bool drxn, bool doTrim );
     bool isVector( Extension &ext );
-    void mapExtensionsCull( string &seq, vector<Extension> &exts );
+    bool mapCorrection( QueryState &q, int it, uint8_t i, CharId rank, CharId count, bool errors );
+//    int mapCorrection( QueryState &q, int it, CharId rank, CharId count, bool doCorrect, bool doExtend );
+    void mapExtensionsCull( string &seq, vector<Extension> &exts, int base );
     void mapExtensionsCull( string &seq, vector<Extension> &exts, vector<Overlap> &overlaps, unordered_set<SeqNum> &seeds );
     void mapExtensionsTrim( vector<Extension> &exts, vector<Overlap> &overlaps );
     void mapReads( QueryState &q, uint8_t it, CharId rank, CharId count );
@@ -60,13 +65,7 @@ private:
     QueryBinaries* bin_;
     
     uint16_t minOver_, maxSeqs_, constCutoff_;
-    
-    CharId baseCounts[4];
-    CharId baseOverlapRanks_[4][4], baseOverlapCounts_[4][4];
-    
-//    LetterCountEachPile countsCumulative_;
-//    LetterCountEachPile countsPerPile_;
-//    LetterCountEachPile baseRanges_;
+    float expectedPer_;
 };
 
 #endif /* QUERY_H */

@@ -24,132 +24,9 @@
 
 extern Parameters params;
 
-void CalibrateWriter::coverage()
+CalibrateWriter::~CalibrateWriter()
 {
-    vector<int> totalCounts;
-    
-    int minOverlap = 1 + params.readLen / 2;
-    srand( time(NULL) );
-    
-    vector<string> seqs;
-    int attempted = 0;
-    while ( seqs.size() < 1000 && attempted < 10000 )
-    {
-        ReadId id = ( ( rand() & 65535 ) << 16 | ( rand() & 65535 ) ) % params.seqCount;
-        string seq = bwt_.getSequence( id );
-        if ( seq.length() < params.readLen ) continue;
-        int counts[2]{0};
-        for ( bool drxn : { 0, 1 } )
-        {
-            vector<Extension> exts = bwt_.mapExtensions( seq, drxn, minOverlap );
-            if ( exts.size() == 1 )
-            {
-                counts[drxn] = exts[0].readCount;
-            }
-        }
-        int diff = abs( counts[0] - counts[1] );
-        if ( counts[0] > 1 && counts[1] > 1 && diff < ( 2 + min( counts[0], counts[1] ) / 2 ) )
-        {
-            totalCounts.push_back( counts[0] );
-            totalCounts.push_back( counts[1] );
-            seqs.push_back( seq );
-        }
-        ++attempted;
-    }
-    
-    vector<int> sortCounts = { totalCounts.begin(), totalCounts.end() };
-    sort( sortCounts.begin(), sortCounts.end() );
-    
-    int midPoint = sortCounts.size() / 2;
-    int i = midPoint;
-    int j = i + midPoint / 2;
-    int totalSum = 0;
-    int totalNum = 0;
-    int cutoffs[2] = { sortCounts[i], sortCounts[j] };
-    
-    while ( i < j )
-    {
-        totalSum += sortCounts[i];
-        totalNum++;
-        i++;
-    }
-    
-    params.cover = ( (float)totalSum / (float)totalNum ) * 2.4;
-    
-    for ( int k ( 0 ); k < seqs.size(); k++ )
-    {
-        if ( cutoffs[0] <= totalCounts[k*2] && totalCounts[k*2+1] <= cutoffs[1] )
-        {
-            seqs_.push_back( seqs[k] );
-        }
-    }
-}
-
-void CalibrateWriter::pairing()
-{
-    params.locusLimits[0] = -30000;
-    params.locusLimits[1] = 30000;
-    int minOverlap = 1 + params.readLen / 2;
-    NodeListList lociNodes;
-    NodeList dummy;
-    SeedLibraryCounts seedList( params );
-    int i = 0, id = 0;
-    while ( lociNodes.size() < 200 && i < seqs_.size() )
-    {
-        vector<Extension> exts = bwt_.mapExtensions( seqs_[i], 1, minOverlap );
-        if ( exts.size() == 1 )
-        {
-            int32_t limits[2]{0};
-            NodeList nodes = { new Node( seqs_[i], exts[0], seqs_[i].length(), 1 ) };
-            nodes[0]->drxn_ = 2;
-            ExtVars ev( nodes, dummy, limits, bwt_, false, false );
-            ++i;
-            if ( nodes[0]->calibrateSeed( ev ) )
-            {
-                SeedLibraryCount libs( params );
-                int thisPairCount = Node::calibrateCount( nodes, libs );
-                if ( thisPairCount >= 50 )
-                {
-                    lociNodes.push_back( nodes );
-                    libs.id = id;
-                    seedList.libs.push_back( libs );
-                    ++id;
-                    continue;
-                }
-            }
-            for ( Node* node : nodes )
-            {
-                delete node;
-            }
-        }
-    }
-    
-    vector<int> goodIds = seedList.set( params );
-    
-    LocusLibraryCounts locusLists;
-    for ( int i : goodIds )
-    {
-        NodeList subGraphs[3];
-        subGraphs[2].push_back( lociNodes[i][0] );
-        for ( Node* fwd : lociNodes[i][0]->getDrxnNodes( 0 ) )
-        {
-            subGraphs[0].push_back( fwd); 
-        }
-        for ( Node* fwd : lociNodes[i][0]->getDrxnNodes( 1 ) )
-        {
-            subGraphs[1].push_back( fwd); 
-        }
-        
-        lociNodes[i].clear();
-        locusLists.libs.push_back( LocusLibraryCount( params ) );
-        Locus* locus = new Locus( bwt_, subGraphs );
-        locus->calibrate( locusLists.libs.back() );
-        delete locus;
-    }
-    
-    locusLists.set( params );
-    
-    for ( NodeList &nodes : lociNodes )
+    for ( NodeList &nodes : nodes_ )
     {
         for ( Node* node : nodes )
         {
@@ -157,6 +34,126 @@ void CalibrateWriter::pairing()
         }
         nodes.clear();
     }
+}
+
+void CalibrateWriter::coverage()
+{
+    params.locusLimits[0] = -30000;
+    params.locusLimits[1] = 30000;
+    srand( time(NULL) );
+    
+    int attempted = 0;
+    int64_t totalLen = 0;
+    NodeList dummy;
+    while ( nodes_.size() < 100 && attempted < 10000 )
+    {
+        ReadId id = ( ( rand() & 65535 ) << 16 | ( rand() & 65535 ) ) % params.seqCount;
+        string seq = bwt_.getSequence( id );
+        if ( seq.length() < params.readLen ) continue;
+        vector<Extension> exts = bwt_.mapExtensions( seq, 0 );
+        if ( exts.size() != 1 || exts[0].readCount <= 1 ) continue;
+        int32_t limits[2]{0};
+        seq = seq.substr( 0, exts[0].maxOverLen );
+        NodeList nodes = { new Node( seq, exts[0], 0, 0 ) };
+        nodes[0]->drxn_ = 2;
+        ExtVars ev( nodes, dummy, limits, bwt_, false, false );
+        nodes[0]->extendCount_ = 50;
+        nodes[0]->extendNode( ev, 1 );
+        nodes[0]->extendCount_ = 50;
+        if ( nodes[0]->ends_[1] > params.readLen ) nodes[0]->extendNode( ev, 0 );
+        if ( nodes[0]->seq_.length() < params.readLen * 2 || nodes[0]->reads_.size() < 15 )
+        {
+            for ( Node* node : nodes ) delete node;
+        }
+        else
+        {
+//            //
+//            LocusLibraryCounts locusLists;
+//            NodeList subGraphs[3];
+//            subGraphs[2].push_back( nodes[0] );
+//            for ( Node* fwd : nodes[0]->getDrxnNodes( 0 ) )
+//            {
+//                subGraphs[0].push_back( fwd); 
+//            }
+//            for ( Node* fwd : nodes[0]->getDrxnNodes( 1 ) )
+//            {
+//                subGraphs[1].push_back( fwd); 
+//            }
+//            locusLists.libs.push_back( LocusLibraryCount( params ) );
+//            Locus* locus = new Locus( bwt_, subGraphs );
+//            locus->calibrate( locusLists.libs.back() );
+//            assert( false );
+//            //
+            
+            nodes_.push_back( nodes );
+            totalLen += nodes[0]->seq_.length();
+            seqs_.push_back( seq );
+        }
+        ++attempted;
+    }
+    
+    sort( nodes_.begin(), nodes_.end(), []( NodeList const &a, NodeList const &b ){
+        return a[0]->coverage_ > b[0]->coverage_;
+    } );
+    
+    double coverTotal = 0, coverCount = 0;
+    int64_t cumulative = 0, cutoffs[2] = { int64_t(totalLen * 0.25), int64_t(totalLen * 0.75) };
+    bool doCount = false;
+    for ( NodeList &nodes : nodes_ )
+    {
+        cumulative += nodes[0]->seq_.length();
+        if ( !doCount && cumulative > cutoffs[0] ) doCount = true;
+        coverTotal += nodes[0]->coverage_ * nodes[0]->seq_.length();
+        coverCount += nodes[0]->seq_.length();
+        if ( doCount && cumulative > cutoffs[1] ) break;
+    }
+    
+    sort( nodes_.begin(), nodes_.end(), []( NodeList const &a, NodeList const &b ){
+        return a[0]->seq_.length() > b[0]->seq_.length();
+    } );
+    
+    params.cover = coverTotal / coverCount;
+}
+
+void CalibrateWriter::pairing()
+{
+    params.locusLimits[0] = -30000;
+    params.locusLimits[1] = 30000;
+    NodeList dummy;
+    SeedLibraryCounts seedList( params );
+    for ( int i = 0; i < nodes_.size(); i++ )
+    {
+        int32_t limits[2]{0};
+        ExtVars ev( nodes_[i], dummy, limits, bwt_, false, false );
+        nodes_[i][0]->calibrateSeed( ev );
+        SeedLibraryCount libs( params );
+        Node::calibrateCount( nodes_[i], libs );
+        libs.id = i;
+        seedList.libs.push_back( libs );
+    }
+    
+    LocusLibraryCounts locusLists;
+    for ( int i : seedList.set( params ) )
+    {
+        NodeList subGraphs[3];
+        subGraphs[2].push_back( nodes_[i][0] );
+        for ( Node* fwd : nodes_[i][0]->getDrxnNodes( 0 ) )
+        {
+            subGraphs[0].push_back( fwd); 
+        }
+        for ( Node* fwd : nodes_[i][0]->getDrxnNodes( 1 ) )
+        {
+            subGraphs[1].push_back( fwd); 
+        }
+        
+        nodes_[i].clear();
+        locusLists.libs.push_back( LocusLibraryCount( params ) );
+        Locus* locus = new Locus( bwt_, subGraphs );
+        locus->calibrate( locusLists.libs.back() );
+        delete locus;
+    }
+    
+    locusLists.set( params );
 }
 
 void CalibrateWriter::write( Filenames* fns )

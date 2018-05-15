@@ -387,8 +387,19 @@ void Node::islandReview( IslandVars &iv, NodeSet &islandSet, NodeSetList &peIsla
     
     NodeSet mainlandSet;
     
+    int extra = 0, extraPe = 0;
     for ( Node* node : islandSet )
     {
+        for ( ReadMark &mark : node->getMarksBase( iv.drxn ) )
+        {
+            for ( Node* mn : iv.ev.nodes )
+            {
+                auto it = mn->reads_.find( mark.id );
+                if ( it == mn->reads_.end() ) continue;
+                extra++;
+                if ( params.isReadPe( mark.id ) ) extraPe++;
+            }
+        }
         bool thisBridge = false;
         for ( const SeqNum &readId : iv.peReads )
         {
@@ -488,8 +499,6 @@ void Node::islandSetExtend( IslandVars &iv, NodeSet &islandSet, NodeSet* &extSet
     
     if ( !anchorList.empty() )
     {
-        
-        
         int32_t cutoffs[2];
         cutoffs[0] = iv.drxn ? anchorList[0]->ends_[0] - ( params.maxPeMean / 2 )
                              : anchorList[0]->ends_[1] - params.maxPeMax;
@@ -973,13 +982,13 @@ bool Node::overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, 
                             int32_t splitCoord = currNodes[i]->ends_[!drxn];
                             for ( auto &read : currNodes[i]->reads_ )
                             {
-                                if ( drxn ? read.second[0] < nxtCoord[0] : nxtCoord[1] < read.second[1] )
-                                {
-                                    splitCoord = drxn ? max( splitCoord, read.second[1] ) : min( splitCoord, read.second[0] );
-                                }
+                                if ( drxn ? nxtCoord[0] <= read.second[0] : read.second[1] <= nxtCoord[1] ) continue;
+//                                if ( currNodes[i]->isRedundant( &read->second ) ) continue;
+                                splitCoord = drxn ? max( splitCoord, read.second[1] ) : min( splitCoord, read.second[0] );
                             }
                             if ( splitCoord == currNodes[i]->ends_[!drxn] ) continue;
                             currNodes[i]->splitNode( splitCoord, nodes, !drxn, !drxn );
+                            nxtCoord[!drxn] = drxn ? max( nxtCoord[0], currNodes[i]->ends_[0] ) : min( nxtCoord[1], currNodes[i]->ends_[1] );
                         }
                     }
                     hitNodes.push_back( currNodes[i] );
@@ -1080,14 +1089,52 @@ void Node::reviewMerged( ExtVars &ev, NodeSet &mergeSet, bool drxn )
 
 bool Node::seedIslandsCheckRead( IslandVars &iv, ReadMark &mark )
 {
+    for ( Node* node : iv.origin )
+    {
+        if ( node->reads_.find( mark.id ) != node->reads_.end() ) return false;
+    }
     for ( Node* node : iv.ev.island )
     {
-        if ( node->reads_.find( mark.id ) != node->reads_.end() )
-        {
-            return false;
-        }
+        if ( node->reads_.find( mark.id ) != node->reads_.end() ) return false;
+    }
+    for ( Node* node : iv.ev.nodes )
+    {
+        if ( node->reads_.find( mark.id ) != node->reads_.end() ) return false;
     }
     return true;
+}
+
+bool Node::seedIslandsCheckSeq( IslandVars &iv, string &seq, ReadMark &mark )
+{
+    int len = min( (int)seq.length(), params.readLen / 2 );
+    Node* bestNode = NULL;
+    bool bestDrxn;
+    int32_t bestCoords[2];
+    for ( NodeList const &nodes : { iv.origin, iv.ev.nodes, iv.ev.island } )
+    {
+        int32_t coords[2];
+        for ( Node* node : nodes )
+        {
+            for ( bool drxn : { 0, 1 } )
+            {
+                if ( !mapSeqEnd( seq, node->seq_, len, coords, drxn ) ) continue;
+                if ( coords[1] - coords[0] == seq.length() )
+                {
+                    node->addRead( mark.id, coords[0] + node->ends_[0], coords[0] + node->ends_[0], true );
+                    return false;
+                }
+                if ( !bestNode || coords[1] - coords[0] > bestCoords[1] - bestCoords[0] )
+                {
+                    bestNode = node;
+                    bestCoords[0] = coords[0];
+                    bestCoords[1] = coords[1];
+                    bestDrxn = drxn;
+                }
+            }
+        }
+    }
+    if ( !bestNode ) return true;
+    return false;
 }
 
 //bool Node::seedIslandBridge( IslandVars &iv, vector<IslandRead*> &path, Node* hitNode, int32_t* coords, bool drxn )
@@ -1144,51 +1191,51 @@ bool Node::seedIslandsCheckRead( IslandVars &iv, ReadMark &mark )
 //    return false;
 //}
 
-void Node::seedIslandsClump( IslandVars &iv, vector<ReadMark> &marks, unordered_set<SeqNum> &seeds, bool drxn )
-{
-    for ( ReadMark &mark : marks )
-    {
-        if ( !Node::seedIslandsCheckRead( iv, mark ) ) continue;
-        
-        string seq = iv.ev.bwt.getSequence( mark.id );
-        vector<Extension> exts = iv.ev.bwt.mapExtensions( seq, !drxn, seeds );
-        
-        for ( Extension &ext : exts )
-        {
-            MergeHit merge;
-            checkExtension( ext, iv, merge );
-            
-            if ( !ext.overlaps.empty() )
-            {
-                string extSeq = ( !drxn ? seq.substr( seq.length() - ext.maxOverLen ) : seq.substr( 0, ext.maxOverLen ) );
-                Node* node = new Node( extSeq, mark, ext, !drxn, drxn );
-                iv.ev.island.push_back( node );
-                
-                if ( merge.node && merge.node->drxn_ == !iv.drxn )
-                {
-                    Node::islandDelete( iv, node );
-                    iv.ev.del.erase( node );
-                }
-                else if ( merge.node && merge.node->drxn_ <= 2 )
-                {
-                    Node* mergeNode = merge.node->mergeNode( iv.ev.nodes, merge.coords, iv.drxn, !drxn );
-                    mergeNode->addEdge( node, merge.overlap, drxn );
-                    iv.merged[!drxn].insert( node );
-                }
-                else if ( merge.node )
-                {
-                    Node* mergeNode = merge.node->mergeNode( iv.ev.island, merge.coords, iv.drxn, !drxn );
-                    mergeNode->addEdge( node, merge.overlap, drxn );
-                }
-                else if ( !node->seedIslandsConfirm( iv, seeds, !drxn ) )
-                {
-                    Node::islandDelete( iv, node );
-                    iv.ev.del.erase( node );
-                }
-            }
-        }
-    }
-}
+//void Node::seedIslandsClump( IslandVars &iv, vector<ReadMark> &marks, unordered_set<SeqNum> &seeds, bool drxn )
+//{
+//    for ( ReadMark &mark : marks )
+//    {
+//        if ( !Node::seedIslandsCheckRead( iv, mark ) ) continue;
+//        
+//        string seq = iv.ev.bwt.getSequence( mark.id );
+//        vector<Extension> exts = iv.ev.bwt.mapExtensions( seq, !drxn, seeds );
+//        
+//        for ( Extension &ext : exts )
+//        {
+//            MergeHit merge;
+//            checkExtension( ext, iv, merge );
+//            
+//            if ( !ext.overlaps.empty() )
+//            {
+//                string extSeq = ( !drxn ? seq.substr( seq.length() - ext.maxOverLen ) : seq.substr( 0, ext.maxOverLen ) );
+//                Node* node = new Node( extSeq, mark, ext, !drxn, drxn );
+//                iv.ev.island.push_back( node );
+//                
+//                if ( merge.node && merge.node->drxn_ == !iv.drxn )
+//                {
+//                    Node::islandDelete( iv, node );
+//                    iv.ev.del.erase( node );
+//                }
+//                else if ( merge.node && merge.node->drxn_ <= 2 )
+//                {
+//                    Node* mergeNode = merge.node->mergeNode( iv.ev.nodes, merge.coords, iv.drxn, !drxn );
+//                    mergeNode->addEdge( node, merge.overlap, drxn );
+//                    iv.merged[!drxn].insert( node );
+//                }
+//                else if ( merge.node )
+//                {
+//                    Node* mergeNode = merge.node->mergeNode( iv.ev.island, merge.coords, iv.drxn, !drxn );
+//                    mergeNode->addEdge( node, merge.overlap, drxn );
+//                }
+//                else if ( !node->seedIslandsConfirm( iv, seeds, !drxn ) )
+//                {
+//                    Node::islandDelete( iv, node );
+//                    iv.ev.del.erase( node );
+//                }
+//            }
+//        }
+//    }
+//}
 
 bool Node::seedIslandsConfirm( IslandVars &iv, unordered_set<SeqNum> &seeds, bool drxn )
 {
@@ -1524,6 +1571,8 @@ bool Node::seedIslandsSingle( IslandVars &iv, ReadMark &mark, unordered_set<SeqN
     if ( !Node::seedIslandsCheckRead( iv, mark ) ) return false;
     
     string seq = iv.ev.bwt.getSequence( mark.id );
+    if ( !Node::seedIslandsCheckSeq( iv, seq, mark ) || seq.length() < params.readLen ) return false;
+    
     vector<Extension> exts = iv.ev.bwt.mapExtensions( seq, drxn, ( params.readLen * 2 ) / 3 );
 
     for ( Extension &ext : exts )
