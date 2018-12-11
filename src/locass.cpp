@@ -32,6 +32,8 @@
 #include "commands/calibrate.h"
 #include "commands/assemble.h"
 #include "commands/correct.h"
+#include "commands/damplify.h"
+#include "mask.h"
 
 Parameters params;
 
@@ -50,7 +52,7 @@ void printUsage()
 }
 
 int main( int argc, char** argv )
-{
+{    
     if ( argc > 1 )
     {
         if ( !strcmp( argv[1], "-h" ) || !strcmp( argv[1], "--help" ) || !strcmp( argv[1], "-help" ) )
@@ -69,10 +71,18 @@ int main( int argc, char** argv )
         {
             Assemble( argc, argv );
         }
-        else if ( !strcmp( argv[1], "correct" ) )
-        {
-            Correct( argc, argv );
-        }
+//        else if ( !strcmp( argv[1], "correct" ) )
+//        {
+//            Correct( argc, argv );
+//        }
+//        else if ( !strcmp( argv[1], "damplify" ) )
+//        {
+//            Damplify( argc, argv );
+//        }
+//        else if ( !strcmp( argv[1], "mask" ) )
+//        {
+//            Mask( argc, argv );
+//        }
 //        else if ( !strcmp( argv[1], "map" ) )
 //        {
 //            assert( false );

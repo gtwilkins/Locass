@@ -21,6 +21,7 @@
 #include "shared_functions.h"
 #include <algorithm>
 #include <cassert>
+#include <string.h>
 
 int getEndTrim( string &q, string trim, bool drxn )
 {
@@ -82,6 +83,74 @@ int getHomopolymerScore( string &s )
     
     score += j - i - 1;
     return score;
+}
+
+bool isSequence( string &s )
+{
+    for ( char c : s )  if ( !strchr( "ACGTN", c ) ) return false;
+    return true;
+}
+
+bool mapSeq( string &q, string &t, int* coords, int minLen )
+{
+    if ( q.find( t ) != string::npos )
+    {
+        coords[0] = 0;
+        coords[1] = t.size();
+        return true;
+    }
+    size_t it = t.find( q );
+    if ( it != string::npos )
+    {
+        coords[0] = it;
+        coords[1] = coords[0] + q.size();
+        return true;
+    }
+    if ( minLen > q.size() ) return false;
+    int ols[2] = { mapSeqOverlap( q, t, minLen ), mapSeqOverlap( t, q, minLen ) };
+    if ( ols[0] && ols[0] >= ols[1] )
+    {
+        coords[0] = 0;
+        coords[1] = ols[0];
+        return true;
+    }
+    if ( ols[1] )
+    {
+        coords[0] = t.size() - ols[1];
+        coords[1] = t.size();
+        return true;
+    }
+    return false;
+}
+
+int mapCongruence( string &left, string &right, int len )
+{
+    if ( len > min( left.size(), right.size() ) ) return 0;
+    if ( left.size() < right.size() )
+    {
+        size_t i = left.size() - len;
+        size_t j = right.find( left.substr( i ) );
+        if ( j == right.npos ) return 0;
+        while ( i > 0 && j > 0 )
+        {
+            if ( left[--i] != right[--j] ) return 0;
+            len++;
+        }
+    }
+    else
+    {
+        size_t i = left.find( right.substr( 0, len ) );
+        size_t j = len;
+        if ( i == left.npos ) return 0;
+        i += len;
+        while ( i < left.size() && j < right.size() )
+        {
+            if ( left[i++] != right[j++] ) return 0;
+            len++;
+        }
+    }
+    
+    return len;
 }
 
 bool mapSeqCongruent( string &left, string &right, int offset )
@@ -165,4 +234,23 @@ void revComp( string &seq )
         else if ( seq[i] == 'g' ) seq[i] = 'c';
         else seq[i] = 'N';
     }
+    
+}
+
+string revCompNew( string &seq )
+{
+    string rev;
+    for ( auto it = seq.rbegin(); it != seq.rend(); it++ )
+    {
+        if ( *it == 'A' ) rev += 'T';
+        else if ( *it == 'T' ) rev += 'A';
+        else if ( *it == 'C' ) rev += 'G';
+        else if ( *it == 'G' ) rev += 'C';
+        else if ( *it == 'a' ) rev += 't';
+        else if ( *it == 't' ) rev += 'a';
+        else if ( *it == 'c' ) rev += 'g';
+        else if ( *it == 'g' ) rev += 'c';
+        else rev += 'N';
+    }
+    return rev;
 }

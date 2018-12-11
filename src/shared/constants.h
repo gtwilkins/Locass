@@ -61,5 +61,15 @@ static const uint8_t charToIntComp[] =
     6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6
 };
 
+static const char intToChar[] =
+{
+    'A', 'C', 'G', 'T', 'N'
+};
+
+static const char intToCharComp[] =
+{
+    'T', 'G', 'C', 'A', 'N'
+};
+
 #endif /* CONSTANTS_H */
 

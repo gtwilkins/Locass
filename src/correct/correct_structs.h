@@ -24,18 +24,16 @@
 #include "types.h"
 #include <fstream>
 
-struct Fastq
+struct CorrectReader
 {
-    Fastq( string line, uint8_t qualCutoff );
-    bool getSeq( string &seq, int nCoords[2], int qCoords[2], int i );
-    bool setNext();
-    
-    ifstream fp;
-    string seqs[2], quals[2];
-    uint8_t cutoff;
-    bool paired;
+    CorrectReader( string &fnReads, uint8_t* used );
+    bool read( string (&lines)[2][4] );
+    FILE* ifpReads;
+    ifstream ifsReads;
+    uint64_t id;
+    uint8_t* used;
+    uint8_t idTable[8];
 };
-
 
 #endif /* CORRECT_STRUCTS_H */
 

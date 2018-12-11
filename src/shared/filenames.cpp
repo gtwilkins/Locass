@@ -33,12 +33,22 @@ Filenames::Filenames( string inPrefix )
     bwt = prefix + "-bwt.dat";
     ids = prefix + "-ids.dat";
     idx = prefix + "-idx.dat";
+    mer = prefix + "-mer.dat";
 }
 
-FILE* Filenames::getReadPointer( string &filename, bool doEdit )
+bool Filenames::exists( string &filename )
+{
+    if ( filename.empty() ) return false;
+    ifstream ifs( filename );
+    bool result = ifs.good();
+    ifs.close();
+    return result;
+}
+
+FILE* Filenames::getReadPointer( string &filename, bool doEdit, bool allowFail )
 {
     FILE* fp = fopen( filename.c_str(), ( doEdit ? "rb+" : "rb" ) );
-    if ( fp == NULL )
+    if ( fp == NULL && !allowFail )
     {
         cerr << "Error opening file \"" << filename << "\"." << endl;
         exit( EXIT_FAILURE );
@@ -118,14 +128,15 @@ void Filenames::removeFile( string &filename )
     }
 }
 
-void Filenames::setIndex( FILE* &inBin, FILE* &inBwt, FILE* &inIdx )
+void Filenames::setIndex( FILE* &inBin, FILE* &inBwt, FILE* &inIdx, FILE* &inMer )
 {
     inBin = getReadPointer( bin, false );
     inBwt = getReadPointer( bwt, false );
     inIdx = getReadPointer( idx, false );
+    inMer = getReadPointer( mer, false, true );
 }
 
-PreprocessFiles::PreprocessFiles( string inPrefix )
+PreprocessFiles::PreprocessFiles( string inPrefix, bool overwrite )
 : Filenames( inPrefix )
 {
     tmpSingles = prefix + "-tmpSingles.seq";
@@ -143,9 +154,9 @@ PreprocessFiles::PreprocessFiles( string inPrefix )
         }
     }
     
-    for ( string const &fn : { bwt, bin, ids, idx } )
+    for ( string const &fn : { bwt, bin, ids, idx, mer } )
     {
-        if ( ifstream( fn ) )
+        if ( ifstream( fn ) && !overwrite )
         {
             cerr << "Error: file \"" << fn << "\" already exists. Either remove it, rename it, or choose a different file prefix." << endl;
             exit( EXIT_FAILURE );
@@ -253,4 +264,9 @@ void PreprocessFiles::setIndexWrite( FILE* &inBwt, FILE* &outIdx )
 {
     inBwt = getReadPointer( bwt, false );
     outIdx = getWritePointer( idx );
+}
+
+void PreprocessFiles::setMersWrite( FILE* &outMer )
+{
+    outMer = getWritePointer( mer );
 }

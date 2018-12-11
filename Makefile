@@ -1,62 +1,72 @@
 PREFIX = /usr/local/bin/
 DBG=-g
-INC=-Isrc -Isrc/assembly -Isrc/calibrate -Isrc/commands -Isrc/index -Isrc/query -Isrc/shared -Isrc/transform -Isrc/correct
-VPATH=src:src/assembly:src/calibrate:src/assembly:src/commands:src/index:src/query:src/shared:src/transform:src/correct
+INC=-Isrc -Isrc/assembly -Isrc/calibrate -Isrc/commands -Isrc/deadaptor -Isrc/index -Isrc/query -Isrc/shared -Isrc/transform -Isrc/correct
+VPATH=src:src/assembly:src/calibrate:src/assembly:src/commands:src/deadaptor:src/index:src/query:src/shared:src/transform:src/correct
 
 SRCS =  \
 	locass.cpp \
-	index_writer.cpp \
-	index_reader.cpp \
 	assemble.cpp \
-	index.cpp \
 	calibrate.cpp \
+	correct.cpp \
+	index.cpp \
+	seed.cpp \
+	bitfiles.cpp \
+	calibrate_writer.cpp \
+	calibrate_structs.cpp \
+	correct_amplicon.cpp \
+	correct_read.cpp \
+	correct_query.cpp \
+	correct_structs.cpp \
+	deadapter.cpp \
+	deamplify.cpp \
+	deamplify_structs.cpp \
+	error.cpp \
+	extend.cpp \
+	export_file.cpp \
+	filenames.cpp \
+	import_file.cpp \
+	index_reader.cpp \
+	index_structs.cpp \
+	index_writer.cpp \
+	timer.cpp \
 	transform_bwt.cpp \
 	transform_structs.cpp \
 	transform.cpp \
 	transform_binary.cpp \
-	correct.cpp \
-	correct_structs.cpp \
-	calibrate_writer.cpp \
-	calibrate_structs.cpp \
-	timer.cpp \
 	parameters.cpp \
-	filenames.cpp \
 	shared_functions \
-	node_looping.cpp \
+	local_alignment.cpp \
 	locus_export.cpp \
+	locus_pathing_structs.cpp \
+	locus_fill.cpp \
+	node.cpp \
+	node_looping.cpp \
 	node_filling.cpp \
 	node_folding.cpp \
 	node_validation.cpp \
-	locus_pathing_structs.cpp \
 	node_export.cpp \
 	node_structs.cpp \
-	seed.cpp \
 	node_completion.cpp \
 	node_slicing.cpp \
 	node_groupings.cpp \
 	node_bridging.cpp \
 	node_reliability.cpp \
-	locus_fill.cpp \
 	node_seed.cpp \
 	node_cloning.cpp \
 	node_pairing.cpp \
 	node_islands.cpp \
 	node_pathing.cpp \
-	node.cpp \
-	extend.cpp \
 	node_extension.cpp \
 	node_navigation.cpp \
-	locus_pathing.cpp \
-	export_file.cpp \
-	locus_extension.cpp \
 	node_reads.cpp \
-	locus_calibration.cpp \
+	node_coverage.cpp \
+	node_calibration.cpp \
 	node_furthest.cpp \
 	locus.cpp \
-	node_coverage.cpp \
-	import_file.cpp \
+	locus_pathing.cpp \
+	locus_extension.cpp \
+	locus_calibration.cpp \
 	locus_leaping.cpp \
-	node_calibration.cpp \
 	path_merge.cpp \
 	path_reassembly.cpp \
 	path_review.cpp \
@@ -67,7 +77,7 @@ SRCS =  \
 	query_extension.cpp \
 	query.cpp \
 	query_structs.cpp
-
+	
 
 # C++ compiler
 CXX = g++

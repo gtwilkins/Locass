@@ -20,6 +20,7 @@
 
 #include "query_state.h"
 #include <cassert>
+#include "constants.h"
 
 extern Parameters params;
 
@@ -78,6 +79,13 @@ void QueryState::updateSeq( string &seq, int off, bool drxn )
         if ( seq[j] == 'N' ) seq[j] = c;
     }
 }
+
+QueryCorrectState::QueryCorrectState( uint8_t* query, int corrLength, int seqLength, int minOverlap )
+: q( query ), corrLen( corrLength ), seqLen( seqLength ), minOver( minOverlap ), fresh( true ), endCount( 0 )
+{
+    endCutoff = altCutoff = 0;
+}
+
 
 QuerySeedState::QuerySeedState( string &seq, MappedSeqs &ms, int errorRate )
 : len( seq.length() ), ms( ms )

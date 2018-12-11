@@ -20,98 +20,28 @@
 
 #include "correct_structs.h"
 #include <cassert>
-#include <fstream>
+#include "constants.h"
 
-Fastq::Fastq( string line, uint8_t qualCutoff )
-: cutoff( qualCutoff )
+CorrectReader::CorrectReader( string &fnReads, uint8_t* used )
+: ifsReads( fnReads ), used( used )
 {
-    size_t it = line.find( "paired" );
-    if ( !it ) paired = true;
-    if ( it ) it = line.find( "single" );
-    assert( paired || !it );
-    it = line.find_first_of( ' ' );
-    assert( it != line.npos );
-    line = line.substr( it + 1 );
-    fp.open( line );
-    assert( fp.is_open() && fp.good() );
+    ifpReads = NULL;
+    id = 0;
+    for ( int i = 0; i < 8; i++ ) idTable[i] = 1 << ( 7 - i );
 }
 
-bool Fastq::getSeq( string &seq, int nCoords[2], int qCoords[2], int i )
+bool CorrectReader::read( string (&lines)[2][4] )
 {
-    bool anyErrors = false;
-    nCoords[0] = qCoords[0] = 0;
-    nCoords[1] = qCoords[1] = seqs[i].length();
-    seq = seqs[i];
+    for ( int i = 0; i < 2; i++ ) for ( int j = 0; j < 4; j++ ) if ( !getline( ifsReads, lines[i][j] ) ) return false;
+    if ( lines[0][0].empty() || lines[1][0].empty() ) return false;
     
-    assert( seqs[i].length() == quals[i].length() );
-    int bestLen = 0, currStart = 0;
-    for ( int j = 0; j < seqs[i].length(); j++ )
-    {
-        if ( seqs[i][j] == 'N' )
-        {
-            anyErrors = true;
-            int len = j - currStart;
-            if ( len > bestLen )
-            {
-                nCoords[0] = currStart;
-                nCoords[1] = j;
-                bestLen = len;
-            }
-            currStart = j + 1;
-        }
-    }
+    if ( !ifpReads ) return true;
     
-    if ( seqs[i].length() - currStart > bestLen )
-    {
-        nCoords[0] = currStart;
-        nCoords[1] = seqs[i].length();
-    }
+    uint8_t lens[2], seqs[2][256];
+    fread( lens, 1, 2, ifpReads );
+    fread( seqs[0], 1, lens[0], ifpReads );
+    fread( seqs[1], 1, lens[1], ifpReads );
     
-    bestLen = 16;
-    currStart = nCoords[0];
-    for ( int j = 0; j < seqs[i].length(); j++ )
-    {
-        if ( quals[i][j] < cutoff )
-        {
-            anyErrors = true;
-            if ( seq[j] == 'A' ) seq[j] = 'a';
-            else if ( seq[j] == 'C' ) seq[j] = 'c';
-            else if ( seq[j] == 'G' ) seq[j] = 'g';
-            else if ( seq[j] == 'T' ) seq[j] = 't';
-            if ( j < qCoords[0] || j >= qCoords[1] ) continue;
-            int len = j - currStart;
-            if ( len > bestLen )
-            {
-                qCoords[0] = currStart;
-                qCoords[1] = j;
-                bestLen = len;
-            }
-            currStart = j + 1;
-        }
-    }
-    
-    if ( seqs[i].length() - currStart > bestLen )
-    {
-        qCoords[0] = currStart;
-        qCoords[1] = seqs[i].length();
-    }
-    
-    return anyErrors;
-}
-
-bool Fastq::setNext()
-{
-    for ( int i = 0; i < 1 + paired; i++ )
-    {
-        if ( !getline( fp, seqs[i] ) )
-        {
-            assert( !i );
-            return false;
-        }
-        getline( fp, seqs[i] );
-        getline( fp, quals[i] );
-        getline( fp, quals[i] );
-    }
-    
-    return true;
+    bool dump = used && ( used[id/8] & ( idTable[id%8] ) );
+    id++;
 }

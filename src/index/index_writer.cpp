@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <iostream>
 #include "timer.h"
+#include "index_reader.h"
 
 IndexWriter::IndexWriter( PreprocessFiles* fns, ReadId indexChunk, ReadId markChunk )
 : bwtPerIndex( indexChunk ), countsPerMark( markChunk )
@@ -61,9 +62,10 @@ IndexWriter::IndexWriter( PreprocessFiles* fns, ReadId indexChunk, ReadId markCh
         }
     }
     
-    write();
+    writeIndex();
     fclose( bwt );
     fclose( idx );
+//    writeMers( fns );
 }
 
 IndexWriter::~IndexWriter()
@@ -72,7 +74,7 @@ IndexWriter::~IndexWriter()
     if ( marks ) delete[] marks;
 }
 
-void IndexWriter::write()
+void IndexWriter::writeIndex()
 {
     double indexStartTime = clock();
     
@@ -171,3 +173,14 @@ void IndexWriter::write()
     cout << "Time taken: " << getDuration( indexStartTime ) << endl;
 }
 
+void IndexWriter::writeMers( PreprocessFiles* fns )
+{
+    IndexReader ir( fns );
+    for ( int i = 0; i < 4; i++ )
+    {
+        for ( int j = 0; j < 4; j++ )
+        {
+            
+        }
+    }
+}

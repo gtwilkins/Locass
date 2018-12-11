@@ -5,7 +5,6 @@
  */
 
 #include "correct.h"
-#include "correct_structs.h"
 #include "shared_functions.h"
 #include "filenames.h"
 #include <cassert>
@@ -13,420 +12,555 @@
 #include <string.h>
 #include "timer.h"
 #include "index.h"
+#include "local_alignment.h"
+#include "error.h"
+#include "deadapter.h"
+#include "constants.h"
+#include "correct_structs.h"
+#include "correct_amplicon.h"
 
 extern Parameters params;
 
 Correct::Correct( int argc, char** argv )
 {
-    PreprocessFiles* ppf = NULL;
-    Filenames* fns = NULL;
-    ifstream infile;
+    ir_ = NULL;
+    da_ = NULL;
+    qb_ = NULL;
+    fns_ = NULL;
+    df_ = NULL;
+    used_ = NULL;
+//    PreprocessFiles* ppf = NULL;
     string oprefix;
+    demate_ = deadapter_ = deamplify_ = false;
+    pairCount_ = trimCount_ = adpCount_ = discardCount_ = 0;
     
-    for ( int i ( 2 ); i < argc; )
+    for ( int i ( 2 ); i < argc; i++ )
     {
         if ( !strcmp( argv[i], "-i" ) )
         {
-            if ( infile.is_open() )
-            {
-                cerr << "Error: multiple inputs provided." << endl;
-                exit( EXIT_FAILURE );
-            }
-            infile.open( argv[i+1] );
-            i += 2;
+            if ( !ifn_.empty() ) failure( "Multiple inputs provided." );
+            ifn_ = argv[++i];
+            if ( i + 1 < argc && argv[i+1][0] != '-' ) assert( false );
         }
         else if ( !strcmp( argv[i], "-p" ) )
         {
-            if ( fns )
-            {
-                cerr << "Error: more than one output prefix provided." << endl;
-                exit( EXIT_FAILURE );
-            }
-            fns = new Filenames( argv[i+1] );
-            ppf = new PreprocessFiles( argv[i+1] );
-            i += 2;
+            if ( fns_ ) failure( "More than one index prefix provided." );
+            fns_ = new Filenames( argv[++i] );
+//            ppf = new PreprocessFiles( argv[i], true );
         }
-        else if ( !strcmp( argv[i], "-o" ) )
-        {
-            oprefix = argv[i+1];
-            i += 2;
-        }
+        else if ( !strcmp( argv[i], "-o" ) ) oprefix = argv[++i];
+        else if ( !strcmp( argv[i], "--de-mate" ) ) demate_ = true;
+        else if ( !strcmp( argv[i], "--de-adapter" ) ) deadapter_ = true;
+        else if ( !strcmp( argv[i], "--de-amplify" ) ) deamplify_ = true;
+        else failure( "Unrecoginsed command: " + string( argv[i] ) );
     }
+//    IndexWriter idx( ppf, 64, 1024 );
+//    IndexWriter idx( ppf, 1024, 20000 );
+//    delete ppf;
+//    {
+//        double startTime = clock();
+//        string fn = "/media/glen/ssd/Hp/Hp-mer.dat";
+//        ir_ = new IndexReader( fns_ );
+//        ir_->createSeeds( fn, 12 );
+//        cout << getDuration( startTime );
+//        exit( 1 );
+//    }
     
-    IndexWriter idx( ppf, 64, 1024 );
-    delete ppf;
+    if ( ifn_.empty() ) failure( "Input file not provided." );
+    if ( !Filenames::exists( ifn_ ) ) failure( "Could not open input file." );
+    if ( oprefix.empty() ) oprefix = ifn_.substr( 0, ifn_.find_last_of( '.' ) );
+    ofns_[0] = oprefix + "_corrected.fastq";
+    ofns_[1] = oprefix + "_singletons.fastq";
+    ofns_[2] = oprefix + "_tmp_seqs.bin";
+    ofns_[3] = oprefix + "_tmp_stat.bin";
+    ofns_[4] = oprefix + "_tmp_kmer.bin";
+    ofns_[5] = oprefix + "_tmp_amps.bin";
+//    for ( int i = 1; i < 6; i++ ) if ( Filenames::exists( ofns_ [i] ) ) failure( "Output file \"" + ofns_[i] + "\" already exists." );
     
-    IndexReader* ir = new IndexReader( fns );
-    QueryBinaries* qb = new QueryBinaries( fns );
-    Querier bwt( ir, qb );
-    delete fns;
+    if ( !fns_ && demate_ ) failure( "Index files must be provided for --de-mate command." );
     
-    correct( bwt, infile, oprefix );
-}
-
-void Correct::correct( Querier &bwt, ifstream &infile, string oprefix )
-{
-    assert( infile.is_open() && infile.good() );
-    string line;
-    int i = 1;
-    int parsed = 0, corrected = 0, report = 100000;
+    
     double startTime = clock();
-    while ( getline( infile, line ) )
-    {
-        Fastq fq( line, 44 );
-        ofstream lib( oprefix + "_lib-" + to_string( i++ ) + ".seq" );
-        while ( fq.setNext() )
-        {
-            int nCoords[2], qCoords[2];
-            string seq;
-            if ( fq.getSeq( seq, nCoords, qCoords, 0 ) && correctRead( bwt, seq, fq.seqs[0], nCoords, qCoords ) ) corrected++;
-            if ( fq.getSeq( seq, nCoords, qCoords, 1 ) && correctRead( bwt, seq, fq.seqs[1], nCoords, qCoords ) ) corrected++;
-            lib << fq.seqs[0] + '\n' + fq.seqs[1] + '\n';
-            parsed += 2;
-            if ( parsed >= report )
-            {
-                cout << to_string( report ) + " | " + to_string( corrected ) + ": " + getDuration( startTime ) << endl;
-                report += 100000;
-            }
-        }
-        lib.close();
-    }
+//    if ( deadapter_ ) da_ = new Deadapter( ifn_ );
+    ofs_[0].open( ofns_[0] );
+    ofs_[1].open( ofns_[1] );
+    
+    
+    if ( deamplify_ ) deamplify();
+    correct();
+    
+    ofs_[0].close();
+    ofs_[1].close();
+    
+    uint64_t discardCount = discardCount + AmpPile::ampCount - AmpPile::pileCount;
+    cout << "Overall summary:" << endl;
+    cout << pairCount_ << " read pairs were scrutinised in " << getDuration( startTime ) << endl;
+    if ( AmpPile::ampCount ) cout << to_string( AmpPile::ampCount - AmpPile::pileCount ) << " pairs were discarded as redundant amplicons." << endl;
+    if ( discardCount_ ) cout << discardCount_ << " pairs were discarded as self-complements." << endl;
+    if ( discardCount ) cout << "Of the remaining " << ( pairCount_ - discardCount ) << " pairs:" << endl;
+    if ( adpCount_ ) cout << adpCount_ << " pairs were consolidated and trimmed as self-compliments." << endl;
+    cout << trimCount_ << " chimeric mated readss were trimmed." << endl;
+    cout << CorrectAlign::nCorrectCount << " undetermined bases were corrected." << endl;
+    cout << CorrectAlign::polyCorrectCount << " homopolymer bases were corrected." << endl;
+    cout << CorrectAlign::errorCorrectCount << " incorrect bases were corrected." << endl;
+    
+    if ( !adpCount_ ) remove( ofns_[1].c_str() );
+    remove( ofns_[2].c_str() );
+    remove( ofns_[3].c_str() );
+    remove( ofns_[4].c_str() );
+    remove( ofns_[5].c_str() );
 }
 
-bool Correct::correctRead( Querier &bwt, string &qSeq, string &finalSeq, int nCoords[2], int qCoords[2] )
+Correct::~Correct()
 {
-    if ( nCoords[1] - nCoords[0] < 45 ) return false;
-    int seqLen = finalSeq.length();
-    uint8_t query[seqLen];
-    int coords[2] = { nCoords[0], nCoords[1] };
-    if ( coords[0] == 0 && coords[1] == seqLen )
+    if ( qb_ ) delete qb_;
+    if ( da_ ) delete da_;
+    if ( fns_ ) delete fns_;
+}
+
+void Correct::correct()
+{
+    if ( demate_ ) cout << "Scrutinising remaing read pairs..." << endl << endl;
+    else cout << "Scrutinising read pairs..." << endl << endl;
+    double startTime = clock();
+    
+    string lines[2][4];
+    ifstream ifsReads( ifn_ );
+    assert( ifsReads.good() );
+    if ( df_ ) df_->rewind();
+    if ( !ir_ ) ir_ = new IndexReader( fns_ );
+    if ( !qb_ ) qb_ = new QueryBinaries( fns_ );
+//    assert( df_ && qb_ && ir_ );
+    time_t my_time = time(NULL);
+    printf("%s", ctime(&my_time));
+    
+    
+    uint64_t id = 0, usedCount = 0;
+    uint8_t idTable[8] = { 128, 64, 32, 16, 8, 4, 2, 1 };
+    int baseLen = readLen_, cutoff = readLen_ * .9;
+    while ( readFastq( ifsReads, lines[0] ) && readFastq( ifsReads, lines[1] ) )
     {
-        coords[0] = qCoords[0];
-        coords[1] = qCoords[1];
-    }
-    
-    if ( coords[0] == 0 && coords[1] == seqLen ) return false;
-    
-    bool rev = coords[1] == seqLen;
-    int start = rev ? coords[0] : coords[1] - 1;
-    int len = rev ? seqLen - start : start + 1;
-    
-    for ( int i = 0; i < len; i++ )
-    {
-        int j = rev ? i + start : start - i;
-        if ( qSeq[j] == 'A' ) query[i] = rev ? 3 : 0;
-        else if ( qSeq[j] == 'a' ) query[i] = rev ? 8 : 5;
-        else if ( qSeq[j] == 'C' ) query[i] = rev ? 2 : 1;
-        else if ( qSeq[j] == 'c' ) query[i] = rev ? 7 : 6;
-        else if ( qSeq[j] == 'G' ) query[i] = rev ? 1 : 2;
-        else if ( qSeq[j] == 'g' ) query[i] = rev ? 6 : 7;
-        else if ( qSeq[j] == 'T' ) query[i] = rev ? 0 : 3;
-        else if ( qSeq[j] == 't' ) query[i] = rev ? 5 : 8;
-        else query[i] = 4;
+        if ( df_ ) df_->overwrite( lines );
+        bool used = used_ && ( used_[id/8] & ( idTable[id%8] ) );
+        bool adapter = !used && da_ && da_->isOverlap( lines );
         
-    }
-    
-    if ( query[0] > 4 ) query[0] -= 5;
-    if ( query[1] > 4 ) query[1] -= 5;
-    if ( query[0] > 3 || query[1] > 3 ) return false;
-    vector<Overlap> ols = bwt.mapCorrection( query, len );
-    
-    if ( ols.empty() ) return false;
-    
-    string extSeq = rev ? qSeq.substr( 0, coords[0] ) : qSeq.substr( coords[1] );
-    if ( rev ) revComp( extSeq );
-    
-    qSeq.clear();
-    for ( int i = len; --i >= 0; )
-    {
-        if ( query[i] == 0 ) qSeq += 'A';
-        else if ( query[i] == 1 ) qSeq += 'C';
-        else if ( query[i] == 2 ) qSeq += 'G';
-        else if ( query[i] == 3 ) qSeq += 'T';
-        else break;
-    }
-    
-    bool changed = false;
-    for ( uint16_t i = 0; i < extSeq.length(); i++ )
-    {
-        bool lowQ = islower( extSeq[i] );
-        if ( lowQ ) extSeq[i] = toupper( extSeq[i] );
-        if ( ols.empty() ) continue;
-        int baseCount = 0;
-        bool diff = false;
-        for ( int j = 0; j < ols.size(); j++ )
+        assert( demate_ );
+        if ( !used && !adapter && demate_ )
         {
-            if ( ols[j].extLen <= i ) ols.erase( ols.begin() + j, ols.end() );
-            else
+            bool trimmed[2]{ false, false };
+            int lens[2]{0};
+            for ( int i = 0; i < 2; i++ )
             {
-                if ( ols[j].seq[i] == extSeq[i] ) baseCount++;
-                if ( ols[j].seq[i] != ols[0].seq[i] ) diff = true;
+                CorrectQuery cq( ir_, lines[i][1], 0 );
+                lens[i] = cq.correct( qb_, lines[i][1], trimmed[i] );
             }
+            for ( int i = 0; i < 2; i++ )
+            {
+                if ( trimmed[i] || !lens[i] || lens[i] == lines[i][1].size() ) continue;
+                if ( trimmed[!i] && lens[i] > cutoff ) continue;
+                CorrectQuery cq( ir_, lines[i][1], lens[i], true );
+                lens[i] = cq.trim( qb_, lines[i][1], trimmed[i] );
+            }
+            for ( int i = 0; i < 2; i++ )
+            {
+                if ( !trimmed[i] ) lens[i] = baseLen;
+                if ( lines[i][1].size() > lens[i] ) lines[i][1] = lines[i][1].substr( 0, lens[i] );
+                if ( lines[i][3].size() > lens[i] ) lines[i][3] = lines[i][3].substr( 0, lens[i] );
+                assert( lines[i][1].size() == lines[i][3].size() );
+                if ( lines[i][1].size() < baseLen ) lines[i][1] += string( baseLen-lines[i][1].size(), 'N' );
+                if ( lines[i][3].size() < baseLen ) lines[i][3] += string( baseLen-lines[i][3].size(), char( 35 ) );
+                for ( int j = 0; j < 4; j++ ) ofs_[0] << lines[i][j] << "\n";
+            }
+            if ( trimmed[0] || trimmed[1] ) trimCount_++;
         }
-        
-        if ( baseCount && diff )
+        if ( used ) usedCount++;
+        if ( adapter ) ( demate_ ? discardCount_ : adpCount_ )++;
+        id++;
+        if ( !( id % 5000 ) )
         {
-            for ( int j = 0; j < ols.size(); )
-            {
-                if ( ols[j].seq[i] != extSeq[i] ) ols.erase( ols.begin() + j );
-                else j++;
-            }
+            my_time = time(NULL);
+            printf("%s", ctime(&my_time));
         }
-        
-        if ( !baseCount )
+        if ( ( id >= 30000 ) )
         {
-            if ( diff || ols.size() < 4 )
-            {
-                if ( changed ) extSeq = extSeq.substr( 0, i );
-                ols.clear();
-            }
-            else extSeq[i] = ols[0].seq[i];
-            if ( lowQ ) changed = true;
+            cout << to_string( id ) << " read pairs corrected so far in " << getDuration( startTime ) << endl;
+            exit( 1 );
         }
     }
     
-    qSeq += extSeq;
-    if ( qSeq.length() < 45 ) return false;
-    finalSeq = qSeq;
-    if ( rev ) revComp( finalSeq );
+    cout << "Finished parsing " << id << " read pairs in " << getDuration( startTime ) << endl;
+    if ( usedCount ) cout << "Note: " << usedCount << " read pairs were already handled during de-amplification." << endl;
+    cout << endl;
     
+    if ( ir_ ) delete ir_;
+    if ( qb_ ) delete qb_;
+    if ( used_ ) delete used_;
+    ir_ = NULL;
+    qb_ = NULL;
+    used_ = NULL;
+}
+
+void Correct::deamplify()
+{
+//    deamplifyConvert();
+//    deamplifyIdentify();
+    deamplifyScrutinise();
+}
+
+void Correct::deamplifyConvert()
+{
+    cout << "Reading in sequences from file... " << endl;
+    double startTime = clock();
+    
+    ifstream ifsReads( ifn_ );
+    FILE* ofpSeq = fopen( ofns_[2].c_str(), "wb" ),* ofpStatus = fopen( ofns_[3].c_str(), "wb" );
+    int readLen = 0, p = 0, b = 0, bufSize = 65536;
+    uint64_t kmers[2];
+    uint32_t pairCount = 0, discardCount = 0;
+    uint8_t bufStatus[bufSize]{0}, bufSeq[2][1024], status;
+    fwrite( &pairCount, 4, 1, ofpSeq );
+    fwrite( &readLen_, 1, 1, ofpSeq );
+    
+    if ( !ir_ ) ir_ = new IndexReader( fns_ );
+    if ( !qb_ ) qb_ = new QueryBinaries( fns_ );
+    
+    string lines[2][4];
+    
+    while ( readFastq( ifsReads, lines[0] ) )
+    {
+        if ( !readFastq( ifsReads, lines[1] ) ) failure( "Unequal number of read pairs." );
+        pairCount++;
+        uint8_t lens[2] = { (uint8_t)lines[0][1].size(), (uint8_t)lines[1][1].size() };
+        status = lens[0] < 16 || lens[1] < 16 ? 3 : 0;
+        for ( int i = 0; i < 2; i++ )
+        {
+            readLen = max( readLen, (int)lines[i][1].size() );
+            kmers[i] = 0;
+            if ( size_t it = lines[i][1].find( 'N' ) != string::npos && it < 16 && ir_ && qb_ )
+            {
+                bool trimmed = false;
+                CorrectQuery cq( ir_, lines[i][1], 0 );
+                cq.correct( qb_, lines[i][1], trimmed );
+            }
+            for ( int j = 0; !status && j < lens[i]; j++ )
+            {
+                uint8_t c = charToInt[ lines[i][1][j] ];
+                if ( j < 16 && c > 3 ) status = 3;
+                bufSeq[i][j] = c > 3 ? 255 : c * 63 + lines[i][3][j] - 33;
+                if ( j < 16 ) kmers[i] = ( kmers[i] << 2 ) + c;
+                assert( bufSeq[i][j] < 252 || bufSeq[i][j] == 255 );
+            }
+        }
+        if ( p == bufSize )
+        {
+            fwrite( bufStatus, 1, p, ofpStatus );
+            memset( bufStatus, 0, p );
+            p = 0;
+        }
+        bufStatus[p] += status << ( ( 3 - b ) * 2 );
+        b = b == 3 ? 0 : b+1;
+        if ( b == 0 ) p++;
+        if ( status ) discardCount++;
+        if ( status ) continue;
+        
+        fwrite( &lens, 1, 2, ofpSeq );
+        int d = kmers[1] < kmers[0];
+        kmers[0] = ( kmers[d] << 32 ) + kmers[!d];
+        fwrite( &kmers[0], 8, 1, ofpSeq );
+        fwrite( bufSeq[d], 1, lens[d], ofpSeq );
+        fwrite( bufSeq[!d], 1, lens[!d], ofpSeq );
+    }
+    if ( readFastq( ifsReads, lines[1] ) ) failure( "Error: unequal number of read pairs." );
+    if ( readLen > 255 ) failure( "Error: maximum read length is too high. Max supported is 255." );
+    readLen_ = readLen;
+    pairCount_= pairCount;
+    
+    if ( p || b ) fwrite( bufStatus, 1, p + bool( b ), ofpStatus );
+    
+    delete ir_;
+    delete qb_;
+    ir_ = NULL;
+    qb_ = NULL;
+    fclose( ofpSeq );
+    fclose( ofpStatus );
+    ofpSeq = fopen( ofns_[2].c_str(), "rb+" );
+    fwrite( &pairCount, 4, 1, ofpSeq );
+    fwrite( &readLen_, 1, 1, ofpSeq );
+    fclose( ofpSeq );
+    
+    cout << "Read " << to_string( pairCount ) << " read pairs, discarding " << to_string( discardCount ) << " in: " << getDuration( startTime ) << endl;
+}
+
+void Correct::deamplifyIdentify()
+{
+    cout << endl << "Compiling candidate amplicons... " << endl;
+    double startTime = clock();
+    
+    if ( !df_ ) df_ = new DeamplifyFiles( ofns_[2], ofns_[3] );
+    pairCount_ = df_->maxPair;
+    
+    FILE* ofpDump = fopen( ofns_[5].c_str(), "wb" );
+    uint64_t kmerSize = 500 * 1000 * 1000, maxMem = 2 * 1000 * 1000 * 1000, ampliconCount = 0;
+    bool full = df_->maxPair;
+    
+    while ( full )
+    {
+        // Parse as many k-mers as possible
+        df_->cycle( ofns_[4], kmerSize, full );
+        
+        // Collate and de-amplify all read for multiple k-mers
+        df_->collate( ofpDump, ofns_[4], kmerSize, maxMem, ampliconCount );
+        
+        df_->reset( 1 );
+    }
+    
+    fclose( ofpDump );
+    
+    cout << "Identified " << to_string( ampliconCount ) << " potential amplicons out of " << df_->maxPair << " total read pairs in " << getDuration( startTime ) << endl << endl;
+}
+
+void Correct::deamplifyScrutinise()
+{
+    cout << endl << "Scrutinising candidate amplicons... " << endl;
+    double startTime = clock();
+    
+    assert( fns_ );
+    if ( !df_ ) df_ = new DeamplifyFiles( ofns_[2], ofns_[3] );
+    if ( !ir_ ) ir_ = new IndexReader( fns_ );
+    if ( !qb_ ) qb_ = new QueryBinaries( fns_ );
+    if ( !pairCount_ ) pairCount_ = df_->maxPair;
+    return;
+    used_ = new uint8_t[ 1 + ( pairCount_ / 8 ) ]{0};
+    
+    FILE* ifpDump = fopen( ofns_[5].c_str(), "rb" );
+    uint64_t lastKmer;
+    
+    vector<Amp*> amps[2];
+    uint64_t candidateCount = 0;
+    while ( !feof( ifpDump ) )
+    {
+        candidateCount++;
+        Amp* tmps[2]{ NULL, NULL };
+        uint64_t kmer = Amp::create( ifpDump, tmps );
+        if ( kmer != lastKmer && !amps[0].empty() )
+        {
+            assert( amps[0].size() > 1 && amps[1].size() > 1 );
+            for ( AmpPile* pile : AmpPile::compile( amps, ir_, qb_ ) ) pile->output( ofs_[0], used_, da_, ir_, qb_ );
+        }
+        amps[0].push_back( tmps[0] );
+        amps[1].push_back( tmps[1] );
+        lastKmer = kmer;
+    }
+    
+    fclose( ifpDump );
+    trimCount_ += AmpPile::trimCount;
+    discardCount_ += AmpPile::adpCount;
+    
+    cout << "Finished scrutinising " << candidateCount << " candidate amplicons in " << getDuration( startTime ) << endl;
+    cout << AmpPile::ampCount << " candidates were consolidated into " << AmpPile::pileCount << " unique pairs." << endl << endl;
+    
+//    uint64_t blockedCount = 0;
+//    for ( uint64_t i = 0; i < pairCount_; i++ )
+//    {
+//        if ( used_[i/8] & ( 1 << ( 7 - i%8 ) ) ) blockedCount++;
+//    }
+//    cout << blockedCount << endl << endl;
+    
+}
+
+bool Correct::readFastq( ifstream &ifs, string (&lines)[4] )
+{
+    if ( !ifs.good() || !getline( ifs, lines[0] ) || !getline( ifs, lines[1] ) || !getline( ifs, lines[2] ) || !getline( ifs, lines[3] ) ) return false;
     return true;
 }
 
-//void Correct::correct()
+//void Correct::censorFiles( string fn, ofstream &ofsOut, bool paired, bool chim, bool pyro )
 //{
-//    vector<TrimFile> files;
-//    files.push_back( TrimFile( prefix_ + "mp.fastq", true ) );
-//    files.push_back( TrimFile( prefix_ + "pe.fastq", false ) );
-//    files.push_back( TrimFile( prefix_ + "single.fastq", false, true ) );
+//    assert( paired + pyro + chim < 2 );
+//    ifstream ifsSeqs( "/home/glen/Genomes/Lv/" + fn + ".fastq" );
+//    MarksFile mf( "/media/glen/ssd/Lv/" + fn + "_marks.bin", "rb" );
+//    assert( ofsOut.good() );
+//    assert( ifsSeqs.good() );
 //    
-//    ofstream pe( prefix_ + "pe.seq" );
-//    ofstream mp( prefix_ + "mp.seq" );
-//    ofstream se( prefix_ + "single.seq" );
+//    auto reinterval = []( vector< pair<int,int> > &ils )
+//    {
+//        for ( int i = 1; i < ils.size(); i++ )
+//        {
+//            int ol = ils[i-1].second - ils[i].first;
+//            if ( ol < 0 ) continue;
+//            ils[i-1].second -= ol+1;
+//            ils[i].first += ol+1;
+//        }
+//    };
 //    
 //    string lines[8];
-//    ReadId report = 20000;
-//    double startTime = clock();
-//    int good = 0, bad = 0;
-//    for ( TrimFile &file : files )
+//    vector< pair<int,int> > ils[2];
+//    int lineCount = 0, outCount = 0;
+//    while ( getline( ifsSeqs, lines[0] ) )
 //    {
-//        while ( file.getNext( &lines[0], 4, 43 ) )
-//        {
-//            if ( good + bad > report )
-//            {
-//                cout << getDuration( startTime ) << endl;
-//                report += 20000;
-//            }
-//            ( bwt_.correct( lines[1] ) ? good : bad )++;
-//            if ( !file.single && file.getNext( &lines[4], 4, 43 ) )
-//            {
-//                ( bwt_.correct( lines[5] ) ? good : bad )++;
-//                if ( lines[1].find( lines[5] ) != lines[1].npos ) lines[5].clear();
-//                if ( lines[5].find( lines[1] ) != lines[5].npos ) lines[1].clear();
-//                if ( lines[5].empty() ) 
-//                {
-//                    if ( !lines[1].empty() ) writeFile( se, &lines[0], 1 );
-//                }
-//                else if ( lines[1].empty() )
-//                {
-//                    if ( !lines[1].empty() ) writeFile( se, &lines[4], 1 );
-//                }
-//                else
-//                {
-//                    writeFile( ( file.mp ? mp : pe ), &lines[0], 1 );
-//                    writeFile( ( file.mp ? mp : pe ), &lines[4], 1 );
-//                }
-//            }
-//            else
-//            {
-//                if ( !lines[1].empty() ) writeFile( se, &lines[0], 1 );
-//            }
-//        }
-//    }
-//    
-//    pe.close();
-//    mp.close();
-//    se.close();
-//    
-//    assert( false );
-//}
-
-//void Correct::decontaminate()
-//{
-//    vector<TrimFile> files;
-//    files.push_back( TrimFile( prefix_ + "mp.seq", true ) );
-//    files.push_back( TrimFile( prefix_ + "pe.seq", false ) );
-//    
-//    vector<SamFile> sams;
-//    sams.push_back( prefix_ + "mp.sam" );
-//    sams.push_back( prefix_ + "pe.sam" );
-//    
-//    vector<ofstream> ofps;
-//    ofps.push_back( ofstream( prefix_ + "mp.seq-tmp" ) );
-//    ofps.push_back( ofstream( prefix_ + "pe.seq-tmp" ) );
-//    ofstream se( prefix_ + "single.seq", ios::out | ios::app );
-//    
-//    int pairs = 0, badPairs = 0, bads = 0, singles = 0;
-//    for ( int i : { 0, 1 } )
-//    {
-//        int j = 0;
-//        int k = sams[i].getNext();
-//        string seqs[2];
-//        bool isBad[2];
-//        while ( files[i].getNext( &seqs[0], 1, 0 ) && files[i].getNext( &seqs[1], 1, 0 ) )
-//        {
-//            isBad[0] = k == j++;
-//            if ( isBad[0] ) k = sams[i].getNext();
-//            isBad[1] = k == j++;
-//            if ( isBad[1] ) k = sams[i].getNext();
-//            
-//            if ( isBad[0] && isBad[1] ) badPairs++;
-//            else if ( isBad[0] ) bads++;
-//            else if ( isBad[1] ) bads++;
-//            
-//            if ( !isBad[0] && !isBad[1] )
-//            {
-//                ofps[i] << seqs[0] << '\n';
-//                ofps[i] << seqs[1] << '\n';
-//                pairs += 2;
-//            }
-//            else if ( !isBad[0] ) se << seqs[0] << '\n';
-//            else if ( !isBad[1] ) se << seqs[1] << '\n';
-//        }
-//        ofps[i].close();
-//    }
-//    
-//    se.close();
-//}
-
-//void Correct::trim( vector<string> &pes, vector<string> &mps )
-//{
-//    bool isFastq = true;
-//    
-//    vector<TrimFile> files;
-//    for ( string &mp : mps ) files.push_back( TrimFile( mp, true ) );
-//    for ( string &pe : pes ) files.push_back( TrimFile( pe, false ) );
-//    
-//    string lines[8];
-//    
-//    ofstream pe( prefix_ + "pe.fastq" );
-//    ofstream mp( prefix_ + "mp.fastq" );
-//    ofstream se( prefix_ + "single.fastq" );
-//    
-//    for ( TrimFile &file : files )
-//    {
-//        while ( file.getNext( &lines[0], 4, 43 ) && file.getNext( &lines[4], 4, 43 ) )
-//        {
-//            string extra[4];
-//            bool didJunc = false;
-//            if ( trimPrimers( &lines[0], &extra[0], isFastq, file.mp ) ) didJunc = true;
-//            if ( trimPrimers( &lines[4], &extra[2], isFastq, file.mp ) ) didJunc = true;
-//
-//            if ( !extra[0].empty() && !extra[2].empty() )
-//            {
-//                trimPair( lines[1], extra[2] );
-//                trimPair( lines[5], extra[0] );
-//            }
-//            
-//            bool didWrite = false;
-//            for ( int i : { 1, 5 } )
-//            {
-//                int j = i == 5 ? 1 : 5;
-//                if ( ( lines[i].length() >= 35 && lines[j].length() < 13 )
-//                        || lines[i].find( lines[j] ) != lines[i].npos  )
-//                {
-//                    writeFile( se, &lines[i-1], isFastq ? 4 : 1 );
-//                    didWrite = true;
-//                    break;
-//                }
-//            }
-//            
-//            if ( didWrite || ( lines[1].length() < 35 && lines[5].length() < 35 ) ) continue;
-//            
-//            writeFile( ( file.mp || didJunc ? mp : pe ), &lines[0], isFastq ? 4 : 1 );
-//            writeFile( ( file.mp || didJunc ? mp : pe ), &lines[4], isFastq ? 4 : 1 );
-//        }
+//        for ( int i = 0; i < ( paired ? 7 : 3 ); i++ ) getline( ifsSeqs, lines[i+1] );
+//        ils[0] = mf.getIntervals( lines[1].size() );
+//        ils[1] = mf.getIntervals( lines[5].size() );
+//        if ( pyro || chim ) reinterval( ils[0] );
 //        
-//        file.fp.close();
+//        if ( pyro )
+//        {
+//            for ( auto it = ils[0].begin(); it != ils[0].end(); it++ )
+//            {
+//                int len = it->second - it->first - 95;
+//                int readCount = len > -21;
+//                while ( len > 63 ){ len -= 64; readCount++; };
+//                int buffer = len > 0 ? ( len / ( readCount+1 ) ) : 0;
+//                for ( int i = 0; i < readCount; i++ )
+//                {
+//                    int base = it->first + ( i * 64 ) + ( (i+1) * buffer );
+//                    ofsOut << lines[1].substr( base, min( 95, it->second - base ) ) + "\n";
+//                    outCount++;
+//                }
+//            }
+//        }
+//        else if ( chim )
+//        {
+//            for ( auto it = ils[0].begin(); it != ils[0].end(); it++ )
+//            {
+//                int len = it->second - it->first;
+//                if ( len >= 50 )
+//                {
+//                    ofsOut << lines[1].substr( it->first, len ) + "\n";
+//                    outCount++;
+//                }
+//            }
+//        }
+//        else
+//        {
+//            for ( int i = 0; i < 1+paired; i++ )
+//            {
+//                int j = 1 + ( i * 4 );
+//                int len = lines[j+2].size();
+//                while ( len > 0 && lines[j+2][len-1] < 39 ) len--;
+//                if ( !ils[i].empty() ) len = max( len, ils[i].back().second );
+//                ofsOut << lines[j].substr( 0, max( 1, len ) ) + "\n";
+//                outCount++;
+//            }
+//        }
+//        lineCount += 1 + paired;
 //    }
 //    
-//    pe.close();
-//    mp.close();
-//    se.close();
-//}
-
-//void Correct::trimPair( string &seq, string &rev )
-//{
-//    revComp( rev );
-//    for ( int i = 0; i < min( seq.length(), rev.length()  ); i++ )
-//    {
-//        if ( seq[seq.length()-i-1] == 'N' && rev[rev.length()-i-1] != 'N' )
-//        {
-//            seq[seq.length()-i-1] = rev[rev.length()-i-1];
-//        }
-//        else if ( seq[seq.length()-i-1] != rev[rev.length()-i-1] ) return;
-//    }
+//    cout << "Output " << outCount << " sequences from " << lineCount << " reads." << endl;
 //}
 //
-//bool Correct::trimPrimers( string lines[4], string extra[2], bool isFastq, bool isMp )
+//void Correct::correct( Querier &bwt, string fn, bool paired, bool chim, bool pyro )
 //{
-//    size_t it, len;
-//    it = lines[1].find( "AGATCGGAAGAGCA" );
-//    if ( it == lines[1].npos ) it = lines[1].find( "AGATCGGAAGAGCG" );
-//    if ( it == lines[1].npos )
+//    MarksFile mf( fn + "_marks.bin", "rb" );
+//    ifstream ifsSeqs( fn + ".fastq" );
+//    ofstream ofsSeqs( fn + "_corrected.fastq" );
+//    ofstream ofsDump;
+//    if ( chim ) ofsDump.open( fn + "_dump.fastq" );
+//    assert( ifsSeqs.good() );
+//    double startTime = clock();
+//    CharId readCount = 0;
+//    Interval::bridgeCount = Interval::capCount = 0;
+//    string lines[8];
+//    vector<Interval*> ils[4];
+//    int lineCount = paired ? 8 : 4;
+//    while ( readSequence( ifsSeqs, mf, &lines[0], ils[0], chim, pyro ) )
 //    {
-//        len = getEndTrim( lines[1], "AGATCGGAAGAGC", 1 );
-//        if ( len ) it = lines[1].length() - len;
-//    }
-//    if ( it == lines[1].npos && lines[1].length() < 235 && lines[1].back() == 'A' )
-//    {
-//        it = lines[1].length() - 1;
-//    }
-//    if ( it != lines[1].npos )
-//    {
-//        lines[1] = lines[1].substr( 0, it );
-//        if ( isFastq ) lines[3] = lines[3].substr( 0, it );
-//    }
-//    
-//    bool didJunc = false;
-//    it = lines[1].find( "CTGTCTCTTATACACATCT" );
-//    if ( it != lines[1].npos )
-//    {
-//        len = min( lines[1].length() - it, size_t(38) );
-//    }
-//    else
-//    {
-//        it = lines[1].find( "AGATGTGTATAAGAGACAG" );
-//        if ( it != lines[1].npos )
-//        {
-//            if ( it > 19 ) { it -= 19; len = 38; }
-//            else { len = it + 19; it = 0; }
-//        }
-//    }
-//    
-//    if ( it == lines[1].npos && isMp )
-//    {
-//        len = getEndTrim( lines[1], "CTGTCTCTTATACACATC", 1 );
-//        if ( len ) it = lines[1].length() - len;
+//        if ( paired ) assert( readSequence( ifsSeqs, mf, &lines[4], ils[1], chim, pyro ) );
+//        
+////        if ( readCount < 3517687 )
+////        {
+////            for ( Interval* il : ils[0] ) delete il;
+////            ils[0].clear();
+////            readCount++;
+////            continue;
+////        }
+//        Interval::correct( bwt, ils, paired && !chim  && !pyro, chim );
+//        
+//        Interval::output( ils[0], ofsSeqs, &lines[0], pyro );
+//        if ( paired ) Interval::output( ils[1], ofsSeqs, &lines[4], pyro );
+//        if ( chim && !ils[2].empty() ) Interval::output( ils[2], ofsDump, &lines[0], false );
+//        if ( chim && !ils[3].empty() ) Interval::output( ils[3], ofsDump, &lines[4], false );
+//        
+//        readCount += 1 + paired;
+//        if ( readCount % 100000 ) continue;
+//        cout << getDuration( startTime ) << endl;
+//        cout << readCount << endl;
 //    }
 //    
-//    if ( it != lines[1].npos )
-//    {
-//        extra[0] = lines[1].substr( it + len );
-//        lines[1] = lines[1].substr( 0, it );
-//        if ( isFastq )
-//        {
-//            extra[1] = lines[3].substr( it + len );
-//            lines[3] = lines[3].substr( 0, it );
-//        }
-//        didJunc = true;
-//    }
+//    ifsSeqs.close();
+//    ofsSeqs.close();
 //    
-//    return didJunc;
+//    cout << "Corrected " << Interval::bridgeCount << " bridges and " << Interval::capCount << " caps from " << readCount << " reads in " << getDuration( startTime ) << endl;
 //}
-
-//void Correct::writeFile( ofstream &fp, string lines[4], int lineCount )
+//
+////void Correct::correct( Querier &bwt, string (&lines)[8], vector<Interval*> (&ils)[3], bool paired, bool chim, bool pyro )
+////{
+////    Interval::correct( bwt, ils, paired && !chim  && !pyro );
+////    
+////    if ( chim )
+////    {
+////        vector<Interval*> split;
+////        Interval* splits[2] = { Interval::getSplit( ils[0] ), Interval::getSplit( ils[1] ) };
+////        if ( splits[0] && !splits[1] ) splits[0]->split( bwt, ils[0], split );
+////        if ( splits[1] && !splits[0] ) splits[1]->split( bwt, ils[1], split );
+////        for ( Interval* il : split ) delete il;
+////    }
+////    
+////    Interval::output( ils[0], lines[1], lines[3] );
+////    if ( paired ) Interval::output( ils[1], lines[5], lines[7] );
+////}
+//
+//bool Correct::readSequence( ifstream &ifs, MarksFile &mf, string* lines, vector<Interval*> &ils, bool chim, bool pyro )
 //{
-//    if ( lineCount == 1 ) fp << lines[1] << '\n';
-//    else for ( int i = 0; i < lineCount; i++ ) fp << lines[i] << '\n';
+//    if ( !getline( ifs, lines[0] ) ) return false;
+//    if ( lines[0][0] != '@' ) return false;
+//    for ( int i = 0; i < 3; i++ ) getline( ifs, lines[i+1] );
+//    vector<bool> marks( max( 0, (int)lines[1].size()-31 ), false );
+//    for ( int i = 0; i < marks.size(); i++ ) marks[i] = mf.read();
+//    ils = Interval::create( lines[1], lines[3], marks, chim || pyro, pyro );
+//    return true;
 //}
+//
+////bool Correct::splitJoin( string &seq1, string &seq2, string &phred1, string &phred2 )
+////{
+////    if ( !seq2.empty() ) return false;
+////    
+////    static int i = 0;
+////    i++;
+////    LocalAlignment glocal( seq1, joiner_, true, true );
+////    int coords[2];
+////    int score = glocal.setCoords( coords );
+//////    string align1, align2;
+//////    glocal.setAlign( align1, align2 );
+////    seq2 = seq1.substr( coords[1] );
+////    seq1 = seq1.substr( 0, coords[0] );
+////    phred2 = phred1.substr( coords[1] );
+////    phred1 = phred1.substr( 0, coords[0] );
+//////    if ( score < 41 ) cout << align1 << endl << align2 << endl << endl;
+////    while ( seq1.back() == 'N' )
+////    {
+////        seq1.pop_back();
+////        phred1.pop_back();
+////    }
+////    
+////    return true;
+////}
+//
+////void Correct::trimEnd( string &seq, string &phred )
+////{
+////    int it = seq.find_last_not_of( 'N' );
+////    if ( it == seq.npos ) return;
+////    it = max( 0, it-70 );
+////    string tmp = seq.substr( it );
+////    LocalAlignment glocal( tmp, ender_, true, true );
+////    int coords[2];
+////    int score = glocal.setCoords( coords );
+//////    string al = seq.substr( coords[0] + it );
+////    seq = seq.substr( 0, coords[0] + it );
+////    phred = phred.substr( 0, coords[0] + it );
+////    while ( seq.back() == 'N' )
+////    {
+////        seq.pop_back();
+////        phred.pop_back();
+////    }
+////}

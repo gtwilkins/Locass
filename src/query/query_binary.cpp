@@ -219,6 +219,31 @@ void QueryBinaries::decodeSequence( uint8_t* line, string &seq, uint8_t extLen, 
     }
 }
 
+void QueryBinaries::getReads( vector<CorrectionRead> &reads, CharId rank, CharId count, int overlap, int seqLen, bool drxn )
+{
+    uint8_t line[lineLen_];
+    vector<ReadId> readIds = getIds( rank, count );
+    
+    ReadId lastId = -1;
+    for ( const ReadId &id : readIds )
+    {
+        if ( id == lastId + 2 ) continue;
+        lastId = id;
+        bool idRev = id & 0x1;
+        bool isRev = idRev == drxn;
+        CharId seekId = CharId( id / 2 ) * lineLen_ + binBegin_;
+        fseek( bin_, seekId, SEEK_SET );
+        fread( &line, 1, lineLen_, bin_ );
+        
+        CorrectionRead read( id - idRev + isRev );
+        decodeSequence( line, read.seq, line[0], isRev, drxn );
+        read.exts[drxn] = read.seq.length() - overlap;
+        read.exts[!drxn] = max( 0, overlap - seqLen );
+        read.ol = overlap;
+        reads.push_back( read );
+    }
+}
+
 vector<ReadStruct> QueryBinaries::getReads( CharId rank, CharId count, bool drxn )
 {
     uint8_t line[lineLen_];
@@ -266,6 +291,17 @@ vector<ReadId> QueryBinaries::getIds( CharId rank, CharId count )
         readIds[i] = idBuff[i];
     }
     return readIds;
+}
+
+vector<Overlap> QueryBinaries::getOverlaps( vector<uint8_t> &ols, vector<CharId> &ranks, vector<CharId> &counts, int minOl, int maxCount, bool drxn )
+{
+    vector<Overlap> overlaps;
+    int i = 0, cumulCount = 0;
+    for ( ; i < ols.size() && ( cumulCount <= maxCount || ( i+1 < ols.size() && ols[i] == ols[i+1] ) ); i++ ) cumulCount += counts[i];
+    if ( cumulCount > maxCount && i < ols.size() && ols[i] > minOl ) return overlaps;
+    for ( int j = 0; j < i; j++ ) getOverlaps( overlaps, ranks[j], counts[j], ols[j], drxn );
+    Overlap::sortByExt( overlaps );
+    return overlaps;
 }
 
 void QueryBinaries::getOverlaps( vector<Overlap> &overlaps, CharId rank, CharId count, uint8_t overlap, bool drxn )

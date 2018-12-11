@@ -33,12 +33,10 @@ public:
     Querier( IndexReader* ir, QueryBinaries* qb );
     ~Querier();
     
-    bool correct( string &seq );
-    int countKmer( string seq );
-    void estimateCoverage( ofstream &fh, int kmerLen, int sampleSize );
+//    vector<Overlap> getOverlaps( CorrectQuery &cq, bool drxn );
     string getSequence( ReadId id );
     ReadId isExtendable( string &seq, uint16_t minLen, bool drxn );
-    vector<Overlap> mapCorrection( uint8_t* query, int len );
+    CorrectionStruct mapCorrection( string seq, int len, bool drxn );
     vector<Extension> mapExtensions( bool &noMatches, string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, unordered_set<SeqNum> &seeds, uint16_t minOver=1 );
@@ -52,7 +50,8 @@ private:
     vector<Overlap> getOverlaps( string &seq, uint16_t minOver, uint8_t &maxConsidered, bool drxn );
     vector<Extension> compileExtensions( vector<Overlap> &overlaps, bool drxn, bool doTrim );
     bool isVector( Extension &ext );
-    bool mapCorrection( QueryState &q, int it, uint8_t i, CharId rank, CharId count, bool errors );
+//    bool mapCorrection( QueryState &q, int it, uint8_t i, CharId rank, CharId count, bool errors );
+    bool mapCorrection( QueryCorrectState &q, int it, uint8_t i, CharId rank, CharId count );
 //    int mapCorrection( QueryState &q, int it, CharId rank, CharId count, bool doCorrect, bool doExtend );
     void mapExtensionsCull( string &seq, vector<Extension> &exts, int base );
     void mapExtensionsCull( string &seq, vector<Extension> &exts, vector<Overlap> &overlaps, unordered_set<SeqNum> &seeds );

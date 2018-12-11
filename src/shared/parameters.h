@@ -50,6 +50,7 @@ struct Parameters {
     ReadId getRevId( const ReadId readId );
     void set();
     void setLimits( int32_t &limit );
+    bool setPairId( ReadId &id, bool pairDrxn );
     
     int readLen, queryMpCutoff;
     int32_t locusLimits[2];

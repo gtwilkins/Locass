@@ -33,7 +33,8 @@ public:
     virtual ~IndexWriter();
     
 private:
-    void write();
+    void writeIndex();
+    void writeMers( PreprocessFiles* fns );
     
     FILE* bwt,* idx;
     CharId id;

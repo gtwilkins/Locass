@@ -26,10 +26,14 @@
 int getEndTrim( string &q, string trim, bool drxn );
 int getHomopolymerLen( string &s, bool drxn );
 int getHomopolymerScore( string &s );
+bool isSequence( string &s );
+bool mapSeq( string &q, string &t, int* coords, int minLen );
+int mapCongruence( string &left, string &right, int len );
 bool mapSeqCongruent( string &left, string &right, int offset );
 bool mapSeqEnd( string &q, string &t, int minLen, int32_t* coords, bool drxn );
 int mapSeqOverlap( string &left, string &right, int minLen );
 void revComp( string &seq );
+string revCompNew( string &seq );
 
 #endif /* SHARED_FUNCTIONS_H */
 

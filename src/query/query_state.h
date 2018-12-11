@@ -36,6 +36,28 @@ struct QueryState
     vector<CharId> endRanks, endCounts;
 };
 
+struct QueryCorrectState
+{
+    QueryCorrectState( uint8_t* query, int corrLength, int seqLength, int minOverlap );
+    uint8_t* q;
+    vector<uint8_t> endOverlaps, alts, altIts;
+    vector<uint32_t> ends;
+    vector<CharId> endRanks, endCounts, altRanks, altCounts;
+    int corrLen, seqLen, minOver;
+    uint32_t endCount;
+    uint8_t endCutoff, altCutoff;
+    bool fresh;
+};
+
+struct QueryKmerState
+{
+    QueryKmerState( uint8_t* query ) : q( query ) { errors = cleans = 0; };
+    
+    uint8_t* q;
+    int errors, cleans;
+    CharId rank, edge, count;
+};
+
 struct QuerySeedState
 {
     QuerySeedState( string &seq, MappedSeqs &ms, int errorRate );
@@ -54,6 +76,8 @@ struct QuerySeedState
     CharId rank, count;
     vector<int32_t> chunks[2];
 };
+
+
 
 #endif /* QUERY_STATE_H */
 

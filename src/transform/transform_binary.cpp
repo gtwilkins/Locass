@@ -273,6 +273,7 @@ void BinaryWriter::write( string &read )
     uint8_t i = 0;
     for ( uint8_t j ( 0 ); j < seqLen; j++ )
     {
+        assert( read[j] != 'N' );
         write2Bit( binBuff, p, i, charToInt[ read[j] ] );
     }
     pBin += lineLen;

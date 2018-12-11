@@ -240,3 +240,11 @@ void Parameters::setLimits( int32_t &limit )
     locusLimits[1] = limit;
 }
 
+bool Parameters::setPairId( ReadId &id, bool pairDrxn )
+{
+    if ( !isReadPe( id ) || pairDrxn == bool(id & 0x1) ) return false;
+    id = getPairId( id );
+    return true;
+}
+
+

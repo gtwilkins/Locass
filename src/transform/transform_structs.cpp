@@ -74,7 +74,7 @@ bool ReadFile::getNext( string &seq )
             getline( fh, line );
         }
         
-//        trimSeq( seq );
+        trimSeq( seq );
         
         return true;
     }
