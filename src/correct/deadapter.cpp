@@ -106,7 +106,7 @@ int Deadapter::align( string (&s)[2], string (&p)[2], int &hits, int &miss, int 
                 if ( a[!d][i] != 'N' && a[!d][i] != c ) poly = false;
                 if ( poly ) polyLen++;
                 else miss += 20;
-                j[!i]++;
+                j[!d]++;
             }
             miss += ( max( 0, polyLen - 3 ) ) * 5 + ( polys ? 10 : 0 );
             if ( poly ) polys = true;
@@ -126,6 +126,8 @@ int Deadapter::align( string (&s)[2], string (&p)[2], int &hits, int &miss, int 
         j[0]++;
         j[1]++;
     }
+    
+    assert( j[0] <= s[0].size() );
     
     return j[0];
 }
@@ -160,6 +162,7 @@ bool Deadapter::consolidateEnd( vector< pair<string, uint32_t> > &ends, int &len
     }
     sort( kmers.begin(), kmers.end(), []( pair<string, uint32_t> &a, pair<string, uint32_t> &b ){ return a.second > b.second; } );
     
+    if ( kmers.empty() ) return false;
     if ( kmers.size() > 1 && kmers[0].second < 50 ) return false;
     
     int kmersCount = max( 2, (int)kmers.size() );
@@ -201,7 +204,7 @@ bool Deadapter::getPair( string (&s)[2] )
     return true;
 }
 
-bool Deadapter::isOverlap( string &seq1, string &seq2, string &phred1, string &phred2 )
+bool Deadapter::isOverlap( string &seq1, string &seq2, string &phred1, string &phred2, bool blank )
 {
     if ( seq1.size() < 24 || seq2.size() < 24 || adapter_[0].empty() || adapter_[1].empty()  ) return false;
     
@@ -209,25 +212,26 @@ bool Deadapter::isOverlap( string &seq1, string &seq2, string &phred1, string &p
     if ( adapter_[0].size() > 21 && mapSeqOverlap( adapter_[0], seq1, 21 ) ||
             adapter_[1].size() > 21 && mapSeqOverlap( adapter_[1], seq2, 21 ) )
     {
-        seq1.clear();
-        seq2.clear();
+        setBlank( seq1, phred1, 0 );
+        setBlank( seq2, phred2, 0 );
         return true;
     }
     
-    if ( isOverlap2( seq1, seq2, phred1, phred2, 0 ) ) return true;
-    if ( isOverlap2( seq2, seq1, phred2, phred1, 1 ) ) return true;
-    if ( isOverlap4( seq1, phred1, 0 ) ) return true;
-    if ( isOverlap4( seq2, phred2, 1 ) )
-    {
-        seq1 = seq2;
-        phred1 = phred2;
-        return true;
-    }
+    // Simple reverse complement overlap
+    if ( isOverlap2( seq1, seq2, phred1, phred2, 0, blank ) ) return true;
+    if ( isOverlap2( seq2, seq1, phred2, phred1, 1, blank ) ) return true;
     
-    return false;
+    // Adaptor clearly overlaps with end
+    bool ols[2]{ isOverlap4( seq1, phred1, 0 ), isOverlap4( seq2, phred2, 1 ) };
+    if ( !ols[0] && !ols[1] ) return false;
+    
+    if ( !ols[0] ) setBlank( seq1, phred1, 0 );
+    if ( !ols[1] ) setBlank( seq2, phred2, 0 );
+    
+    return true;
 }
 
-bool Deadapter::isOverlap2( string &seq1, string &seq2, string &phred1, string &phred2, int i )
+bool Deadapter::isOverlap2( string &seq1, string &seq2, string &phred1, string &phred2, int i, bool blank )
 {
     string q = seq1.substr( 0, 24 ), rev = revCompNew( seq2 );
     size_t it = rev.find( q );
@@ -248,15 +252,8 @@ bool Deadapter::isOverlap2( string &seq1, string &seq2, string &phred1, string &
     if ( !confirmed ) confirmed = isOverlap3( seq2, phred2, altOl, !i );
     if ( !confirmed ) return false;
 //        cout << lines[i][1] << endl << rev.substr( it ) << endl << endl;
-    string &seq = ( i ? seq2 : seq1 );
-    string &phred = ( i ? phred2 : phred1 );
-    seq = ( diff >= 0 ? seq1 : seq2 );
-    phred = ( diff >= 0 ? phred1 : phred2 );
-    for ( int i = ( diff < 0 ? altOl : ol ); i < seq.size(); i++ )
-    {
-        seq[i] = 'N';
-        phred[i] = char( 35 );
-    }
+    setBlank( seq1, phred1, blank ? 0 : ol );
+    setBlank( seq2, phred2, altOl );
     return true;
 }
 
@@ -284,83 +281,9 @@ bool Deadapter::isOverlap4( string &seq, string &phred, int i )
     for ( ; it < seq.size(); it++ )
     {
         seq[it] = 'N';
-        phred[it] = char( 35 );
+        if ( it < phred.size() ) phred[it] = char( 35 );
     }
     return true;
-}
-
-bool Deadapter::isOverlap( string (&lines)[2][4] )
-{
-    if ( lines[0][1].size() < 24 || lines[0][1].size() < 24 ) return false;
-    for ( int i = 0; i < 2; i++ )
-    {
-        // This whole pair is junk
-        if ( adapter_[i].size() > 21 && mapSeqOverlap( adapter_[i], lines[i][1], 21 ) )
-        {
-            lines[0][1].clear();
-            lines[0][3].clear();
-            return true;
-        }
-        
-        string q = lines[i][1].substr( 0, 24 ), rev = revCompNew( lines[!i][1] );
-        size_t it = rev.find( q );
-        if ( it == string::npos ) continue;
-        int altOl = lines[!i][1].size() - it, ol = 24, hits = 0, miss = 0, diff = 0;
-        while ( ol < lines[i][1].size() && it + ol < rev.size() && lines[i][1][ol] == rev[it+ol] ) ol++;
-        hits = ol;
-        string s[2] = { lines[i][1].substr( ol ), rev.substr( ol + it ) };
-        string p[2] = { lines[i][3].substr( ol ), string( lines[!i][3].rbegin() + it + ol, lines[!i][3].rend() ) };
-        ol += align( s, p, hits, miss, diff, 1 );
-        bool confirmed = hits == lines[i][1].size() && !miss;
-        if ( ol * 2 - hits + ( miss / 10 ) > lines[i][1].size() ) continue;
-        assert( ol <= lines[i][1].size() );
-        if ( !confirmed && miss <= 40 && hits >= ol * .95  ) confirmed = isOverlapAdapter( lines[i], ol, i );
-        if ( !confirmed ) diff = -1;
-        if ( !confirmed ) confirmed = isOverlapAdapter( lines[i], ol, !i );
-        if ( !confirmed ) continue;
-//        cout << lines[i][1] << endl << rev.substr( it ) << endl << endl;
-        if ( diff >= 0 ? i : !i ) lines[0][1] = lines[1][1];
-        if ( diff >= 0 ? i : !i ) lines[0][3] = lines[1][3];
-        for ( int j = ( diff < 0 ? altOl : ol ); j < lines[0][1].size(); j++ )
-        {
-            lines[0][1][j] = 'N';
-            lines[0][3][j] = char( 35 );
-        }
-        return true;
-    }
-    for ( int i = 0; i < 2; i++ )
-    {
-        size_t it = lines[i][1].find( adapter_[i] );
-        if ( it == string::npos && adapter_[i].size() > 21 )
-        {
-            int ol = mapSeqOverlap( lines[i][1], adapter_[i], 21 );
-            if ( ol ) it = lines[i][1].size() - ol;
-        }
-        if ( it != string::npos )
-        {
-            for ( ; it < lines[i][1].size(); it++ )
-            {
-                lines[i][1][it] = 'N';
-                lines[i][3][it] = char( 35 );
-            }
-            if ( i ) lines[0][1] = lines[1][1];
-            if ( i ) lines[0][3] = lines[1][3];
-            return true;
-        }
-        
-    }
-    return false;
-}
-
-bool Deadapter::isOverlapAdapter( string (&lines)[4], int ol, int i )
-{
-    string s[2] = { lines[1].substr( ol ), adapter_[i] };
-    string p[2] = { lines[3].substr( ol ), string( s[1].size(), char( 53 ) ) };
-    
-    int hits = 0, miss = 0, diff = 0, len = min( s[0].size(), s[1].size() );
-    align( s, p, hits, miss, diff, 2 );
-    
-    return hits + ( hits > 3 ) + ( hits / 10 ) + ( max( 0, hits - 5 ) / 10 ) - ( miss / 10 ) >= len;
 }
 
 bool Deadapter::readLine( string &s, bool suppress )
@@ -375,14 +298,6 @@ bool Deadapter::readLine( string &s, bool suppress )
     return false;
 }
 
-bool Deadapter::readRead( string (&lines)[4] )
-{
-    if ( header_ && !readLine( lines[0], true ) ) return false;
-    if ( !readLine( lines[1], true ) ) return false;
-    for ( int i = 0; i < footer_; i++ ) if ( !readLine( lines[2+i], true ) ) return false;
-    return true;
-}
-
 void Deadapter::rewind()
 {
     ifs_.close();
@@ -392,51 +307,6 @@ void Deadapter::rewind()
         cerr << "Failed to open file." << endl;
         exit(1);
     }
-}
-
-void Deadapter::rewrite()
-{
-    cout << "Removing adapters from read file..." << endl << endl;
-    double startTime = clock();
-    
-    rewind();
-    size_t it = fn_.find_last_of( '.' );
-    string fnOut = fn_.substr( 0, it ) + "_deadaptered.fastq";
-    string fnDump = fn_.substr( 0, it ) + "_unpaired.fastq";
-    {
-        ifstream ifsTest( fnOut );
-        if ( ifsTest.good() ) failure( "File \"" + fnOut + "\" already exists." );
-        ifsTest.open( fnDump );
-        if ( ifsTest.good() ) failure( "File \"" + fnDump + "\" already exists." );
-    }
-    ofstream ofsOut( fnOut );
-    ofstream ofsDump( fnDump );
-    
-    string lines[2][4];
-    uint64_t pairCount = 0, discard = 0, overlap = 0;
-    while ( readRead( lines[0] ) && readRead( lines[1] ) )
-    {
-        pairCount++;
-        int len = lines[0][1].size();
-        if ( isOverlap( lines ) )
-        {
-            overlap++;
-            if ( lines[0][1].size() < len / 2 ) discard++;
-            else for ( int i = 0; i < 4; i++ ) ofsDump << lines[0][i] + "\n";
-            continue;
-        }
-        for ( int i = 0; i < 2; i++ ) for ( int j = 0; j < 4; j++ ) ofsOut << lines[i][j] + "\n";
-    }
-    ofsOut.close();
-    ofsDump.close();
-    ifs_.close();
-    
-    cout << "Finshed removing adapters from read file in " <<  getDuration( startTime ) << endl;
-    cout << "    " << to_string( pairCount ) << " total pairs in read file." << endl;
-    cout << "    " << to_string( overlap ) << " pairs included terminal adapters." << endl;
-    cout << "        " << to_string( overlap - discard ) << " pairs were trimmed." << endl;
-    cout << "        " << to_string( discard ) << " pairs were discarded." << endl;
-    int x = 0;
 }
 
 void Deadapter::setAdapters( uint32_t kmerLen )
@@ -549,6 +419,15 @@ void Deadapter::setAdapters( uint32_t kmerLen )
     delete kmers;
     
     if ( !connectors.empty() ) setConnectors( connectors );
+}
+
+void Deadapter::setBlank( string &seq, string &phred, int start )
+{
+    for ( int i = start; i < seq.size(); i++ )
+    {
+        seq[i] = 'N';
+        if ( i < phred.size() ) phred[i] = char( 35 );
+    }
 }
 
 bool Deadapter::setConnectors( vector<string> &connectors )

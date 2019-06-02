@@ -25,7 +25,6 @@ Correct::Correct( int argc, char** argv )
 {
     ir_ = NULL;
     da_ = NULL;
-    qb_ = NULL;
     fns_ = NULL;
     df_ = NULL;
     used_ = NULL;
@@ -59,61 +58,57 @@ Correct::Correct( int argc, char** argv )
 //    delete ppf;
 //    {
 //        double startTime = clock();
-//        string fn = "/media/glen/ssd/Hp/Hp-mer.dat";
+//        string fn = "/media/glen/ssd/Sp/Sp-mer.dat";
 //        ir_ = new IndexReader( fns_ );
 //        ir_->createSeeds( fn, 12 );
 //        cout << getDuration( startTime );
 //        exit( 1 );
 //    }
-    
     if ( ifn_.empty() ) failure( "Input file not provided." );
     if ( !Filenames::exists( ifn_ ) ) failure( "Could not open input file." );
     if ( oprefix.empty() ) oprefix = ifn_.substr( 0, ifn_.find_last_of( '.' ) );
     ofns_[0] = oprefix + "_corrected.fastq";
-    ofns_[1] = oprefix + "_singletons.fastq";
-    ofns_[2] = oprefix + "_tmp_seqs.bin";
-    ofns_[3] = oprefix + "_tmp_stat.bin";
-    ofns_[4] = oprefix + "_tmp_kmer.bin";
-    ofns_[5] = oprefix + "_tmp_amps.bin";
-//    for ( int i = 1; i < 6; i++ ) if ( Filenames::exists( ofns_ [i] ) ) failure( "Output file \"" + ofns_[i] + "\" already exists." );
+    ofns_[1] = oprefix + "_tmp_seqs.bin";
+    ofns_[2] = oprefix + "_tmp_stat.bin";
+    ofns_[3] = oprefix + "_tmp_kmer.bin";
+    ofns_[4] = oprefix + "_tmp_amps.bin";
+//    for ( int i = 1; i < 5; i++ ) if ( Filenames::exists( ofns_ [i] ) ) failure( "Output file \"" + ofns_[i] + "\" already exists." );
     
     if ( !fns_ && demate_ ) failure( "Index files must be provided for --de-mate command." );
     
     
     double startTime = clock();
-//    if ( deadapter_ ) da_ = new Deadapter( ifn_ );
-    ofs_[0].open( ofns_[0] );
-    ofs_[1].open( ofns_[1] );
+    if ( deadapter_ ) da_ = new Deadapter( ifn_ );
+    ofs_.open( ofns_[0] );
     
     
     if ( deamplify_ ) deamplify();
     correct();
     
-    ofs_[0].close();
-    ofs_[1].close();
+    ofs_.close();
     
-    uint64_t discardCount = discardCount + AmpPile::ampCount - AmpPile::pileCount;
+    uint64_t discardCount = discardCount_ + Amp::ampCount - Pile::pileCount;
+    bool corrected = adpCount_ || trimCount_ || CorrectAlign::nCorrectCount || CorrectAlign::polyCorrectCount || CorrectAlign::errorCorrectCount;
+    
     cout << "Overall summary:" << endl;
     cout << pairCount_ << " read pairs were scrutinised in " << getDuration( startTime ) << endl;
-    if ( AmpPile::ampCount ) cout << to_string( AmpPile::ampCount - AmpPile::pileCount ) << " pairs were discarded as redundant amplicons." << endl;
+    if ( Amp::ampCount ) cout << to_string( Amp::ampCount - Pile::pileCount ) << " pairs were discarded as redundant amplicons." << endl;
     if ( discardCount_ ) cout << discardCount_ << " pairs were discarded as self-complements." << endl;
-    if ( discardCount ) cout << "Of the remaining " << ( pairCount_ - discardCount ) << " pairs:" << endl;
+    if ( corrected && discardCount ) cout << ( pairCount_ - discardCount ) << " pairs remained undiscarded." << endl;
     if ( adpCount_ ) cout << adpCount_ << " pairs were consolidated and trimmed as self-compliments." << endl;
-    cout << trimCount_ << " chimeric mated readss were trimmed." << endl;
-    cout << CorrectAlign::nCorrectCount << " undetermined bases were corrected." << endl;
-    cout << CorrectAlign::polyCorrectCount << " homopolymer bases were corrected." << endl;
-    cout << CorrectAlign::errorCorrectCount << " incorrect bases were corrected." << endl;
+    if ( trimCount_ ) cout << trimCount_ << " chimeric mated reads were trimmed." << endl;
+    if ( CorrectAlign::nCorrectCount ) cout << CorrectAlign::nCorrectCount << " undetermined bases were corrected." << endl;
+    if ( CorrectAlign::polyCorrectCount ) cout << CorrectAlign::polyCorrectCount << " homopolymer bases were corrected." << endl;
+    if ( CorrectAlign::errorCorrectCount ) cout << CorrectAlign::errorCorrectCount << " incorrect bases were corrected." << endl;
     
-    if ( !adpCount_ ) remove( ofns_[1].c_str() );
+    remove( ofns_[1].c_str() );
     remove( ofns_[2].c_str() );
     remove( ofns_[3].c_str() );
     remove( ofns_[4].c_str() );
-    remove( ofns_[5].c_str() );
 }
 
 Correct::~Correct()
 {
-    if ( qb_ ) delete qb_;
     if ( da_ ) delete da_;
     if ( fns_ ) delete fns_;
 }
@@ -128,9 +123,8 @@ void Correct::correct()
     ifstream ifsReads( ifn_ );
     assert( ifsReads.good() );
     if ( df_ ) df_->rewind();
-    if ( !ir_ ) ir_ = new IndexReader( fns_ );
-    if ( !qb_ ) qb_ = new QueryBinaries( fns_ );
-//    assert( df_ && qb_ && ir_ );
+    if ( demate_ && !ir_ ) ir_ = new IndexReader( fns_ );
+    if ( deamplify_ && !df_ ) df_ = new DeamplifyFiles( ofns_[1], ofns_[2] );
     time_t my_time = time(NULL);
     printf("%s", ctime(&my_time));
     
@@ -142,24 +136,18 @@ void Correct::correct()
     {
         if ( df_ ) df_->overwrite( lines );
         bool used = used_ && ( used_[id/8] & ( idTable[id%8] ) );
-        bool adapter = !used && da_ && da_->isOverlap( lines );
+        bool adapter = !used && da_ && da_->isOverlap( lines[0][1], lines[1][1], lines[0][3], lines[1][3], !demate_ );
         
-        assert( demate_ );
         if ( !used && !adapter && demate_ )
         {
             bool trimmed[2]{ false, false };
             int lens[2]{0};
-            for ( int i = 0; i < 2; i++ )
-            {
-                CorrectQuery cq( ir_, lines[i][1], 0 );
-                lens[i] = cq.correct( qb_, lines[i][1], trimmed[i] );
-            }
+            for ( int i = 0; i < 2; i++ ) CorrectQuery cq( ir_, lines[i][1], lens[i], trimmed[i], false );
             for ( int i = 0; i < 2; i++ )
             {
                 if ( trimmed[i] || !lens[i] || lens[i] == lines[i][1].size() ) continue;
                 if ( trimmed[!i] && lens[i] > cutoff ) continue;
-                CorrectQuery cq( ir_, lines[i][1], lens[i], true );
-                lens[i] = cq.trim( qb_, lines[i][1], trimmed[i] );
+                CorrectQuery cq( ir_, lines[i][1], lens[i], trimmed[i], false );
             }
             for ( int i = 0; i < 2; i++ )
             {
@@ -169,41 +157,45 @@ void Correct::correct()
                 assert( lines[i][1].size() == lines[i][3].size() );
                 if ( lines[i][1].size() < baseLen ) lines[i][1] += string( baseLen-lines[i][1].size(), 'N' );
                 if ( lines[i][3].size() < baseLen ) lines[i][3] += string( baseLen-lines[i][3].size(), char( 35 ) );
-                for ( int j = 0; j < 4; j++ ) ofs_[0] << lines[i][j] << "\n";
             }
             if ( trimmed[0] || trimmed[1] ) trimCount_++;
         }
         if ( used ) usedCount++;
-        if ( adapter ) ( demate_ ? discardCount_ : adpCount_ )++;
+        if ( adapter ) ( demate_ || lines[0][1].empty() ? discardCount_ : adpCount_ )++;
+        if ( !used && ( !demate_ || !adapter ) && !lines[0][1].empty() )
+        {
+            lines[0][0] = "@";
+            lines[1][0] = "@";
+            lines[0][2] = "+";
+            lines[1][2] = "+";
+            if ( adapter ) lines[1][1] = string( lines[0][1].size(), 'N' );
+            if ( adapter ) lines[1][3] = string( lines[0][1].size(), 35 );
+            for ( int i = 0; i < 2; i++ ) for ( int j = 0; j < 4; j++ ) ofs_ << lines[i][j] << "\n";
+        }
         id++;
-        if ( !( id % 5000 ) )
+        if ( !( id % 5000000 ) )
         {
             my_time = time(NULL);
             printf("%s", ctime(&my_time));
-        }
-        if ( ( id >= 30000 ) )
-        {
             cout << to_string( id ) << " read pairs corrected so far in " << getDuration( startTime ) << endl;
-            exit( 1 );
         }
     }
+    pairCount_ = id;
     
     cout << "Finished parsing " << id << " read pairs in " << getDuration( startTime ) << endl;
     if ( usedCount ) cout << "Note: " << usedCount << " read pairs were already handled during de-amplification." << endl;
     cout << endl;
     
     if ( ir_ ) delete ir_;
-    if ( qb_ ) delete qb_;
     if ( used_ ) delete used_;
     ir_ = NULL;
-    qb_ = NULL;
     used_ = NULL;
 }
 
 void Correct::deamplify()
 {
-//    deamplifyConvert();
-//    deamplifyIdentify();
+    deamplifyConvert();
+    deamplifyIdentify();
     deamplifyScrutinise();
 }
 
@@ -213,7 +205,7 @@ void Correct::deamplifyConvert()
     double startTime = clock();
     
     ifstream ifsReads( ifn_ );
-    FILE* ofpSeq = fopen( ofns_[2].c_str(), "wb" ),* ofpStatus = fopen( ofns_[3].c_str(), "wb" );
+    FILE* ofpSeq = fopen( ofns_[1].c_str(), "wb" ),* ofpStatus = fopen( ofns_[2].c_str(), "wb" );
     int readLen = 0, p = 0, b = 0, bufSize = 65536;
     uint64_t kmers[2];
     uint32_t pairCount = 0, discardCount = 0;
@@ -222,7 +214,6 @@ void Correct::deamplifyConvert()
     fwrite( &readLen_, 1, 1, ofpSeq );
     
     if ( !ir_ ) ir_ = new IndexReader( fns_ );
-    if ( !qb_ ) qb_ = new QueryBinaries( fns_ );
     
     string lines[2][4];
     
@@ -236,11 +227,12 @@ void Correct::deamplifyConvert()
         {
             readLen = max( readLen, (int)lines[i][1].size() );
             kmers[i] = 0;
-            if ( size_t it = lines[i][1].find( 'N' ) != string::npos && it < 16 && ir_ && qb_ )
+            size_t it = lines[i][1].find( 'N' );
+            if ( it != string::npos && it < 16 && ir_ )
             {
                 bool trimmed = false;
-                CorrectQuery cq( ir_, lines[i][1], 0 );
-                cq.correct( qb_, lines[i][1], trimmed );
+                int len = 0;
+                CorrectQuery cq( ir_, lines[i][1], len, trimmed, false );
             }
             for ( int j = 0; !status && j < lens[i]; j++ )
             {
@@ -278,38 +270,36 @@ void Correct::deamplifyConvert()
     if ( p || b ) fwrite( bufStatus, 1, p + bool( b ), ofpStatus );
     
     delete ir_;
-    delete qb_;
     ir_ = NULL;
-    qb_ = NULL;
     fclose( ofpSeq );
     fclose( ofpStatus );
-    ofpSeq = fopen( ofns_[2].c_str(), "rb+" );
+    ofpSeq = fopen( ofns_[1].c_str(), "rb+" );
     fwrite( &pairCount, 4, 1, ofpSeq );
     fwrite( &readLen_, 1, 1, ofpSeq );
     fclose( ofpSeq );
     
-    cout << "Read " << to_string( pairCount ) << " read pairs, discarding " << to_string( discardCount ) << " in: " << getDuration( startTime ) << endl;
+    cout << "Read " << to_string( pairCount ) << " read pairs, discarding " << to_string( discardCount ) << " in: " << getDuration( startTime ) << endl << endl;
 }
 
 void Correct::deamplifyIdentify()
 {
-    cout << endl << "Compiling candidate amplicons... " << endl;
+    cout << "Compiling candidate amplicons... " << endl;
     double startTime = clock();
     
-    if ( !df_ ) df_ = new DeamplifyFiles( ofns_[2], ofns_[3] );
+    if ( !df_ ) df_ = new DeamplifyFiles( ofns_[1], ofns_[2] );
     pairCount_ = df_->maxPair;
     
-    FILE* ofpDump = fopen( ofns_[5].c_str(), "wb" );
+    FILE* ofpDump = fopen( ofns_[4].c_str(), "wb" );
     uint64_t kmerSize = 500 * 1000 * 1000, maxMem = 2 * 1000 * 1000 * 1000, ampliconCount = 0;
     bool full = df_->maxPair;
     
     while ( full )
     {
         // Parse as many k-mers as possible
-        df_->cycle( ofns_[4], kmerSize, full );
+        df_->cycle( ofns_[3], kmerSize, full );
         
         // Collate and de-amplify all read for multiple k-mers
-        df_->collate( ofpDump, ofns_[4], kmerSize, maxMem, ampliconCount );
+        df_->collate( ofpDump, ofns_[3], kmerSize, maxMem, ampliconCount );
         
         df_->reset( 1 );
     }
@@ -321,18 +311,16 @@ void Correct::deamplifyIdentify()
 
 void Correct::deamplifyScrutinise()
 {
-    cout << endl << "Scrutinising candidate amplicons... " << endl;
+    cout << "Scrutinising candidate amplicons... " << endl;
     double startTime = clock();
     
     assert( fns_ );
-    if ( !df_ ) df_ = new DeamplifyFiles( ofns_[2], ofns_[3] );
+    if ( !df_ ) df_ = new DeamplifyFiles( ofns_[1], ofns_[2] );
     if ( !ir_ ) ir_ = new IndexReader( fns_ );
-    if ( !qb_ ) qb_ = new QueryBinaries( fns_ );
     if ( !pairCount_ ) pairCount_ = df_->maxPair;
-    return;
     used_ = new uint8_t[ 1 + ( pairCount_ / 8 ) ]{0};
     
-    FILE* ifpDump = fopen( ofns_[5].c_str(), "rb" );
+    FILE* ifpDump = fopen( ofns_[4].c_str(), "rb" );
     uint64_t lastKmer;
     
     vector<Amp*> amps[2];
@@ -344,27 +332,25 @@ void Correct::deamplifyScrutinise()
         uint64_t kmer = Amp::create( ifpDump, tmps );
         if ( kmer != lastKmer && !amps[0].empty() )
         {
-            assert( amps[0].size() > 1 && amps[1].size() > 1 );
-            for ( AmpPile* pile : AmpPile::compile( amps, ir_, qb_ ) ) pile->output( ofs_[0], used_, da_, ir_, qb_ );
+            for ( Pile* pile : Pile::compile( amps, ir_ ) ) pile->output( ofs_, used_, da_, ir_ );
         }
-        amps[0].push_back( tmps[0] );
-        amps[1].push_back( tmps[1] );
+        if ( tmps[0] ) amps[0].push_back( tmps[0] );
+        if ( tmps[1] ) amps[1].push_back( tmps[1] );
         lastKmer = kmer;
+        if ( !( candidateCount % 5000000 ) )
+        {
+            time_t my_time = time(NULL);
+            printf("%s", ctime(&my_time));
+            cout << to_string( candidateCount ) << " candidate amplicons parsed so far in " << getDuration( startTime ) << endl;
+        }
     }
     
     fclose( ifpDump );
-    trimCount_ += AmpPile::trimCount;
-    discardCount_ += AmpPile::adpCount;
+    trimCount_ += Pile::trimCount;
+    discardCount_ += Pile::adpCount;
     
     cout << "Finished scrutinising " << candidateCount << " candidate amplicons in " << getDuration( startTime ) << endl;
-    cout << AmpPile::ampCount << " candidates were consolidated into " << AmpPile::pileCount << " unique pairs." << endl << endl;
-    
-//    uint64_t blockedCount = 0;
-//    for ( uint64_t i = 0; i < pairCount_; i++ )
-//    {
-//        if ( used_[i/8] & ( 1 << ( 7 - i%8 ) ) ) blockedCount++;
-//    }
-//    cout << blockedCount << endl << endl;
+    cout << Amp::ampCount << " candidates were consolidated into " << Pile::pileCount << " unique pairs." << endl << endl;
     
 }
 

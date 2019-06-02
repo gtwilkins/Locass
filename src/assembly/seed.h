@@ -24,17 +24,20 @@
 #include "node.h"
 #include "locus.h"
 #include "query.h"
+#include "seed_fork.h"
 
 class Seed 
 {
 public:
-    Seed( string &header, string &seq, Querier &inBwt, int errorCount );
+    Seed( string &header, string &seq, Querier &inBwt, int errorCount, bool bestOnly=true );
     void assemble();
     void assembleGraph();
     vector<Locus*> getLoci();
     bool warning();
     virtual ~Seed();
 private:
+    bool extend( NodeRoll &exts, bool drxn );
+    bool restart( vector<SeedFork> forks[2] );
     void assembleHaploid();
     void checkDivergent( NodeList &path );
     void checkDivergentBack( NodeList &div, NodeSet &pathSet, bool drxn );
@@ -55,6 +58,7 @@ private:
     void resolveBackForks();
     
     string header_, seq_;
+    NodeRoll seed_;
     NodeList nodes_;
     int32_t validLimits_[2], ends_[2], tether_[2];
     int readCount_;

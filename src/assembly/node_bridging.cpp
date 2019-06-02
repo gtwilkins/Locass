@@ -1380,7 +1380,7 @@ void Node::cloneBridge( PathVars &pv, NodeList &hitNodes )
                     nxtSet.insert( e.node );
                     nodeMap[e.node] = cloneEdge;
                 }
-                clone->addEdge( cloneEdge, e.overlap, pv.drxn, false, e.isLeap );
+                clone->addEdge( cloneEdge, e.ol, pv.drxn, false, e.isLeap );
             }
         }
         currSet = nxtSet;
@@ -1396,7 +1396,7 @@ void Node::cloneBridge( PathVars &pv, NodeList &hitNodes )
             else
             {
                 Node* clone = it->second;
-                clone->addEdge( prv->edges_[pv.drxn][i].node, prv->edges_[pv.drxn][i].overlap, pv.drxn, false, prv->edges_[pv.drxn][i].isLeap );
+                clone->addEdge( prv->edges_[pv.drxn][i].node, prv->edges_[pv.drxn][i].ol, pv.drxn, false, prv->edges_[pv.drxn][i].isLeap );
                 prv->edges_[pv.drxn][i].node->removeEdge( prv, !pv.drxn );
                 prv->edges_[pv.drxn].erase( prv->edges_[pv.drxn].begin() + i );
             }

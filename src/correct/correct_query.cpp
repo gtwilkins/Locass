@@ -14,50 +14,6 @@ uint64_t CorrectAlign::nCorrectCount = 0;
 uint64_t CorrectAlign::errorCorrectCount = 0;
 uint64_t CorrectAlign::polyCorrectCount = 0;
 
-CorrectExt::CorrectExt( string &seq, int len, bool drxn )
-{
-    maxLen = seq.size();
-    ext = len >= seq.size() ? seq : ( drxn ? seq.substr( 0, len ) : seq.substr( seq.size() - len ) );
-    lens.push_back( min( seq.size(), ext.size() ) );
-}
-
-bool CorrectExt::add( string &seq, bool drxn, bool doAdd )
-{
-    for ( int i = 0; i < min( seq.size(), ext.size() ); i++ )
-    {
-        if ( seq[i] == 'N' ) continue;
-        if ( drxn ? seq[i] != ext[i] : seq.end()[-i-1] != ext.end()[-i-1] ) return false;
-    }
-    if ( doAdd ) lens.push_back( min( seq.size(), ext.size() ) );
-    return true;
-}
-
-vector<string> CorrectExt::get( vector<Overlap> ols, int len, bool drxn )
-{
-    vector<CorrectExt> exts;
-    for ( Overlap &ol : ols )
-    {
-        bool added = false, strong = false;
-        vector<int> weak;
-        for ( int i = 0; i < exts.size(); i++ )
-        {
-            if ( !exts[i].add( ol.seq, drxn ) ) continue;
-            if ( exts[i].lens.size() == 2 ) weak.push_back( i );
-            if ( exts[i].lens.size() > 9 && exts[i].maxLen - ol.extLen > 29 ) strong = true;
-            added = true;
-        }
-        if ( !added ) exts.push_back( CorrectExt( ol.seq, len, drxn ) );
-        if ( !strong || weak.empty() ) continue;
-        for ( auto it = weak.rbegin(); it != weak.rend(); it++ ) exts.erase( exts.begin() + *it );
-    }
-    bool strong = false;
-    for ( CorrectExt &ext : exts ) if ( ext.lens.size() > 9 && ext.maxLen > 29 ) strong = true;
-    
-    vector<string> seqs;
-    for ( CorrectExt &ext : exts ) if ( !strong || ext.lens.size() > 1 ) seqs.push_back( ext.ext );
-    return seqs;
-}
-
 CorrectAlign::CorrectAlign( string &t, string &q )
 {
     LocalAlignment la( t, q, false, true );
@@ -145,7 +101,6 @@ bool CorrectAlign::operator >( CorrectAlign &rhs )
         while ( j < rhs.a[1].size() && rhs.a[1][j] == '-' ) j++;
         if ( i < a[1].size() && j < rhs.a[1].size() && a[1][i++] != rhs.a[1][j++] ) return false;
     }
-    assert( false );
     return true;
 }
 
@@ -204,181 +159,154 @@ CorrectBranch::CorrectBranch( uint8_t i, int it, CharId rank, CharId count )
     bad = good = 0;
 }
 
-void CorrectBranch::collect( vector<uint8_t> &ols, vector<CharId> &ranks, vector<CharId> &counts )
+void CorrectBranch::align( string seq, int len, bool drxn )
 {
-    int j = 0;
-    for ( int i = 0; i < endOverlaps.size(); )
-    {
-        while ( j < ols.size() && endOverlaps[i] < ols[j] ) j++;
-        int k = j < ols.size() ? i + 1 : endOverlaps.size();
-        while ( k < endOverlaps.size() && ols[j] <= endOverlaps[k] ) k++;
-        ols.insert( ols.begin(), endOverlaps.begin()+i, endOverlaps.begin()+k );
-        ranks.insert( ranks.begin(), endRanks.begin()+i, endRanks.begin()+k );
-        counts.insert( counts.begin(), endCounts.begin()+i, endCounts.begin()+k );
-        i = k;
-    }
-    for ( CorrectBranch &cb : branches ) cb.collect( ols, ranks, counts );
+    string ext[2]{ drxn ? seq.substr( seq.size() - len ) : seq.substr( 0, len ), "" };
+    for ( int i = 0; i < q.size(); i++ ) ext[1] += drxn ? intToCharComp[ q[i] ] : intToChar[ q.end()[-i-1] ];
+    aligns.push_back( CorrectAlign( ext[0], ext[1] ) );
 }
 
-bool CorrectBranch::beats( CorrectBranch &rhs, int len )
+void CorrectBranch::contend( CorrectAlign*& full, CorrectAlign*& part, int partLen, int imperf )
 {
-    return ( rhs.bad && ( good == len || max( good, bad ) - rhs.bad > 12 ) );
-}
-
-int CorrectBranch::getNovel()
-{
-    uint8_t last = -1;
-    int novel = 0, len = min( (int)q.size(), max( good, bad ) );
-    for ( int i = 0; i < len; i++ )
-    {
-        if ( q[i] != last ) novel++;
-        last = q[i];
-    }
-    return novel;
-}
-
-bool CorrectBranch::steal( vector<uint8_t> &ols, vector<CharId> &ranks, vector<CharId> &counts, int len )
-{
-    for ( int i = 0; i < endOverlaps.size(); i++ )
-    {
-        if ( endOverlaps[i] > len ) continue;
-        ols.insert( ols.begin(), endOverlaps.begin()+i, endOverlaps.end() );
-        ranks.insert( ranks.begin(), endRanks.begin()+i, endRanks.end() );
-        counts.insert( counts.begin(), endCounts.begin()+i, endCounts.end() );
-        endOverlaps.erase( endOverlaps.begin()+i, endOverlaps.end() );
-        endRanks.erase( endRanks.begin()+i, endRanks.end() );
-        endCounts.erase( endCounts.begin()+i, endCounts.end() );
-    }
-    int cut = len - base;
-    assert( cut <= q.size() );
-    q.erase( q.begin(), q.begin() + len - base );
-    base += cut;
-    return q.empty();
-}
-
-string CorrectBranch::yield( bool drxn )
-{
-    string s;
-    for ( int i = 0; i < q.size(); i++ ) s += drxn ? intToChar[ q.end()[-i-1] ] : intToCharComp[ q[i] ];
-    return s;
-}
-
-vector<string> CorrectBranch::yield( vector<CorrectBranch> &cbs, bool drxn )
-{
-    vector<string> exts;
-    for ( CorrectBranch &cb : cbs ) exts.push_back( cb.yield( drxn ) );
-    return exts;
-}
-
-CorrectQuery::CorrectQuery( IndexReader* ir, string &seq, int qLen, bool retract )
-: ir_( ir ), base_( 0 ), qLen_( 0 ), seqLen_( seq.size() ), collect_( true ), trim_( false )
-{
-    if ( retract ) while ( qLen > 1 && seq[qLen-1] == seq[qLen-2] ) qLen--;
-    for ( int i = qLen; --i >= 0; ) q_.push_back( charToInt[ seq[i] ] );
-    
-    base_ = seqLen_ - q_.size();
-    collect_ = true;
-    if ( q_.size() < 16 ) return;
-    CharId rank, count;
-//    ir->setBaseAll( q_[0], q_[1], rank, count );
-//    query( q_[1], 2, rank, count );
-    int it = ir->setBaseAll( q_, rank, count );
-    if ( count ) query( q_[it-1], it, rank, count );
-}
-
-CorrectQuery::CorrectQuery( IndexReader* ir, string &seq, bool drxn )
-: ir_( ir ), base_( 0 ), qLen_( 0 ), seqLen_( seq.size() ), collect_( false ), trim_( false )
-{
-    for ( int i = 0; i < seq.size(); i++ )
-    {
-        if ( drxn ) q_.push_back( charToInt[ seq.end()[-i-1] ] );
-        else q_.push_back( charToIntComp[ seq[i] ] );
-        if ( q_.back() > 3 && i - base_ < 32 )
-        {
-            base_ = i + 1;
-            q_.clear();
-            collect_ = true;
-        }
-    }
-    if ( !ir || q_.size() < 32 ) return;
-    CharId rank, count;
-//    ir->setBaseAll( q_[0], q_[1], rank, count );
-//    query( q_[1], 2, rank, count );
-    int it = ir->setBaseAll( q_, rank, count );
-    if ( count ) query( q_[it-1], it, rank, count );
-}
-
-CorrectQuery::CorrectQuery( IndexReader* ir, vector<uint8_t> &q, vector<CorrectBranch> &branches, int seqLen )
-: ir_( ir ), base_( 0 ), qLen_( q.size() ), seqLen_( seqLen ), q_( q ), branches_( branches ), collect_( false ), trim_( false )
-{
-    for ( CorrectBranch &cb : branches_ ) query( cb, cb.q.back(), cb.base+1 );
-}
-
-int CorrectQuery::correct( QueryBinaries* qb, string &seq, bool &trimmed )
-{
-    if ( qLen_ < seqLen_ * .9 && !branches_.empty() && base_ + qLen_ < seq.size() )
-    {
-        vector<string> base( 1, seq.substr( base_ + qLen_ ) );
-        vector<string> exts = CorrectBranch::yield( branches_, 0 );
-        vector<CorrectAlign> cas = CorrectAlign::get( base, exts, 1 );
-        qLen_ += correct( cas, seq, 0, true, 1 );
-        if ( trim_ ) trimmed = true;
-    }
-    
-    if ( base_ )
-    {
-        for ( CorrectBranch &cb : branches_ ) cb.collect( endOverlaps_, endRanks_, endCounts_ );
-        vector<string> base( 1, seq.substr( 0, base_ ) );
-        vector<string> exts = CorrectExt::get( qb->getOverlaps( endOverlaps_, endRanks_, endCounts_, 80, 200, 0 ), base_, 0 );
-        vector<CorrectAlign> cas = CorrectAlign::get( base, exts, 0 );
-        int extLen = correct( cas, seq, 0, false, 0 );
-        if ( !extLen && seq.find_first_not_of( "N" ) == base_ ) extLen = base_;
-        base_ -= extLen;
-        qLen_ += extLen;
-        if ( !extLen ) qLen_ = 0;
-    }
-    
-    return qLen_;
-}
-
-int CorrectQuery::correct( string &seq, vector<string> &seqs, bool &trimmed )
-{
-    assert( !seqs.empty() && !base_ );
-    if ( branches_.empty() || qLen_ >= seqLen_ * .9 ) return qLen_;
-    vector<string> base;
-    for ( string &s : seqs ) base.push_back( s.substr( qLen_ + base_ ) );
-    vector<string> exts = CorrectBranch::yield( branches_, 0 );
-    vector<CorrectAlign> cas = CorrectAlign::get( base, exts, 1 );
-    qLen_ += correct( cas, seq, 0, true, 1 );
-    if ( trim_ ) trimmed = true;
-    
-    string q = seq.substr( 0, qLen_ );
-    for ( int i = 0; i < seqs.size(); i++ ) if ( seqs[i].find( q ) != 0 ) seqs.erase( seqs.begin() + i-- );
-    assert( !seqs.empty() );
-    
-    return qLen_;
-}
-
-int CorrectQuery::correct( vector<CorrectAlign> &cas, string &seq, int maxMiss, bool partial, bool drxn )
-{
-    CorrectAlign* full = NULL,* part = NULL,* bad = NULL;
-    for ( CorrectAlign &ca : cas )
-    {
-        if ( ca.isBad() ) bad = &ca;
-        if ( ( !full || ca > *full ) && ca.isFull( maxMiss ) ) full = &ca;
-        if ( ( !part || ( ca.perf == part->perf ? ca > *part : ca.perf > part->perf ) ) && ca.isPart() ) part = &ca;
-    }
-    
-    int partLen = part ? part->perf : 0, imperf = 0;
-    for ( CorrectAlign &ca : cas )
+    for ( CorrectAlign &ca : aligns )
     {
         if ( full && full != &ca && ca.contendFull( *full ) ) full = NULL;
         if ( part && part != &ca && ca.contendPart( *part, partLen ) ) part = NULL;
         if ( !ca.perf ) imperf++;
     }
+}
+
+void CorrectBranch::correct( CorrectAlign*& full, CorrectAlign*& part, bool &bad, int maxMiss )
+{
+    for ( CorrectAlign &ca : aligns )
+    {
+        if ( ca.isBad() ) bad = true;
+        if ( ( !full || ca > *full ) && ca.isFull( maxMiss ) ) full = &ca;
+        if ( ( !part || ca.perf > part->perf ) && ca.isPart() ) part = &ca;
+    }
+}
+
+bool CorrectBranch::proceed( IndexReader* ir, int limit )
+{
+    assert( branches.empty() && count );
+    query( ir, limit );
+    return true;
+}
+
+void CorrectBranch::query( IndexReader* ir, int limit )
+{
+    if ( q.size() >= limit ) return;
     
-    if ( full && ( full->miss || full->poly ) && cas.size() > 2 && full->hit < ( 5 + cas.size() / 4 ) ) full = NULL;
-    if ( part && part->perf <= imperf ) part = NULL;
+    CharCount ranks;
+    CharCount counts;
+    
+    ir->countRange( q.back(), rank, count, ranks, counts );
+    
+    int i = 4;
+    for ( int j = 0; j < 4; j++ ) if ( counts[j] && ( i == 4 || counts[j] > counts[i] ) ) i = j;
+    for ( int j = 0; i < 4 && j < 4; j++ ) if ( j != i && ( counts[j] > min( (CharId)1, counts[i] / 8 ) ) ) j = 4;
+    for ( int j = 0; j < 4; j++ ) if ( counts[j] && j != i ) branches.push_back( CorrectBranch( j, base+q.size(), ranks[j], counts[j] ) );
+    if ( i > 3 ) return;
+    
+    q.push_back( i );
+    rank = ranks[i];
+    count = counts[i];
+    query( ir, limit );
+}
+
+CorrectQuery::CorrectQuery( IndexReader* ir, string &seq, int &len, bool &trimmed, bool dummy )
+: qLen_( 0 ), seqLen_( seq.size() ), trim_( false ), initial_( !len )
+{
+    // Set right query paramters
+    coords_[0] = initial_ ? 0 : len - ( seqLen_ * .7 );
+    coords_[1] = seqLen_;
+    for ( int i = coords_[0]; i < seq.size() && i - coords_[0] < 32; i++ ) if ( seq[i] == 'N' ) coords_[0] = i + 1;
+    if ( initial_ ? coords_[0] > 30 : coords_[0] <= 0 ) return;
+    
+    // Perform right query and correct or trim if necessary
+    assert( setQuery( seq, 1 ) );
+//    if ( !setQuery( seq, 0 ) ) return;
+    CharId rank, count;
+    int it = ir->setBaseAll( q_, rank, count );
+    query( ir, q_[it-1], it, rank, count );
+    len = correct( ir, seq, 1 ) + coords_[0];
+    if ( trim_ ) trimmed = true;
+    
+    if ( !coords_[0] || !initial_ ) return;
+    
+    // Perform left query if undetermined bases present
+    coords_[1] = min( coords_[0] + int( seqLen_ * .7 ), len );
+    coords_[0] = 0;
+    assert( setQuery( seq, 0 ) );
+    it = ir->setBaseAll( q_, rank, count );
+    query( ir, q_[it-1], it, rank, count );
+    int left = coords_[1] - correct( ir, seq, 0 );
+    for ( int i = 0; i < left; i++ ) if ( seq[i] != 'N' ) len = 0;
+}
+
+CorrectQuery::CorrectQuery( IndexReader* ir, string &seq, vector<string> &seqs, vector<CorrectBranch> &branches, int &len, bool &trimmed )
+: branches_( branches ), qLen_( len ), seqLen_( seq.size() ), trim_( false ), initial_( false )
+{
+    coords_[0] = 0;
+    coords_[1] = seqLen_;
+    if ( branches_.empty() ) return;
+    len = correct( ir, seq, seqs );
+    if ( trim_ ) trimmed = true;
+}
+
+CorrectQuery::CorrectQuery( IndexReader* ir, string &seq, vector<string> &seqs, int &len, bool &trimmed )
+: qLen_( len ), seqLen_( seq.size() ), trim_( false ), initial_( false )
+{
+    coords_[0] = len - ( seqLen_ * .7 );
+    coords_[1] = seqLen_;
+    if ( coords_[0] <= 0 ) return;
+    
+    assert( setQuery( seq, 1 ) );
+    CharId rank, count;
+    int it = ir->setBaseAll( q_, rank, count );
+    query( ir, q_[it-1], it, rank, count );
+    len = correct( ir, seq, seqs );
+    if ( trim_ ) trimmed = true;
+}
+
+int CorrectQuery::correct( IndexReader* ir, string &seq, bool drxn )
+{
+    if ( proceed( ir ) )
+    {
+        for ( CorrectBranch &cb : branches_ ) cb.align( seq, q_.size() - cb.base, drxn );
+        qLen_ += correct( seq, drxn );
+    }
+    
+    branches_.clear();
+    
+    return qLen_;
+}
+
+int CorrectQuery::correct( IndexReader* ir, string &seq, vector<string> &seqs )
+{
+    if ( proceed( ir ) )
+    {
+        for ( string &s : seqs ) for ( CorrectBranch &cb : branches_ ) cb.align( s, seqLen_ - qLen_ - coords_[0], 1 );
+        qLen_ += correct( seq, 1 );
+    }
+    if ( trim_ || qLen_ + coords_[0] >= seqLen_ ) seqs.clear();
+    branches_.clear();
+    
+    string q = seq.substr( 0, coords_[0] + qLen_ );
+    for ( int i = 0; i < seqs.size(); i++ ) if ( seqs[i].find( q ) != 0 ) seqs.erase( seqs.begin() + i-- );
+    
+    return coords_[0] + qLen_;
+}
+
+int CorrectQuery::correct( string &seq, bool drxn )
+{
+    CorrectAlign* full = NULL,* part = NULL;
+    
+    bool bad = false;
+    for ( CorrectBranch &cb : branches_ ) cb.correct( full, part, bad, drxn && initial_ );
+    
+    int partLen = part ? part->perf : 0, imperf = 0;
+    for ( CorrectBranch &cb : branches_ ) cb.contend( full, part, partLen, imperf );
     
     if ( full )
     {
@@ -386,92 +314,57 @@ int CorrectQuery::correct( vector<CorrectAlign> &cas, string &seq, int maxMiss, 
         assert( seq.size() == seqLen_ );
         return full->lens[0];
     }
-    else if ( partial && part )
+    else if ( drxn && part )
     {
         part->write( seq, partLen, drxn );
-        if ( part->miss > 2 && ( part->score - part->perf < 0 ) ) trim_ = true;
+        if ( part->miss > 2 && ( part->score - part->perf < 0 ) ) trim_ = drxn;
         assert( seq.size() == seqLen_ );
         return partLen;
     }
-    else if ( bad ) trim_ = true;
+    else if ( bad ) trim_ = drxn;
     
     return 0;
 }
 
-void CorrectQuery::query( uint8_t i, int it, CharId rank, CharId count )
+bool CorrectQuery::proceed( IndexReader* ir )
 {
+    if ( branches_.empty() || qLen_ >= min( coords_[1] - coords_[0], int( seqLen_ * .9 ) ) ) return false;
+    int maxCount = 0;
+    for ( CorrectBranch &cb : branches_ ) if ( cb.count > maxCount ) maxCount = cb.count;
+    if ( maxCount < 10 ) return false;
+    for ( int i = 0; i < branches_.size(); i++ )
+    {
+        if ( maxCount >= 30 && branches_[i].count < 2 ) branches_.erase( branches_.begin() + i-- );
+        else branches_[i].query( ir, (int)q_.size() - qLen_ );
+    }
+    
+    return true;
+}
+
+ReadId CorrectQuery::query( IndexReader* ir, uint8_t i, int it, CharId rank, CharId count )
+{
+    if ( count ) qLen_ = it;
+    else return 0;
+    
     CharCount ranks;
     CharCount counts;
     
-    ir_->countRange( i, rank, count, ranks, counts );
-    if ( it < q_.size() && q_[it] < 4 && counts[ q_[it] ] )
-    {
-        qLen_ = it + 1;
-        if ( qLen_ < q_.size() || collect_ ) query( q_[it], it+1, ranks[ q_[it] ], counts[ q_[it] ] );
-    }
+    ir->countRange( i, rank, count, ranks, counts );
+    ReadId ends = it < q_.size() && q_[it] < 4 ? query( ir, q_[it], it+1, ranks[ q_[it] ], counts[ q_[it] ] ) : 0;
     
-    for ( int j = 0; it >= qLen_ && j < 4; j++ )
-    {
-        if ( !counts[j] || ( it < q_.size() && j == q_[it] ) ) continue;
-        if ( it < q_.size() && q_[it] < 4 && counts[j] <= counts[ q_[it] ] ) continue;
-        branches_.push_back( CorrectBranch( j, it, ranks[j], counts[j] ) );
-        query( branches_.back(), j, it+1 );
-    }
+    if ( !branches_.empty() || qLen_ == q_.size() || ends > 2 ) return ends;
     
-    if ( !collect_ || it < 32 || it == seqLen_ || !counts.endCounts ) return;
+    for ( int j = 0; j < 4; j++ ) if ( j != q_[it] && counts[j] ) branches_.push_back( CorrectBranch( j, it, ranks[j], counts[j] ) );
     
-    endOverlaps_.push_back( it );
-    endRanks_.push_back( ranks.endCounts );
-    endCounts_.push_back( counts.endCounts );
+    return ends + counts.endCounts;
 }
 
-void CorrectQuery::query( CorrectBranch &cb, uint8_t i, int it )
+bool CorrectQuery::setQuery( string &seq, bool drxn )
 {
-    CharCount ranks;
-    CharCount counts;
-    
-    ir_->countRange( i, cb.rank, cb.count, ranks, counts );
-    bool free = cb.bad || it >= q_.size() || q_[it] > 3 || !counts[ q_[it] ];
-    int jBest = free ? counts.getMaxBranch() : q_[it];
-    int jCount = free ? counts.getBranchCount() : 1;
-    if ( !cb.bad && it < q_.size() && jCount && q_[it] < 4 && jBest != q_[it] ) cb.bad = it;
-    if ( !cb.bad && !cb.good && ( it >= q_.size() || !jCount ) ) cb.good = min( it, (int)q_.size() );
-    if ( jBest < 4 && jCount == 1 )
-    {
-        cb.q.push_back( jBest );
-        cb.rank = ranks[jBest];
-        cb.count = counts[jBest];
-        query( cb, jBest, it+1 );
-    }
-    else for ( int j = 0; j < 4; j++ ) if ( counts[j] ) cb.branches.push_back( CorrectBranch( j, it, ranks[j], counts[j] ) );
-    
-    if ( !collect_ || it < 32 || it == seqLen_ || !counts.endCounts ) return;
-    
-    cb.endOverlaps.push_back( it );
-    cb.endRanks.push_back( ranks.endCounts );
-    cb.endCounts.push_back( counts.endCounts );
-}
-
-int CorrectQuery::trim( QueryBinaries* qb, string &seq, bool &trimmed )
-{
-    for ( CorrectBranch &cb : branches_ ) cb.collect( endOverlaps_, endRanks_, endCounts_ );
-    vector<string> base( 1, seq.substr( q_.size() ) );
-    vector<string> exts = CorrectExt::get( qb->getOverlaps( endOverlaps_, endRanks_, endCounts_, 80, 200, 1 ), base_, 1 );
-    vector<CorrectAlign> cas = CorrectAlign::get( base, exts, 1 );
-    int extLen = correct( cas, seq, 1, true, 1 );
-    if ( trim_ ) trimmed = true;
-    return q_.size() + extLen;
-}
-
-int CorrectQuery::trim( QueryBinaries* qb, string &seq, vector<string> &seqs, bool &trimmed )
-{
-    assert( !seqs.empty() );
-    for ( CorrectBranch &cb : branches_ ) cb.collect( endOverlaps_, endRanks_, endCounts_ );
-    vector<string> base;
-    for ( string &s : seqs ) base.push_back( s.substr( q_.size() ) );
-    vector<string> exts = CorrectExt::get( qb->getOverlaps( endOverlaps_, endRanks_, endCounts_, 80, 200, 1 ), base_, 1 );
-    vector<CorrectAlign> cas = CorrectAlign::get( base, exts, 1 );
-    int extLen = correct( cas, seq, 1, true, 1 );
-    if ( trim_ ) trimmed = true;
-    return q_.size() + extLen;
+    q_.clear();
+    if ( coords_[1] - coords_[0] < 12 ) return false;
+    if ( drxn ) for ( int i = coords_[0]; i < seq.size(); i++ ) q_.push_back( charToIntComp[ seq[i] ] );
+    else for ( int i = coords_[1]; --i >= 0; ) q_.push_back( charToInt[ seq[i] ] );
+    for ( int i = 0; i < 12; i++ ) if ( q_[i] > 3 ) return false;
+    return true;
 }

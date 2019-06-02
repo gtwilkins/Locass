@@ -20,23 +20,20 @@ class Deadapter
 {
 public:
     Deadapter( string fn );
-    bool isOverlap( string &seq1, string &seq2, string &phred1, string &phred2 );
-    bool isOverlap( string (&lines)[2][4] );
-    void rewrite();
+    bool isOverlap( string &seq1, string &seq2, string &phred1, string &phred2, bool blank );
     
 private:
     int align( string (&s)[2], string (&p)[2], int &hits, int &miss, int &diff, int trim );
     bool addEnds( vector< pair<string, uint32_t> > &ends, string &s );
     bool consolidateEnd( vector< pair<string, uint32_t> > &ends, int &len, string &adaptor );
     bool getPair( string (&s)[2] );
-    bool isOverlap2( string &seq1, string &seq2, string &phred1, string &phred2, int i );
+    bool isOverlap2( string &seq1, string &seq2, string &phred1, string &phred2, int i, bool blank );
     bool isOverlap3( string &seq, string &phred, int ol, int i );
     bool isOverlap4( string &seq, string &phred, int i );
-    bool isOverlapAdapter( string (&lines)[4], int ol, int i );
     bool readLine( string &s, bool suppress );
-    bool readRead( string (&lines)[4] );
     void rewind();
     void setAdapters( uint32_t kmerLen );
+    void setBlank( string &seq, string &phred, int start );
     bool setConnectors( vector<string> &connectors );
     
     string fn_, adapter_[2];

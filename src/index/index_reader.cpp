@@ -23,6 +23,7 @@
 #include <cassert>
 #include <string.h>
 #include <iostream>
+#include "constants.h"
 
 IndexReader::IndexReader( Filenames* fns )
 {
@@ -177,6 +178,23 @@ void IndexReader::createSeeds( FILE* fp, int i, int it, int limit, CharId rank, 
     countRange( i, rank, edge, count, ranks, edges, counts );
     
     for ( int j = 0; j < 4; j++ ) createSeeds( fp, j, it+1, limit, ranks[j], edges[j], counts[j] );
+}
+
+void IndexReader::primeOverlap( string &seq, vector<uint8_t> &q, CharId &rank, CharId &count, int &ol, bool drxn )
+{
+    ol = mers && seq.size() >= 12 ? 12 : 2;
+    if ( drxn ) for ( int i = 0; i++ < ol; ) q.push_back( charToInt[ seq.end()[-i] ] );
+    else for ( int i = 0; i < ol; i++ ) q.push_back( charToIntComp[ seq[i] ] );
+    
+    if ( mers )
+    {
+        assert( false );
+    }
+    else
+    {
+        rank = midRanks[ q[0] ][ q[1] ];
+        count = baseCounts[ q[0] + 1 ][ q[1] ] - rank;
+    }
 }
 
 int IndexReader::setBaseAll( vector<uint8_t> &q, CharId &rank, CharId &count )

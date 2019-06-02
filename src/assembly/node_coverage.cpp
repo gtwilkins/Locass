@@ -93,8 +93,8 @@ float Node::getCoverageDrxn( int32_t dist, bool drxn, bool inclSelf )
             int currOffset = offsetMap[curr];
             for ( Edge &e : curr->edges_[drxn] )
             {
-                int offset = drxn ? curr->ends_[1] - e.overlap - e.node->ends_[0]
-                                  : e.node->ends_[1] - e.overlap - curr->ends_[0];
+                int offset = drxn ? curr->ends_[1] - e.ol - e.node->ends_[0]
+                                  : e.node->ends_[1] - e.ol - curr->ends_[0];
                 offset += currOffset;
                 if ( offsetMap.find( e.node ) == offsetMap.end()
                         && limits[0] < e.node->ends_[1] + offset 
@@ -253,56 +253,9 @@ void Node::resetReliabilityPropagate( NodeSet &propagated, bool drxn )
 void Node::setCoverage()
 {
     float len = getLengthForCoverage();
-    float readCount = reads_.size();
+    float readCount = countReads();
     coverage_ = readCount < 3 ? params.cover : ( ( readCount - 2 ) * float( params.readLen) ) / len;
 }
-
-//void Node::setCoverage( ExtVars &ev, bool subGraph, bool drxn, bool isIsland )
-//{
-//    if ( isContinue( drxn ) || ( ends_[1] - ends_[0] < params.readLen * 1.25 ) )
-//    {
-//        setCoverage();
-//        return;
-//    }
-//    
-//    vector< pair<int32_t, uint16_t> > coverMarks = getCoverageMarks( drxn );
-//    
-//    if ( coverMarks.size() < 2 || params.cover * 2 < coverMarks[0].second )
-//    {
-//        setCoverage();
-//        return;
-//    }
-//    
-//    uint16_t baseCover = max( uint16_t(params.cover * 0.9), coverMarks[0].second );
-//    
-//    int i = 1;
-//    while ( i < coverMarks.size() && coverMarks[i].second < baseCover * 1.2 )
-//    {
-//        baseCover = coverMarks[i].second < baseCover 
-//                ? max( uint16_t(params.cover * 0.9), coverMarks[i].second ) 
-//                : baseCover;
-//        i++;
-//    }
-//    
-//    if ( i != coverMarks.size() )
-//    {
-//        int32_t splitMark = findNextRead( coverMarks[i-1].first, drxn );
-//        if ( splitMark != ends_[drxn] )
-//        {
-//            if ( abs( splitMark - ends_[drxn] ) < params.readLen )
-//            {
-//                assert( false );
-//            }
-//            splitNode( splitMark, ( isIsland ? ev.island : ev.nodes ), subGraph, drxn );
-//            if ( edges_[drxn].size() == 1 )
-//            {
-//                edges_[drxn][0].node->setCoverage( ev, subGraph, drxn, isIsland );
-//            }
-//        }
-//    }
-//    
-//    setCoverage();
-//}
 
 void Node::setReliability()
 {

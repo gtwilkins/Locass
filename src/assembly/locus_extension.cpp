@@ -92,7 +92,7 @@ void Locus::advanceEndScoreNext( Node* node, ScoreMap &scores, ScoreList &nxtSco
     for ( Edge &edge : node->edges_[drxn] )
     {
         Score thisScore;
-        thisScore[0] += float( 10 * ( params.readLen - edge.overlap ) ) / float( params.readLen );
+        thisScore[0] += float( 10 * ( params.readLen - edge.ol ) ) / float( params.readLen );
         NodeSet nxtFwdSet = { edge.node };
         edge.node->getDrxnNodes( nxtFwdSet, drxn );
         bool doesContinue = false;

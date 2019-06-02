@@ -609,10 +609,10 @@ bool SeqPathMerge::doMerge( PathVars &pv, NodeSet &delSet, bool drxn )
                 for ( Edge &e : mergeNodes[!drxn]->edges_[!drxn] )
                 {
                     if ( find( nodes.begin(), nodes.end(), e.node ) == nodes.end() ) continue;
-                    if ( e.overlap > diff );
+                    if ( e.ol > diff );
                     mergeNodes[!drxn] = e.node;
                     splitCoords[!drxn] = e.node->ends_[drxn];
-                    ol -= ( diff - e.overlap );
+                    ol -= ( diff - e.ol );
                     didFind = true;
                 }
                 if ( !didFind ) return false;
@@ -646,7 +646,7 @@ bool SeqPathMerge::doMerge( PathVars &pv, NodeSet &delSet, bool drxn )
             bool didMerge = false;
             for ( Edge &e : mergeNodes[drxn]->edges_[drxn] )
             {
-                int diff = endDist - e.overlap;
+                int diff = endDist - e.ol;
                 if ( diff < 0 ) continue;
                 mergeNodes[!drxn]->addEdge( e.node, ol - diff, drxn );
                 didMerge = true;

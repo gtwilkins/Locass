@@ -37,44 +37,55 @@ SRCS =  \
 	locus_export.cpp \
 	locus_pathing_structs.cpp \
 	locus_fill.cpp \
-	node.cpp \
-	node_looping.cpp \
-	node_filling.cpp \
-	node_folding.cpp \
-	node_validation.cpp \
-	node_export.cpp \
-	node_structs.cpp \
-	node_completion.cpp \
-	node_slicing.cpp \
-	node_groupings.cpp \
-	node_bridging.cpp \
-	node_reliability.cpp \
-	node_seed.cpp \
-	node_cloning.cpp \
-	node_pairing.cpp \
-	node_islands.cpp \
-	node_pathing.cpp \
-	node_extension.cpp \
-	node_navigation.cpp \
-	node_reads.cpp \
-	node_coverage.cpp \
-	node_calibration.cpp \
-	node_furthest.cpp \
 	locus.cpp \
 	locus_pathing.cpp \
 	locus_extension.cpp \
 	locus_calibration.cpp \
 	locus_leaping.cpp \
+	node.cpp \
+	node_bridging.cpp \
+	node_calibration.cpp \
+	node_claim.cpp \
+	node_completion.cpp \
+	node_coverage.cpp \
+	node_cloning.cpp \
+	node_export.cpp \
+	node_extension.cpp \
+	node_filling.cpp \
+	node_folding.cpp \
+	node_furthest.cpp \
+	node_groupings.cpp \
+	node_groups.cpp \
+	node_islands.cpp \
+	node_leaping.cpp \
+	node_limits.cpp \
+	node_looping.cpp \
+	node_navigation.cpp \
+	node_pairing.cpp \
+	node_pairs.cpp \
+	node_path.cpp \
+	node_pathing.cpp \
+	node_pruning.cpp \
+	node_reads.cpp \
+	node_reliability.cpp \
+	node_seed.cpp \
+	node_slicing.cpp \
+	node_structs.cpp \
+	node_validation.cpp \
+	node_verify.cpp \
 	path_merge.cpp \
 	path_reassembly.cpp \
 	path_review.cpp \
 	path_seed.cpp \
 	path_sequence.cpp \
-	query_state.cpp \
+	query.cpp \
 	query_binary.cpp \
 	query_extension.cpp \
-	query.cpp \
-	query_structs.cpp
+	query_graph.cpp \
+	query_junction.cpp \
+	query_state.cpp \
+	query_structs.cpp \
+	seed_fork.cpp
 
 
 # C++ compiler

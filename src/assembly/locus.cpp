@@ -703,9 +703,9 @@ int Locus::getWeakestEdge( Node* begin, Node* end, NodeSet &fwdSet, bool drxn )
         int thisBest = 0;
         for ( Edge &edge : thisNode->edges_[!drxn] )
         {
-            if ( edge.overlap > thisBest && ( edge.node == begin || fwdSet.find( edge.node ) != fwdSet.end() ) )
+            if ( edge.ol > thisBest && ( edge.node == begin || fwdSet.find( edge.node ) != fwdSet.end() ) )
             {
-                thisBest = edge.overlap;
+                thisBest = edge.ol;
                 nextNode = edge.node;
             }
         }

@@ -18,47 +18,47 @@
 #include "node.h"
 
 
-struct SeedBranch
-{
-    SeedBranch( Edge &e, NodeList &tNodes, NodeSet &shared, bool drxn );
-    bool operator>( SeedBranch &rhs );
-    Node* n;
-    int ol, score[2], reads;
-};
+//struct SeedBranch
+//{
+//    SeedBranch( Edge &e, NodeList &tNodes, NodeSet &shared, bool drxn );
+//    bool operator>( SeedBranch &rhs );
+//    Node* n;
+//    int ol, score[2], reads;
+//};
 
-struct SeedPath
-{
-    SeedPath( Node* node, NodeSet &usedSet, bool drxn );
-    
-    NodeList getTargets( bool drxn );
-    static NodeSet getUsed( vector<SeedPath> &paths, bool drxn );
-    static bool resolve( vector<SeedPath> &paths, NodeSet &altFwd, NodeSet &usedSet, int i, bool drxn );
-    void setBranches( Node* node, NodeSet &altFwd, NodeSet &usedSet, NodeList &tNodes, bool drxn );
-    bool setLoop( Node* node, NodeList &tNodes, bool drxn );
-    bool setNext( NodeSet &altFwd, NodeSet &usedSet, NodeSet &bckSet, NodeList &tNodes, bool drxn );
-    
-    
-    NodeList path, branches;
-    NodeSetList branchFwd;
-    NodeListList alts;
-    NodeSet starts, shared;
-    bool ended, doBranch;
-};
+//struct SeedPath
+//{
+//    SeedPath( Node* node, NodeSet &usedSet, bool drxn );
+//    
+//    NodeList getTargets( bool drxn );
+//    static NodeSet getUsed( vector<SeedPath> &paths, bool drxn );
+//    static bool resolve( vector<SeedPath> &paths, NodeSet &altFwd, NodeSet &usedSet, int i, bool drxn );
+//    void setBranches( Node* node, NodeSet &altFwd, NodeSet &usedSet, NodeList &tNodes, bool drxn );
+//    bool setLoop( Node* node, NodeList &tNodes, bool drxn );
+//    bool setNext( NodeSet &altFwd, NodeSet &usedSet, NodeSet &bckSet, NodeList &tNodes, bool drxn );
+//    
+//    
+//    NodeList path, branches;
+//    NodeSetList branchFwd;
+//    NodeListList alts;
+//    NodeSet starts, shared;
+//    bool ended, doBranch;
+//};
 
-class PathSeed
-{
-public:
-    PathSeed( NodeList &nodes );
-    void exportAlign( ofstream &fp );
-    void plot( bool drxn );
-    
-private:
-    void setEnds();
-    
-    vector<SeedPath> paths_;
-    NodeList &nodes_, ends_[2];
-    NodeSet usedSet_;
-};
+//class PathSeed
+//{
+//public:
+//    PathSeed( NodeList &nodes );
+//    void exportAlign( ofstream &fp );
+//    void plot( bool drxn );
+//    
+//private:
+//    void setEnds();
+//    
+//    vector<SeedPath> paths_;
+//    NodeList &nodes_, ends_[2];
+//    NodeSet usedSet_;
+//};
 
 
 

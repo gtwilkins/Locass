@@ -18,18 +18,6 @@
 #include "types.h"
 #include "query_binary.h"
 
-struct CorrectExt
-{
-    CorrectExt( string &seq, int len, bool drxn );
-    bool add( string &seq, bool drxn, bool doAdd=true );
-//    static vector<CorrectExt> get( vector<Overlap> ols, int len, bool drxn );
-    static vector<string> get( vector<Overlap> ols, int len, bool drxn );
-    
-    string ext;
-    int maxLen;
-    vector<int> lens;
-};
-
 struct CorrectAlign
 {
     CorrectAlign( string &t, string &q );
@@ -52,13 +40,14 @@ struct CorrectAlign
 struct CorrectBranch
 {
     CorrectBranch( uint8_t i, int it, CharId rank, CharId count );
-    void collect( vector<uint8_t> &ols, vector<CharId> &ranks, vector<CharId> &counts );
-    bool beats( CorrectBranch &rhs, int len );
-    int getNovel();
-    bool steal( vector<uint8_t> &ols, vector<CharId> &ranks, vector<CharId> &counts, int len );
-    string yield( bool drxn );
-    static vector<string> yield( vector<CorrectBranch> &cbs, bool drxn );
+    void align( string seq, int len, bool drxn );
+    void contend( CorrectAlign*& full, CorrectAlign*& part, int partLen, int imperf );
+    void correct( CorrectAlign*& full, CorrectAlign*& part, bool &bad, int maxMiss );
+    bool proceed( IndexReader* ir, int limit );
+    void query( IndexReader* ir, int limit );
+    
     vector<CorrectBranch> branches;
+    vector<CorrectAlign> aligns;
     vector<uint8_t> q, endOverlaps;
     vector<CharId> endRanks, endCounts;
     CharId rank, count;
@@ -68,27 +57,24 @@ struct CorrectBranch
 class CorrectQuery
 {
 public:
-    CorrectQuery( IndexReader* ir, string &seq, int qLen, bool retract );
-    CorrectQuery( IndexReader* ir, string &seq, bool drxn );
-    CorrectQuery( IndexReader* ir, vector<uint8_t> &q, vector<CorrectBranch> &branches, int seqLen );
-    
-//    void correct( QueryBinaries* qb, string &seq, bool drxn );
-    int correct( QueryBinaries* qb, string &seq, bool &trimmed );
-    int correct( string &seq, vector<string> &seqs, bool &trimmed );
-    int trim( QueryBinaries* qb, string &seq, bool &trimmed );
-    int trim( QueryBinaries* qb, string &seq, vector<string> &seqs, bool &trimmed );
+    CorrectQuery( IndexReader* ir, string &seq, int &len, bool &trimmed, bool dummy );
+    CorrectQuery( IndexReader* ir, string &seq, vector<string> &seqs, vector<CorrectBranch> &branches, int &len, bool &trimmed );
+    CorrectQuery( IndexReader* ir, string &seq, vector<string> &seqs, int &len, bool &trimmed );
     
 private:
-    int correct( vector<CorrectAlign> &cas, string &seq, int maxMiss, bool partial, bool drxn );
+    int correct( IndexReader* ir, string &seq, bool drxn );
+    int correct( IndexReader* ir, string &seq, vector<string> &seqs );
+    int correct( string &seq, bool drxn );
+    bool proceed( IndexReader* ir );
+    ReadId query( IndexReader* ir, uint8_t i, int it, CharId rank, CharId count );
     void query( uint8_t i, int it, CharId rank, CharId count );
-    void query( CorrectBranch &cb, uint8_t i, int it );
+    bool setQuery( string &seq, bool drxn );
     
-    IndexReader* ir_;
     vector<CorrectBranch> branches_;
     vector<uint8_t> q_, endOverlaps_;
     vector<CharId> endRanks_, endCounts_;
-    int base_, qLen_, seqLen_;
-    bool collect_, trim_;
+    int base_, qLen_, seqLen_, coords_[2];
+    bool collect_, trim_, initial_;
 };
 
 

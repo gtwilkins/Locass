@@ -35,7 +35,7 @@ public:
     
     void coverage();
     void pairing();
-    void write( Filenames* fns );
+    static void write( Filenames* fns );
     
     vector<string> seqs_;
     NodeListList nodes_;

@@ -31,7 +31,8 @@ public:
     
 private:
     void readIn( ifstream &fh, vector<string> &headers, vector<string> &seqs );
-    void printUsage();
+    void printUsage( string msg );
+    void printUsage( bool failed=false );
 };
 
 #endif /* ASSEMBLE_H */

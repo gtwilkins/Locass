@@ -22,6 +22,104 @@
 #include <algorithm>
 #include "shared_functions.h"
 
+void Node::addSeed( NodeRoll& nodes, ReadStruct& read )
+{
+    // Redundant read, no need to append
+    bool added = false;
+    for ( Node* node : nodes.nodes ) if ( node->addSeed( read ) ) added = true;
+    if ( added ) return;
+    
+    // Check posssible overlaps and splits
+    NodeIntList ols;
+    NodeIntIntList splits;
+    int nodeCount = nodes.size();
+    for ( int i = 0; i < nodeCount; i++ ) nodes[i]->addSeed( read, nodes, ols, splits );
+    
+    // Remove unfavourable overlaps and splits
+    NodeSet fwdSet;
+    for ( int i = 0; i < ols.size(); i++ ) ols[i].first->getDrxnNodes( 0 );
+    for ( int i = 0; i < splits.size(); i++ ) get<0>( splits[i] )->getDrxnNodes( 0 );
+    for ( int i = 0; i < ols.size(); i++ ) if ( fwdSet.find( ols[i].first ) != fwdSet.end() ) ols.erase( ols.begin() + i-- );
+    for ( int i = 0; i < splits.size(); i++ ) if ( fwdSet.find( get<0>( splits[i] ) ) != fwdSet.end() ) splits.erase( splits.begin() + i-- );
+    
+    int32_t maxOl = 0;
+    for ( int i = 0; i < ols.size(); i++ ) maxOl = max( maxOl, ols[i].second );
+    for ( int i = 0; i < splits.size(); i++ ) maxOl = max( maxOl, get<1>( splits[i] ) );
+    for ( int i = 0; i < ols.size(); i++ ) if ( ols[i].second < min( maxOl, ols[i].first->getBestOverlap( 1 ) ) ) ols.erase( ols.begin() + i-- );
+    
+    // Do splits
+    for ( int i = 0; i < splits.size(); i++ )
+    {
+        if ( get<1>( splits[i] ) < maxOl ) continue;
+        get<0>( splits[i] )->splitNode( get<2>( splits[i] ), nodes, 1 );
+        ols.push_back( make_pair( get<0>( splits[i] ), get<1>( splits[i] ) ) );
+    }
+    
+    if ( ols.size() == 1 && ols[0].first->edges_[1].empty() )
+    {
+        ols[0].first->addSeed( read, ols[0].second );
+        return;
+    }
+    
+    Node* node = new Node( read );
+    nodes += node;
+    
+    for ( int i = 0; i < ols.size(); i++ ) node->addEdge( ols[i].first, ols[i].second, 0 );
+}
+
+bool Node::addSeed( ReadStruct &read )
+{
+    size_t it = seq_.find( read.seq );
+    if ( it == string::npos ) return false;
+    
+    int coords[2]{ int( ends_[0]+it ), int( ends_[0]+it+read.seq.size() ) };
+    add( read.readId, coords[0], coords[1], isRedundant( coords[0], coords[1] ) );
+    readTest();
+    ends_.init( read.tether[0], 0 );
+    ends_.init( read.tether[1], 1 );
+    
+    return true;
+}
+
+void Node::addSeed( ReadStruct &read, int ol )
+{
+    int coords[2]{ ends_[1] - ol, int( ends_[1] - ol + read.seq.size() ) };
+    string seq = read.seq.substr( ol );
+    appendSeq( seq, 1 );
+    add( read.readId, coords[0], coords[1], false );
+    readTest();
+    ends_.init( read.tether[0], 0 );
+    ends_.init( read.tether[1], 1 );
+    setOrigin();
+}
+
+void Node::addSeed( ReadStruct& read, NodeRoll& nodes, NodeIntList& ols, NodeIntIntList& splits )
+{
+    if ( int ol = mapSeqOverlap( seq_, read.seq, params.readLen / 2 ) )
+    {
+        ols.push_back( make_pair( this, ol ) );
+        return;
+    }
+    
+    int32_t coords[2], splitCoords[2];
+    if ( !mapSeqEnd( read.seq, seq_, params.readLen / 2, coords, 0 ) ) return;
+    coords[0] += ends_[0];
+    coords[1] += ends_[0];
+    if ( !getSplitCoords( splitCoords, coords[1], 0 ) ) return;
+    coords[1] = splitCoords[0];
+    
+    if ( coords[1] - coords[0] > splitCoords[0] - splitCoords[1] )
+    {
+        Node* node = splitNode( splitCoords[1], nodes, 1 );
+        node->drxn_ = 2;
+        ols.push_back( make_pair( this, coords[1] - coords[0] ) );
+        assert( false );
+        return;
+    }
+    
+    splits.push_back( make_tuple( this, coords[1] - coords[0], splitCoords[1] ) );
+}
+
 void Node::printSeed( Querier &bwt, NodeSet nodes[2] )
 {
     struct BadPair
@@ -178,51 +276,51 @@ void Node::printSeed( Querier &bwt, NodeSet nodes[2] )
     }
 }
 
-bool Node::fixSeed( IslandVars &iv, bool drxn )
-{
-    vector<GoodPair> gps, ggps;
-    vector<BadPair> bps;
-    fixSeedGetPairs( iv.ev.bwt, gps, bps, drxn );
-    
-    for ( int i = ends_[0] + 100; i < ends_[1]; i+=100 )
-    {
-        vector<int> dists[2];
-        for ( GoodPair &gp : gps )
-        {
-            if ( gp.coords[0] < i && i < gp.coords[1] ) dists[!gp.isPe].push_back( gp.coords[1] - gp.coords[0] );
-        }
-        int medianDist[2]{0};
-        for ( int j : { 0, 1 } )
-        {
-            sort( dists[j].begin(), dists[j].end() );
-            if ( dists[j].empty() ) continue;
-            medianDist[j] = dists[j][dists[j].size() / 2];
-        }
-        cout << "Coord " << i 
-                << "| PE Count " << dists[0].size() << ", Median " << medianDist[0] 
-                << "| MP Count " << dists[1].size() << ", Median " << medianDist[1] << endl;
-    }
-    
-    for ( GoodPair &gp : gps )
-    {
-        int diff = gp.coords[1] - gp.coords[0];
-        if ( diff < 0 ) continue;
-        if ( gp.isPe && abs( diff - params.maxPeMean ) > 200 ) continue;
-        if ( !gp.isPe && diff - params.maxMpMean > 1000 ) continue;
-        ggps.push_back( gp );
-    }
-    
-    vector<PairPath> paths = fixSeedGraphPairs( bps, drxn );
-    
-    if ( paths.empty() ) return false;
-    
-    NodeList nodes = { this };
-    for ( Node* fwd : getDrxnNodes( !drxn ) ) nodes.push_back( fwd );
-    
-    if ( fixSeedGetNodes( iv, paths, drxn ) ) return true;
-    
-    return fixSeedSetEdge( iv, ggps, drxn );
-}
+//bool Node::fixSeed( IslandVars &iv, bool drxn )
+//{
+//    vector<GoodPair> gps, ggps;
+//    vector<BadPair> bps;
+//    fixSeedGetPairs( iv.ev.bwt, gps, bps, drxn );
+//    
+//    for ( int i = ends_[0] + 100; i < ends_[1]; i+=100 )
+//    {
+//        vector<int> dists[2];
+//        for ( GoodPair &gp : gps )
+//        {
+//            if ( gp.coords[0] < i && i < gp.coords[1] ) dists[!gp.isPe].push_back( gp.coords[1] - gp.coords[0] );
+//        }
+//        int medianDist[2]{0};
+//        for ( int j : { 0, 1 } )
+//        {
+//            sort( dists[j].begin(), dists[j].end() );
+//            if ( dists[j].empty() ) continue;
+//            medianDist[j] = dists[j][dists[j].size() / 2];
+//        }
+//        cout << "Coord " << i 
+//                << "| PE Count " << dists[0].size() << ", Median " << medianDist[0] 
+//                << "| MP Count " << dists[1].size() << ", Median " << medianDist[1] << endl;
+//    }
+//    
+//    for ( GoodPair &gp : gps )
+//    {
+//        int diff = gp.coords[1] - gp.coords[0];
+//        if ( diff < 0 ) continue;
+//        if ( gp.isPe && abs( diff - params.maxPeMean ) > 200 ) continue;
+//        if ( !gp.isPe && diff - params.maxMpMean > 1000 ) continue;
+//        ggps.push_back( gp );
+//    }
+//    
+//    vector<PairPath> paths = fixSeedGraphPairs( bps, drxn );
+//    
+//    if ( paths.empty() ) return false;
+//    
+//    NodeList nodes = { this };
+//    for ( Node* fwd : getDrxnNodes( !drxn ) ) nodes.push_back( fwd );
+//    
+//    if ( fixSeedGetNodes( iv, paths, drxn ) ) return true;
+//    
+//    return fixSeedSetEdge( iv, ggps, drxn );
+//}
 
 bool Node::fixSeedGetNodes( IslandVars &iv, vector<PairPath> &paths, bool drxn )
 {
@@ -913,188 +1011,206 @@ bool Node::plotSeed( IslandVars &iv, NodeSet &delSet, bool drxn, bool finished )
     return false;
 }
 
-void Node::plotSeed( NodeList &ends, bool drxn )
+//void Node::plotSeed( NodeList &ends, bool drxn )
+//{
+//    struct SeedBranch
+//    {
+//        SeedBranch( Edge &e, NodeList &tNodes, NodeSet &shared, bool drxn )
+//        : n( e.node ), ol( e.ol )
+//        {
+//            score[0] = score[1] = reads = 0;
+//            for ( Node* fwd : e.node->getDrxnNodes( drxn, false, true ) )
+//            {
+//                reads += fwd->reads_.size();
+//                for ( ReadMark &mark : fwd->marks_[drxn] )
+//                {
+//                    for ( Node* t : tNodes )
+//                    {
+//                        if ( t->reads_.find( mark.id ) == t->reads_.end() ) continue;
+//                        score[ shared.find( t ) != shared.end() ]++;
+//                    }
+//                }
+//            }
+//        }
+//        bool operator>( SeedBranch &rhs )
+//        {
+//            if ( score[0] > rhs.score[0] ) return true;
+//            else if ( score[0] < rhs.score[1] ) return false;
+//            else if ( score[1] > rhs.score[1] ) return true;
+//            else if ( score[1] < rhs.score[1] ) return false;
+//            else if ( ol > rhs.ol ) return true;
+//            else if ( ol < rhs.ol ) return false;
+//            else if ( reads < rhs.reads ) return false;
+//            return true;
+//        }
+//        Node* n;
+//        int ol, score[2], reads;
+//    };
+//    struct SeedPath
+//    {
+//        SeedPath( Node* node, bool drxn )
+//        : ended( false )
+//        {
+//            path.push_back( node );
+//        }
+//        NodeList path;
+//        NodeListList alts, starts;
+//        NodeSet shared;
+//        bool ended;
+//    };
+//    vector<SeedPath> paths;
+//    for ( Node* node : ends ) paths.push_back( SeedPath( node, drxn ) );
+//    
+//    bool complete = false;
+//    while ( !complete )
+//    {
+//        complete = true;
+//        for ( SeedPath &path : paths )
+//        {
+//            if ( path.ended ) continue;
+//            complete = false;
+//            NodeSet altFwd;
+//            for ( SeedPath &altPath : paths )
+//            {
+//                if ( &path == &altPath ) continue;
+//                altFwd.insert( altPath.path.back() );
+//                altPath.path.back()->getDrxnNodes( altFwd, drxn );
+//            }
+//            NodeList tNodes( path.path.begin(), path.path.end() );
+//            NodeList branches;
+//            NodeSetList branchFwd;
+//            while ( !path.ended && altFwd.find( path.path.back() ) == altFwd.end() )
+//            {
+//                vector<SeedBranch*> edges;
+//                SeedBranch* edge = NULL;
+//                for ( Edge &e : path.path.back()->edges_[drxn] )
+//                {
+//                    SeedBranch* branch = new SeedBranch( e, tNodes, path.shared, drxn );
+//                    edges.push_back( branch );
+//                    if ( !edge || *branch > *edge ) edge = branch;
+//                }
+//                if ( !edge ) path.ended = true;
+//                else
+//                {
+//                    for ( int i = 0; i < branches.size(); )
+//                    {
+//                        if ( branches[i] == edge->n )
+//                        {
+//                            branches.erase( branches.begin() + i );
+//                            branchFwd.erase( branchFwd.begin() + i );
+//                        }
+//                        else if ( branchFwd[i].find( edge->n ) != branchFwd[i].end() )
+//                        {
+//                            NodeSet pathSet = edge->n->getDrxnNodesInSet( branchFwd[i], !drxn, true );
+//                            NodeList allele;
+//                            Node* curr = branches[i];
+//                            while ( curr && altFwd.find( curr ) == altFwd.end() )
+//                            {
+//                                allele.push_back( curr );
+//                                SeedBranch* branch = NULL;
+//                                for ( Edge &e : curr->edges_[drxn] )
+//                                {
+//                                    if ( pathSet.find( e.node ) == pathSet.end() || altFwd.find( curr ) != altFwd.end() ) continue;
+//                                    SeedBranch* edgeBranch = new SeedBranch( e, tNodes, path.shared, drxn );
+//                                    if ( !branch || *edgeBranch > *branch )
+//                                    {
+//                                        if ( branch ) delete branch;
+//                                        branch = edgeBranch;
+//                                    }
+//                                    else delete edgeBranch;
+//                                }
+//                                curr = NULL;
+//                                if ( branch )
+//                                {
+//                                    curr = branch->n;
+//                                    delete branch;
+//                                }
+//                            }
+//                            for ( Node* node : allele )
+//                            {
+//                                if ( find( tNodes.begin(), tNodes.end(), node ) == tNodes.end() ) tNodes.push_back( node );
+//                            }
+//                            path.alts.push_back( allele );
+//                            branches.erase( branches.begin() + i );
+//                            branchFwd.erase( branchFwd.begin() + i );
+//                        }
+//                        else i++;
+//                    
+//                    }
+//                    path.path.push_back( edge->n );
+//                    bool looped = false;
+//                    for ( int i = 0; i < path.path.size()-1; i++ )
+//                    {
+//                        if ( path.path[i] != edge->n ) continue;
+//                        looped = true;
+//                        SeedBranch* branch = NULL;
+//                        NodeList branchPath;
+//                        for ( int j = i; j < path.path.size()-1; j++ )
+//                        {
+//                            for ( Edge &e: path.path[j]->edges_[drxn] )
+//                            {
+//                                for ( int k = 0; k < branches.size(); )
+//                                {
+//                                    if ( e.node == branches[k] )
+//                                    {
+//                                        branches.erase( branches.begin() + k );
+//                                        branchFwd.erase( branchFwd.begin() + k );
+//                                    }
+//                                    else k++;
+//                                }
+//                                if ( find( tNodes.begin(), tNodes.end(), e.node ) != tNodes.end() ) continue;
+//                                SeedBranch* edgeBranch = new SeedBranch( e, tNodes, path.shared, drxn );
+//                                if ( !branch || *edgeBranch > *branch )
+//                                {
+//                                    if ( branch ) delete branch;
+//                                    branch = edgeBranch;
+//                                    branchPath = { path.path.begin() + i, path.path.begin() + j };
+//                                    branchPath.push_back( branch->n );
+//                                }
+//                                else delete edgeBranch;
+//                            }
+//                        }
+//                        if ( branch )
+//                        {
+//                            path.path.insert( path.path.end(), branchPath.begin(), branchPath.end() );
+//                            delete branch;
+//                        }
+//                        else path.ended = true;
+//                        break;
+//                    }
+//                    if ( find( tNodes.begin(), tNodes.end(), edge->n ) == tNodes.end() ) tNodes.push_back( edge->n );
+//                    for ( SeedBranch* e : edges )
+//                    {
+//                        if ( !looped && e != edge && altFwd.find( e->n ) == altFwd.end() )
+//                        {
+//                            branches.push_back( e->n );
+//                            branchFwd.push_back( e->n->getDrxnNodes( drxn, false, true ) );
+//                        }
+//                        delete e;
+//                    }
+//                }
+//            }
+//            
+//        }
+//    }
+//}
+
+void Node::reviewSeed( Querier &bwt, NodeRoll &nodes )
 {
-    struct SeedBranch
-    {
-        SeedBranch( Edge &e, NodeList &tNodes, NodeSet &shared, bool drxn )
-        : n( e.node ), ol( e.overlap )
-        {
-            score[0] = score[1] = reads = 0;
-            for ( Node* fwd : e.node->getDrxnNodes( drxn, false, true ) )
-            {
-                reads += fwd->reads_.size();
-                for ( ReadMark &mark : fwd->marks_[drxn] )
-                {
-                    for ( Node* t : tNodes )
-                    {
-                        if ( t->reads_.find( mark.id ) == t->reads_.end() ) continue;
-                        score[ shared.find( t ) != shared.end() ]++;
-                    }
-                }
-            }
-        }
-        bool operator>( SeedBranch &rhs )
-        {
-            if ( score[0] > rhs.score[0] ) return true;
-            else if ( score[0] < rhs.score[1] ) return false;
-            else if ( score[1] > rhs.score[1] ) return true;
-            else if ( score[1] < rhs.score[1] ) return false;
-            else if ( ol > rhs.ol ) return true;
-            else if ( ol < rhs.ol ) return false;
-            else if ( reads < rhs.reads ) return false;
-            return true;
-        }
-        Node* n;
-        int ol, score[2], reads;
-    };
-    struct SeedPath
-    {
-        SeedPath( Node* node, bool drxn )
-        : ended( false )
-        {
-            path.push_back( node );
-        }
-        NodeList path;
-        NodeListList alts, starts;
-        NodeSet shared;
-        bool ended;
-    };
-    vector<SeedPath> paths;
-    for ( Node* node : ends ) paths.push_back( SeedPath( node, drxn ) );
-    
-    bool complete = false;
-    while ( !complete )
-    {
-        complete = true;
-        for ( SeedPath &path : paths )
-        {
-            if ( path.ended ) continue;
-            complete = false;
-            NodeSet altFwd;
-            for ( SeedPath &altPath : paths )
-            {
-                if ( &path == &altPath ) continue;
-                altFwd.insert( altPath.path.back() );
-                altPath.path.back()->getDrxnNodes( altFwd, drxn );
-            }
-            NodeList tNodes( path.path.begin(), path.path.end() );
-            NodeList branches;
-            NodeSetList branchFwd;
-            while ( !path.ended && altFwd.find( path.path.back() ) == altFwd.end() )
-            {
-                vector<SeedBranch*> edges;
-                SeedBranch* edge = NULL;
-                for ( Edge &e : path.path.back()->edges_[drxn] )
-                {
-                    SeedBranch* branch = new SeedBranch( e, tNodes, path.shared, drxn );
-                    edges.push_back( branch );
-                    if ( !edge || *branch > *edge ) edge = branch;
-                }
-                if ( !edge ) path.ended = true;
-                else
-                {
-                    for ( int i = 0; i < branches.size(); )
-                    {
-                        if ( branches[i] == edge->n )
-                        {
-                            branches.erase( branches.begin() + i );
-                            branchFwd.erase( branchFwd.begin() + i );
-                        }
-                        else if ( branchFwd[i].find( edge->n ) != branchFwd[i].end() )
-                        {
-                            NodeSet pathSet = edge->n->getDrxnNodesInSet( branchFwd[i], !drxn, true );
-                            NodeList allele;
-                            Node* curr = branches[i];
-                            while ( curr && altFwd.find( curr ) == altFwd.end() )
-                            {
-                                allele.push_back( curr );
-                                SeedBranch* branch = NULL;
-                                for ( Edge &e : curr->edges_[drxn] )
-                                {
-                                    if ( pathSet.find( e.node ) == pathSet.end() || altFwd.find( curr ) != altFwd.end() ) continue;
-                                    SeedBranch* edgeBranch = new SeedBranch( e, tNodes, path.shared, drxn );
-                                    if ( !branch || *edgeBranch > *branch )
-                                    {
-                                        if ( branch ) delete branch;
-                                        branch = edgeBranch;
-                                    }
-                                    else delete edgeBranch;
-                                }
-                                curr = NULL;
-                                if ( branch )
-                                {
-                                    curr = branch->n;
-                                    delete branch;
-                                }
-                            }
-                            for ( Node* node : allele )
-                            {
-                                if ( find( tNodes.begin(), tNodes.end(), node ) == tNodes.end() ) tNodes.push_back( node );
-                            }
-                            path.alts.push_back( allele );
-                            branches.erase( branches.begin() + i );
-                            branchFwd.erase( branchFwd.begin() + i );
-                        }
-                        else i++;
-                    
-                    }
-                    path.path.push_back( edge->n );
-                    bool looped = false;
-                    for ( int i = 0; i < path.path.size()-1; i++ )
-                    {
-                        if ( path.path[i] != edge->n ) continue;
-                        looped = true;
-                        SeedBranch* branch = NULL;
-                        NodeList branchPath;
-                        for ( int j = i; j < path.path.size()-1; j++ )
-                        {
-                            for ( Edge &e: path.path[j]->edges_[drxn] )
-                            {
-                                for ( int k = 0; k < branches.size(); )
-                                {
-                                    if ( e.node == branches[k] )
-                                    {
-                                        branches.erase( branches.begin() + k );
-                                        branchFwd.erase( branchFwd.begin() + k );
-                                    }
-                                    else k++;
-                                }
-                                if ( find( tNodes.begin(), tNodes.end(), e.node ) != tNodes.end() ) continue;
-                                SeedBranch* edgeBranch = new SeedBranch( e, tNodes, path.shared, drxn );
-                                if ( !branch || *edgeBranch > *branch )
-                                {
-                                    if ( branch ) delete branch;
-                                    branch = edgeBranch;
-                                    branchPath = { path.path.begin() + i, path.path.begin() + j };
-                                    branchPath.push_back( branch->n );
-                                }
-                                else delete edgeBranch;
-                            }
-                        }
-                        if ( branch )
-                        {
-                            path.path.insert( path.path.end(), branchPath.begin(), branchPath.end() );
-                            delete branch;
-                        }
-                        else path.ended = true;
-                        break;
-                    }
-                    if ( find( tNodes.begin(), tNodes.end(), edge->n ) == tNodes.end() ) tNodes.push_back( edge->n );
-                    for ( SeedBranch* e : edges )
-                    {
-                        if ( !looped && e != edge && altFwd.find( e->n ) == altFwd.end() )
-                        {
-                            branches.push_back( e->n );
-                            branchFwd.push_back( e->n->getDrxnNodes( drxn, false, true ) );
-                        }
-                        delete e;
-                    }
-                }
-            }
-            
-        }
-    }
+//    for ( int i = 0; i < nodes.size(); i++ ) if ( nodes[i]->pruneBad( bwt, nodes ) ) nodes.erase( nodes[i], i );
+//    Node::merge( nodes );
+//    nodes.test();
+//    Node::claimBads( nodes );
+//    Node::pruneBlunt( bwt, nodes );
+//    Node::merge( nodes );
+//    Node::pruneBlunt( bwt, nodes );
+//    Node::merge( nodes );
+//    Node::pruneEdges( bwt, nodes );
+//    Node::prune( bwt, nodes );
+//    Node::verify( nodes );
+//    nodes.test();
+//    Node::pruneLoops( bwt, nodes );
+//    assert( false );
 }
 
 void Node::seedAdd( ReadStruct &read )
@@ -1164,11 +1280,11 @@ bool Node::seedDiminutive()
             if ( nxt->edges_[!drxn].size() == 1 ) return false;
             for ( Edge &e : nxt->edges_[!drxn] )
             {
-                if ( e.overlap < params.readLen / 2 || e.overlap <= ols[drxn] ) continue;
+                if ( e.ol < params.readLen / 2 || e.ol <= ols[drxn] ) continue;
                 int eReadCount = 0;
                 for ( auto &read : e.node->reads_ ) if ( !read.second.redundant 
                         && read.second[1] - read.second[0] > params.readLen * 0.8 ) eReadCount++;
-                if ( e.overlap + e.node->getBestOverlap( !drxn ) > seq_.length() || eReadCount > 5 ) better = true;
+                if ( e.ol + e.node->getBestOverlap( !drxn ) > seq_.length() || eReadCount > 5 ) better = true;
             }
         }
         
@@ -1477,7 +1593,7 @@ void Node::seedLoop( bool drxn )
     for ( int i = 0; i < edges_[drxn].size(); )
     {
         if ( loopSet.find( edges_[drxn][i].node ) != loopSet.end()
-                && edges_[drxn][i].node->seedLoop( loopSet, usedSet, edges_[drxn][i].node->seq_.length() - edges_[drxn][i].overlap, params.maxPeMax, drxn ) )
+                && edges_[drxn][i].node->seedLoop( loopSet, usedSet, edges_[drxn][i].node->seq_.length() - edges_[drxn][i].ol, params.maxPeMax, drxn ) )
         {
             edges_[drxn][i].node->offsetNode( !drxn );
             edges_[drxn][i].node->removeEdge( this, 0 );
@@ -1497,7 +1613,7 @@ bool Node::seedLoop( NodeSet &loopSet, NodeSet &usedSet, int len, int limit, boo
     {
         if ( usedSet.find( e.node ) != usedSet.end() ) continue;
         if ( loopSet.find( e.node ) == loopSet.end() ) continue;
-        if ( e.node->seedLoop( loopSet, usedSet, len + e.node->seq_.length() - e.overlap, limit, drxn ) ) return true;
+        if ( e.node->seedLoop( loopSet, usedSet, len + e.node->seq_.length() - e.ol, limit, drxn ) ) return true;
     }
     return false;
 }
@@ -1525,7 +1641,7 @@ void Node::seedSetDrxnNodes( Node* fork, NodeList &nodes, bool drxn )
     
     for ( Edge &e : edges )
     {
-        addEdge( e.node, e.overlap, drxn );
+        addEdge( e.node, e.ol, drxn );
     }
 }
 
@@ -1604,7 +1720,7 @@ void Node::seedSplit( NodeList &nodes, int32_t coord )
     seq_.erase( seq_.begin() + ( ends_[1] - ends_[0] ), seq_.end() );
     for ( Edge &e : edges_[1] )
     {
-        node->addEdge( e.node, e.overlap, 1, false );
+        node->addEdge( e.node, e.ol, 1, false );
         e.node->removeEdge( this, 0 );
     }
     edges_[1].clear();
@@ -1632,6 +1748,7 @@ void Node::seedValidate( NodeSet &seedSet, NodeSet &delSet, int32_t* validLimits
             {
                 if ( curr->isDeadEnd( drxn ) && doDel )
                 {
+                    curr->drxn_ = drxn;
                     curr->dismantleNode( delSet, drxn );
                     seedSet.erase( curr );
                 }
@@ -1844,7 +1961,7 @@ void Node::seedValidate( NodeList &nodes, NodeSet &delSet, bool drxn )
         : n( e.node ), olPref( false ), hitPref( false ), altPref( false )
         {
             NodeList tNodes;
-            for ( Edge &re : n->edges_[!d] ) if ( re.overlap > e.overlap ) olPref = true;
+            for ( Edge &re : n->edges_[!d] ) if ( re.ol > e.ol ) olPref = true;
             for ( Node* bck : n->getDrxnNodes( !d ) ) tNodes.push_back( bck );
             for ( Node* fwd : n->getDrxnNodes( d, false, true ) )
             {
@@ -1953,7 +2070,7 @@ void Node::setIds( int &id, bool drxn )
     {
         if ( e.node->id2_ >= 0 ) continue;
         NodeSet nxtSet = e.node->getNextNodes( drxn );
-        int32_t off = ends_[drxn] - e.node->ends_[!drxn] + ( drxn ? -e.overlap : e.overlap );
+        int32_t off = ends_[drxn] - e.node->ends_[!drxn] + ( drxn ? -e.ol : e.ol );
         e.node->offset( off );
         e.node->id2_ = id++;
         for ( int j = i + 1; j < edges_[drxn].size(); j++ )
@@ -1964,11 +2081,49 @@ void Node::setIds( int &id, bool drxn )
                 if ( nxtSet.find( nxt ) == nxtSet.end() ) independent = true;
             }
             if ( independent ) continue;
-            off = ends_[drxn] - edges_[drxn][j].node->ends_[!drxn] + ( drxn ? -edges_[drxn][j].overlap : edges_[drxn][j].overlap ); 
+            off = ends_[drxn] - edges_[drxn][j].node->ends_[!drxn] + ( drxn ? -edges_[drxn][j].ol : edges_[drxn][j].ol ); 
             edges_[drxn][j].node->offset( off );
             edges_[drxn][j].node->id2_ = id++;
         }
         e.node->setIds( id, drxn );
         i++;
     }
+}
+
+void Node::trimSeed( Querier &bwt, NodeRoll &nodes )
+{
+    NodeList tests[2];
+    int goods[2]{0};
+    for ( Node* node : nodes.nodes )
+    {
+        int readCount = node->countReads( true );
+        for ( int i = 0; i < 2; i++ )
+        {
+            if ( !node->edges_[i].empty() ) continue;
+            if ( readCount > 2 ) goods[i]++;
+            else tests[i].push_back( node );
+        }
+        if ( node->edges_[0].empty() || node->edges_[1].empty() || readCount > 1 ) continue;
+        
+        // NYI: remove a weak and redundant node
+        NodeSet selfSet = { node }, lSet, rSet;
+        for ( Edge &e : node->edges_[0] ) e.node->getDrxnNodesNotInSet( lSet, selfSet, 1 );
+        for ( Edge &e : node->edges_[1] ) if ( lSet.find( e.node ) != lSet.end() ) assert( false );
+    }
+    
+    for ( int i = 0; i < 2; i++ )
+    {
+        for ( Node* node : tests[i] )
+        {
+            if ( !nodes.find( node ) || !node->edges_[i].empty() ) continue;
+            bool noMatches = false;
+            int minOl = max( 1 + params.readLen / 2, 10 + (int)node->seq_.size() - node->getBestOverlap( !i ) );
+            bwt.mapExtensions( noMatches, node->seq_, i, minOl );
+            if ( noMatches ) nodes.erase( node );
+            else assert( false );
+        }
+    }
+    
+    Node::merge( nodes );
+    for ( Node* node : nodes.nodes ) node->setOrigin();
 }

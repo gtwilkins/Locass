@@ -135,13 +135,12 @@ void LocalAlignment::realign( std::string &a, std::string &b, bool conform, bool
         std::string &x = ( a[0] == '-' ? a : b ), &y = ( a[0] == '-' ? b : a );
         int i = 0, len = 1;
         for ( ; len < x.size() && x[len] == '-'; len++ );
-        for ( ; i+len < x.size(); i++ )
+        for ( ; len && i+len < x.size(); i++ )
         {
             if ( x[i+len] != 'N' && y[i] != 'N' && x[i+len] != y[i] ) break;
             x[i] = x[i+len];
             if ( y[i+len] == '-' )
             {
-                assert( false );
                 x.erase( x.begin() + i+len );
                 y.erase( y.begin() + i+len-- );
             }

@@ -30,14 +30,14 @@ class Node;
 typedef std::vector<Node*> NodeList;
 typedef std::vector<NodeList> NodeListList;
 typedef std::unordered_set<Node*> NodeSet;
-typedef std::pair<Node*, Node*> NodePair;
-typedef std::vector<NodePair> NodePairList;
 typedef std::vector<NodeSet> NodeSetList;
 typedef std::unordered_map<Node*, NodeSet> NodeMap;
 typedef std::unordered_map<Node*, std::pair<int32_t, int32_t> > NodeOffsetMap;
 typedef std::unordered_map<Node*, int32_t> NodeIntMap;
 typedef std::unordered_map<Node*, float> NodeFloatMap;
-typedef std::vector< std::pair<Node*, int32_t> >  NodeIntList;
+typedef std::vector< std::pair<Node*, int32_t> > NodeIntList;
+typedef std::vector< std::tuple<Node*, int, int> > NodeIntIntList;
+typedef std::vector< std::tuple<Node*, int, int, int> > NodeIntIntIntList;
 typedef std::vector< std::pair<Node*, float> >  NodeFloatList;
 
 

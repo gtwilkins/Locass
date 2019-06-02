@@ -32,11 +32,12 @@ struct DeamplifyFiles
     void rewrite();
     void rewind();
     bool set( int j );
+//    void test( uint64_t testKmer );
     
     FILE* ifpSeq,* ifpStatus,* ifpEdit;
-    uint64_t kmersRead, kmersUnread, setPos[2];
+    uint64_t kmersRead, kmersUnread, setPos[2], lineLen;
     uint32_t curPair, maxPair, setPair[2];
-    uint8_t* bufStatus, bufSeq[1024], lens[2], mask[4], inTable[4][256], outTable[4][4], readLen, lineLen;
+    uint8_t* bufStatus, bufSeq[1024], lens[2], mask[4], inTable[4][256], outTable[4][4], readLen;
     int bufSize, p, i;
     bool doRewrite;
 };

@@ -25,15 +25,11 @@
 #include "shared/types.h"
 #include "commands/index.h"
 #include "shared/parameters.h"
-#include "index/index_reader.h"
-#include "query/query.h"
 #include "assembly/extend.h"
 #include "assembly/seed.h"
 #include "commands/calibrate.h"
 #include "commands/assemble.h"
 #include "commands/correct.h"
-#include "commands/damplify.h"
-#include "mask.h"
 
 Parameters params;
 
@@ -52,7 +48,7 @@ void printUsage()
 }
 
 int main( int argc, char** argv )
-{    
+{
     if ( argc > 1 )
     {
         if ( !strcmp( argv[1], "-h" ) || !strcmp( argv[1], "--help" ) || !strcmp( argv[1], "-help" ) )
@@ -71,22 +67,10 @@ int main( int argc, char** argv )
         {
             Assemble( argc, argv );
         }
-//        else if ( !strcmp( argv[1], "correct" ) )
-//        {
-//            Correct( argc, argv );
-//        }
-//        else if ( !strcmp( argv[1], "damplify" ) )
-//        {
-//            Damplify( argc, argv );
-//        }
-//        else if ( !strcmp( argv[1], "mask" ) )
-//        {
-//            Mask( argc, argv );
-//        }
-//        else if ( !strcmp( argv[1], "map" ) )
-//        {
-//            assert( false );
-//        }
+        else if ( !strcmp( argv[1], "correct" ) )
+        {
+            Correct( argc, argv );
+        }
         else
         {
             cerr << "Unrecognised command: \"" << argv[1] << "\"" << endl << endl;

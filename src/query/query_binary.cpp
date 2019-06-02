@@ -197,7 +197,6 @@ QueryBinaries::QueryBinaries( Filenames* fns )
 
 void QueryBinaries::decodeSequence( uint8_t* line, string &seq, uint8_t extLen, bool isRev, bool drxn )
 {
-    
     if ( isRev )
     {
         uint8_t i = drxn ? extLen : line[0];

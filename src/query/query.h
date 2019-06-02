@@ -27,6 +27,8 @@
 #include "query_binary.h"
 #include "query_state.h"
 #include "query_structs.h"
+#include "query_junction.h"
+#include "query_graph.h"
 
 class Querier {
 public:
@@ -35,12 +37,14 @@ public:
     
 //    vector<Overlap> getOverlaps( CorrectQuery &cq, bool drxn );
     string getSequence( ReadId id );
+    bool isExtendable( string& seq, bool drxn );
     ReadId isExtendable( string &seq, uint16_t minLen, bool drxn );
     CorrectionStruct mapCorrection( string seq, int len, bool drxn );
     vector<Extension> mapExtensions( bool &noMatches, string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, unordered_set<SeqNum> &seeds, uint16_t minOver=1 );
     vector<Overlap> mapJoin( string seq1, string seq2, uint8_t overLen );
+    QueryJunction mapJunction( string &seq, bool drxn );
     MappedSeqs mapSeed( string &seq, int errorRate, bool bestMatch );
     void mapSequence( string &seq, vector<ReadId> &ids, vector<int32_t>* coords );
    
@@ -60,10 +64,12 @@ private:
     bool mapSeed( QuerySeedState &qs, int errors, bool drxn );
     void setQuery( string &seq, uint8_t *query, int length, bool drxn );
     
-    IndexReader* reader_;
-    QueryBinaries* bin_;
+    IndexReader* ir_;
+    QueryBinaries* qb_;
     
     uint16_t minOver_, maxSeqs_, constCutoff_;
+    ReadId countLimits_[256];
+    int olLimits_[2];
     float expectedPer_;
 };
 

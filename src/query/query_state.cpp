@@ -24,6 +24,47 @@
 
 extern Parameters params;
 
+QState::QState( uint8_t i, CharId rank, CharId count, int ol, int gen, bool perfect )
+: ol( ol ), gen( gen ), rank( rank ), count( count ), perfect( perfect )
+{
+    q.push_back( i );
+}
+
+bool QState::advance( uint8_t i )
+{
+    if ( i > 3 || !counts[i] ) return false;
+    rank = ranks[i];
+    count = counts[i];
+    q.push_back( i );
+    ol++;
+    return true;
+}
+
+void QState::branch( int i, CharId minCount )
+{
+    count = 0;
+    for ( int j = 0; j < 4; j++ )
+    {
+        if ( counts[j] < minCount ) continue;
+        bool ePerfect = perfect && i==j;
+        edges.push_back( QState( j, ranks[j], counts[j], ol+1, gen + !ePerfect, ePerfect ) );
+    }
+}
+
+int QState::failure()
+{
+    if ( !ols.empty() && perfect ) return 0;
+    for ( QState& qs : edges ) if ( !qs.failure() ) return 0;
+    return edges.empty() && ols.empty() ? 1 : 3;
+}
+
+bool QState::record()
+{
+    if ( !counts.endCounts ) return false;
+    ols.push_back( QueryEnd( ranks.endCounts, counts.endCounts, ol ) );
+    return true;
+}
+
 int QueryState::setFirst()
 {
     int base = 0;

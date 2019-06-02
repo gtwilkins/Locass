@@ -46,17 +46,16 @@ private:
 //    bool splitJoin( string &seq1, string &seq2, string &phred1, string &phred2 );
 //    void trimEnd( string &seq, string &phred );
     
-    QueryBinaries* qb_;
     IndexReader* ir_;
     Deadapter* da_;
     Filenames* fns_;
     DeamplifyFiles* df_;
-    ofstream ofs_[2];
+    ofstream ofs_;
     uint8_t* used_;
     int64_t pairCount_, trimCount_, adpCount_, discardCount_;
     uint8_t readLen_;
     int32_t maxSeqMem_;
-    string ifn_, ofns_[6], fnBase_, fnSeqs_, joiner_, ender_;
+    string ifn_, ofns_[5], fnBase_, fnSeqs_, joiner_, ender_;
     ifstream ifsReads_;
     ofstream ofsIntervals_, ofsPairs_, ofsSingles_;
     uint64_t byteCount_, dontAddByte_;

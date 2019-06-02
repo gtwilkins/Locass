@@ -24,10 +24,7 @@
 
 void Node::addClone( Node* node, bool isFirst )
 {
-    if ( !clones_ )
-    {
-        clones_ = new NodeList;
-    }
+    if ( !clones_ ) clones_ = new NodeList;
     if ( isFirst )
     {
         node->addClone( this, false );

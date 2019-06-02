@@ -412,7 +412,7 @@ Node* Node::foldEndHit( ExtVars &ev, Node* hitNode, MapResult &result, bool drxn
     {
         for ( Edge &e : hitNode->edges_[drxn] )
         {
-            int overlap = result.len + e.overlap - abs( hitNode->ends_[drxn] - result.coords[drxn] );
+            int overlap = result.len + e.ol - abs( hitNode->ends_[drxn] - result.coords[drxn] );
             e.node->addEdge( this, overlap, !drxn, false, e.isLeap || result.len <= 0 );
         }
     }
@@ -947,11 +947,11 @@ void Node::getMapStructQuery( vector<MapStruct> &qStructs, MapStruct &qStruct, i
         for ( Edge &e : edges_[!drxn] )
         {
             MapStruct q = qStruct;
-            int seqLen = e.node->seq_.length() - e.overlap;
+            int seqLen = e.node->seq_.length() - e.ol;
             seqLen = min( params.readLen * 2 - q.len, seqLen );
             q.len += seqLen;
-            int32_t seqBgn = drxn ? e.node->seq_.length() - seqLen - e.overlap
-                                  : e.overlap;
+            int32_t seqBgn = drxn ? e.node->seq_.length() - seqLen - e.ol
+                                  : e.ol;
             string seq = e.node->seq_.substr( seqBgn, seqLen );
             q.seq = drxn ? seq + q.seq : q.seq + seq;
             q.nodes.push_back( e.node );
@@ -1058,7 +1058,7 @@ void Node::getMapStructTargetCheckPaths( NodeListList &targetPaths, int32_t* lim
                     if ( e.node == targetPaths[i][j-1] )
                     {
                         doSplit = doSplit || e.isLeap;
-                        overlap = e.overlap;
+                        overlap = e.ol;
                     }
                 }
                 
@@ -1121,7 +1121,7 @@ void Node::interEdge( ExtVars &ev, Node* node, bool drxn )
     {
         if ( nodeFwdSet.find( e.node ) == nodeFwdSet.end() )
         {
-            e.node->addEdge( node, e.overlap, drxn );
+            e.node->addEdge( node, e.ol, drxn );
         }
     }
     

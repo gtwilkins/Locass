@@ -67,10 +67,10 @@ void DeamplifyFiles::collate( FILE* ofpDump, string &fnKmers, uint64_t kmerSize,
         reset( 0 );
         while ( read( status, kmer ) )
         {
-            if ( curPair < setPair[1] ? status : status != 1 ) continue;
+            if ( curPair <= setPair[1] ? status : status != 1 ) continue;
             auto it = kmers->find( kmer );
             if ( it == kmers->end() ) continue;
-            if ( curPair >= setPair[1] ) edit( 2 );
+            if ( curPair > setPair[1] ) edit( 2 );
             uint64_t p = it->second * lineLen;
             memcpy( &test, &bufSeqs[p], 4 );
             assert( !test );
@@ -81,9 +81,6 @@ void DeamplifyFiles::collate( FILE* ofpDump, string &fnKmers, uint64_t kmerSize,
             added++;
         }
         
-        uint8_t blank[1024];
-        memcpy( &blank, bufSeqs, 1024 );
-        assert( blank[0] || blank[1] || blank[2] || blank[3] || blank[4] );
         fwrite( bufSeqs, 1, seqCount*lineLen, ofpDump );
         delete kmers;
         delete bufSeqs;
@@ -153,11 +150,15 @@ void DeamplifyFiles::overwrite( string (&lines)[2][4] )
 {
     uint8_t status;
     uint64_t kmer;
-    if ( !read( status, kmer ) ) return;
+    if ( !read( status, kmer ) || status ) return;
+    if ( lines[0][1].find( 'N' ) == string::npos && lines[1][1].find( 'N' ) == string::npos ) return;
     for ( int i = 0; i < 2; i++ )
     {
-        if ( lines[i][1].find( 'N' ) == string::npos || lens[i] != lines[i][1].size() ) continue;
-        for ( int j = 0; j < lines[i][1].size(); j++ ) lines[i][1][j] = intToChar[ bufSeq[ i ? j+lens[0] : j ] ];
+        for ( int j = 0; j < lines[i][1].size(); j++ )
+        {
+            lines[i][1][j] = intToChar[ bufSeq[ i ? j+lens[0] : j ] / 63 ];
+            lines[i][3][j] = ( bufSeq[ i ? j+lens[0] : j ] % 63 ) + 33;
+        }
     }
 }
 
@@ -233,3 +234,14 @@ bool DeamplifyFiles::set( int j )
     setPos[j] = ftell( ifpSeq );
     return true;
 }
+
+//void DeamplifyFiles::test( uint64_t testKmer )
+//{
+//    cout << maxPair << endl;
+//    uint8_t status;
+//    uint64_t kmer;
+//    while ( read( status, kmer ) )
+//    {
+//        if ( kmer == testKmer ) cout << ( curPair-1 ) << endl;
+//    }
+//}

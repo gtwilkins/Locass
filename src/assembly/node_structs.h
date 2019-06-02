@@ -25,16 +25,38 @@
 #include "parameters.h"
 #include "query.h"
 #include "node_types.h"
+#include "node_groups.h"
 
 class Node;
+
+struct NodeScores
+{
+    void add( Node* node, int drxn, bool inclNode );
+//    void add( Nodes& fwd, Nodes& bck, bool drxn );
+    void append( Node* node, int score );
+//    void add2( Node* node, bool inclNode=true );
+//    void add2( unordered_map<Node*, int> &pairs );
+//    void add2( const pair<Node*, int> score );
+//    void add2( Node* node, int score );
+    void clear();
+    void erase( Node* node );
+    int get( Node* node );
+    unordered_map<Node*, int> scores;
+};
+
+//struct NodeScoresUnique : public NodeScores
+//{
+//    void add( Node* node );
+//    unordered_set<Node*> added;
+//};
 
 struct Coords
 {
     Coords( int32_t start, int32_t end, bool isRedundant=false );
     void offset( int32_t offset );
     int32_t& operator[]( bool i );
-    int32_t coords[2];
-    bool redundant;
+    int32_t coords[3];
+    bool redundant, ignore;
 };
 typedef std::unordered_map<SeqNum, Coords> ReadCoords;
 
@@ -42,6 +64,15 @@ struct PairCoords
 {
     int& operator[](int i){ return coords[i]; };
     int32_t coords[4];
+};
+
+struct NodeMark
+{
+    NodeMark( ReadId id, int i, int j, Lib* lib, bool drxn );
+    void offset( int32_t off );
+    int32_t& operator[](int i){ return coords[i]; };
+    ReadId id;
+    int32_t coords[2], tar[2], dist;
 };
 
 struct Score
@@ -104,21 +135,14 @@ typedef std::unordered_map<Node*, CloneScore> CloneScoreMap;
 
 struct ReadMark
 {
-//    ReadMark();
-//    ReadMark( const SeqNum &readId ): readId( readId ){}
-    ReadMark( SeqNum &readId, Coords &coords, Lib* lib, bool drxn );
-//    ReadMark( SeqNum num, Coords &inCoords, Lib &lib, bool markerRev, bool drxn );
-//    void getPairCoords( UnpairedMap &pairs );
+    ReadMark( ReadId id, Coords &coords, Lib* lib, bool drxn );
     void getMissScore( float &missScore, int32_t* limits );
     bool isValid( Coords &coords );
     bool isValid( Coords &coords, pair<int32_t, int32_t> &markOffset, pair<int32_t, int32_t> &hitOffset, bool drxn );
     void offset( int32_t offset );
 
     int32_t mark, estimate, coords[2];
-//    PairCoords coords;
     SeqNum id;
-//    uint8_t mode; // 0 = unknown direction and orientation, 1 = known orientation. 2 = both known
-//    bool extDrxn;
 };
 
 struct PairingVars
@@ -176,11 +200,11 @@ struct DrxnVars
 
 struct MergeHit
 {
-    MergeHit() : node( NULL ), coords( NULL ), read( 0 ), overlap( 0 ) {};
+    MergeHit() : node( NULL ), coords( NULL ), id( 0 ), ol( 0 ) {};
     Node* node;
-    SeqNum read;
+    SeqNum id;
     Coords* coords;
-    uint16_t overlap;
+    uint16_t ol;
 };
 
 struct PairHit
@@ -195,11 +219,36 @@ struct PairHit
 
 struct Edge
 {
-    Edge( Node* node, int overlap, bool isLeap ): node( node ), overlap( overlap ), isLeap( isLeap ) {}
-    float getOverlapWeakness();
+    Edge( Node* node, int overlap, bool isLeap ): node( node ), ol( overlap ), isLeap( isLeap ) {}
     Node* node;
-    int overlap;
+    int ol;
     bool isLeap;
+};
+
+struct NodeBlock
+{
+    NodeBlock( Node* node, int base, int ext, bool drxn );
+    NodeBlock( Edge& e, int ext, bool drxn );
+    NodeBlock( NodeRoll& nodes, NodeBlock& prv, NodeBlock& nxt );
+//    void intervene( NodeBlock& l, NodeBlock& r, bool drxn );
+//    void transfer( NodeBlock& tar );
+    void transfer( vector<NodeBlock>& tar, NodeRoll& nodes, NodeRoll& added, bool drxn );
+    Node* node;
+    int32_t coords[2][3], diffs[2];
+};
+
+struct NodeLine
+{
+    NodeLine( Node* node, bool drxn );
+    bool add( Edge& e, bool drxn );
+    void edge( Node* node, NodeRoll& nodes, int32_t coord, int ol, bool drxn );
+    void fold( NodeRoll& nodes, Nodes& mapped, bool drxn );
+    void map( Edge& e, Nodes& mapped, int ext, int align, bool drxn );
+//    void map( NodeLine& line, int len, bool drxn );
+    string seq;
+    int32_t coords[2];
+    vector<NodeBlock> tar, maps;
+    vector< tuple<Node*, int32_t, int32_t> > edges;
 };
 
 struct MapStruct

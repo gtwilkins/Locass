@@ -24,6 +24,31 @@
 #include "types.h"
 #include "parameters.h"
 #include "query_structs.h"
+#include "index_structs.h"
+
+struct QueryEnd
+{
+    QueryEnd( CharId rank, CharId count, int ol ): rank( rank ), count( count ), ol( ol ){};
+    CharId rank, count;
+    int ol;
+};
+
+struct QState
+{
+    QState(): gen( 0 ), perfect( true ){};
+    QState( uint8_t i, CharId rank, CharId count, int ol, int gen, bool perfect );
+    bool advance( uint8_t i );
+    void branch( int i, CharId minCount );
+    int failure();
+    bool record();
+    vector<uint8_t> q;
+    vector<QState> edges;
+    vector<QueryEnd> ols;
+    CharCount ranks, counts;
+    CharId rank, count;
+    int ol, gen;
+    bool perfect;
+};
 
 struct QueryState
 {

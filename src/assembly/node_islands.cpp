@@ -87,12 +87,12 @@ void Node::addExtensionMerge( MergeHit &merge, Extension &ext, IslandVars &iv, b
         if ( drxn == iv.drxn && isIslandMerge )
         {
             mergeNode = merge.node->splitNode( (*merge.coords)[!drxn], iv.ev.island, iv.drxn, drxn );
-            thisNode->addEdge( mergeNode, merge.overlap, drxn );
+            thisNode->addEdge( mergeNode, merge.ol, drxn );
         }
         else if ( drxn != iv.drxn )
         {
             mergeNode = merge.node->mergeNode( ( isIslandMerge ? iv.ev.island : iv.ev.nodes ), merge.coords, iv.drxn, drxn );
-            mergeNode->addEdge( thisNode, merge.overlap, !drxn );
+            mergeNode->addEdge( thisNode, merge.ol, !drxn );
         }
         
         if ( mergeNode && mergeNode != merge.node && iv.merged[drxn].find( merge.node ) != iv.merged[drxn].end() )
@@ -1005,8 +1005,8 @@ bool Node::overlapExtend( NodeList &nodes, int32_t* coords, NodeList &hitNodes, 
                     for ( Edge &e : currNodes[i]->edges_[drxn] )
                     {
                         if ( currNodes[i]->drxn_ == 2 ) continue;
-                        int32_t diff = drxn ? e.node->ends_[0] - currNodes[i]->ends_[1] + e.overlap
-                                            : e.node->ends_[1] - currNodes[i]->ends_[0] - e.overlap;
+                        int32_t diff = drxn ? e.node->ends_[0] - currNodes[i]->ends_[1] + e.ol
+                                            : e.node->ends_[1] - currNodes[i]->ends_[0] - e.ol;
                         nxtNodes.push_back( e.node );
                         nxtCoords[0].push_back( currCoords[0][i] + diff );
                         nxtCoords[1].push_back( currCoords[1][i] + diff );
@@ -1590,7 +1590,7 @@ bool Node::seedIslandsSingle( IslandVars &iv, ReadMark &mark, unordered_set<SeqN
             if ( merge.node )
             {
                 Node* mergeNode = merge.node->splitNode( (*merge.coords)[!drxn], iv.ev.island, iv.drxn, drxn );
-                node->addEdge( mergeNode, merge.overlap, drxn );
+                node->addEdge( mergeNode, merge.ol, drxn );
                 return true;
             }
 
@@ -1619,11 +1619,11 @@ bool Node::seedIslandsSingle( IslandVars &iv, ReadMark &mark, unordered_set<SeqN
 bool Node::setBlank( IslandVars &iv, NodeSet &foldable, bool drxn )
 {
     sort( edges_[!drxn].begin(), edges_[!drxn].end(), []( Edge &a, Edge &b ){ 
-        return a.overlap > b.overlap;
+        return a.ol > b.ol;
     } );
     
-    seq_ = ( drxn ? edges_[!drxn][0].node->seq_.substr( edges_[!drxn][0].node->seq_.length() - edges_[!drxn][0].overlap ) 
-                  : edges_[!drxn][0].node->seq_.substr( 0, edges_[!drxn][0].overlap ) );
+    seq_ = ( drxn ? edges_[!drxn][0].node->seq_.substr( edges_[!drxn][0].node->seq_.length() - edges_[!drxn][0].ol ) 
+                  : edges_[!drxn][0].node->seq_.substr( 0, edges_[!drxn][0].ol ) );
     ends_[drxn] = ends_[!drxn] + ( drxn ? seq_.length() : -seq_.length() );
     
     NodeSet folded;
@@ -1636,14 +1636,14 @@ bool Node::setBlank( IslandVars &iv, NodeSet &foldable, bool drxn )
     for ( Edge &re : edges_[!drxn] )
     {
         NodeSet currSet;
-        int32_t reOff = edges_[!drxn][0].overlap - re.overlap;
+        int32_t reOff = edges_[!drxn][0].ol - re.ol;
         for ( Edge &e : re.node->edges_[drxn] )
         {
             if ( folded.find( e.node ) == folded.end()
                     && foldable.find( e.node ) != foldable.end()
-                    && e.overlap <= re.overlap )
+                    && e.ol <= re.ol )
             {
-                offMap[e.node] = reOff + e.overlap;
+                offMap[e.node] = reOff + e.ol;
                 currSet.insert( e.node );
             }
         }
@@ -1664,8 +1664,8 @@ bool Node::setBlank( IslandVars &iv, NodeSet &foldable, bool drxn )
                     {
                         string readSeq = drxn ? curr->seq_.substr( currOff, readEndOff - currOff )
                                               : curr->seq_.substr( curr->seq_.length() - readEndOff, readEndOff - currOff );
-                        int32_t coord = drxn ? ends_[0] + ( edges_[!drxn][0].overlap - readBgnOff )
-                                             : ends_[1] - ( edges_[!drxn][0].overlap - readBgnOff );
+                        int32_t coord = drxn ? ends_[0] + ( edges_[!drxn][0].ol - readBgnOff )
+                                             : ends_[1] - ( edges_[!drxn][0].ol - readBgnOff );
                         
                         if ( !drxn )
                         {
@@ -1679,7 +1679,7 @@ bool Node::setBlank( IslandVars &iv, NodeSet &foldable, bool drxn )
                 }
                 for ( Edge &e : curr->edges_[drxn] )
                 {
-                    int32_t eOff = currOff + e.overlap - ( e.node->ends_[1] - e.node->ends_[0] );
+                    int32_t eOff = currOff + e.ol - ( e.node->ends_[1] - e.node->ends_[0] );
                     if ( folded.find( e.node ) == folded.end()
                             && foldable.find( e.node ) != foldable.end()
                             && eOff >= 0 )

@@ -104,7 +104,7 @@ void Node::fillReads( Querier &bwt, NodeSet &delSet )
             {
                 if ( reachSet.find( l.node ) == reachSet.end() )
                 {
-                    ols.push_back( l.overlap - ( seq_.length() - r.overlap ) );
+                    ols.push_back( l.ol - ( seq_.length() - r.ol ) );
                     eNodes.push_back( l.node );
                 }
             }
@@ -409,12 +409,12 @@ void Node::mergeAll( NodeList* nodes, NodeSet &delSet )
                 NodeList eNodes;
                 for ( Edge &e : node->edges_[j] )
                 {
-                    if ( e.overlap <= 0 ) e.isLeap = true;
+                    if ( e.ol <= 0 ) e.isLeap = true;
                     if ( e.isLeap ) continue;
                     Node* x[2];
                     x[0] = j ? node : e.node;
                     x[1] = j ? e.node : node;
-                    string seqs[2] = { x[0]->seq_.substr( x[0]->seq_.length() - e.overlap ), x[1]->seq_.substr( 0, e.overlap ) };
+                    string seqs[2] = { x[0]->seq_.substr( x[0]->seq_.length() - e.ol ), x[1]->seq_.substr( 0, e.ol ) };
                     if ( seqs[0] != seqs[1] )
                     {
                         int ol = mapSeqOverlap( x[0]->seq_, x[1]->seq_, 15 );
@@ -451,15 +451,79 @@ void Node::mergeAll( NodeList* nodes, NodeSet &delSet )
     }
 }
 
+Node* Node::merge( bool drxn )
+{
+    if ( edges_[drxn].size() != 1 ) return NULL;
+    Edge& e = edges_[drxn][0];
+    if ( e.ol <= 0 ) e.isLeap = true;
+    if ( e.isLeap || e.node->edges_[!drxn].size() != 1 ) return NULL;
+    if ( e.node->cloned_ ) return NULL;
+    if ( cloned_ ) for ( Node* c : cloned_->nodes ) if ( !c->edges_[drxn].empty() ) return NULL;
+    
+    Node* node = e.node,* l = drxn ? this : e.node, * r = drxn ? e.node : this;
+    if ( !bad_ && node->bad_ ) claimGood( drxn );
+    if ( bad_ && !node->bad_ ) node->claimGood( !drxn );
+    
+    int32_t off = drxn ? ends_[1] - e.ol - node->ends_[0] : ends_[0] - node->ends_[1] + e.ol;
+    node->offset( off );
+    if ( node->drxn_ >= 2 ) drxn_ = node->drxn_;
+    bad_ = bad_ && node->bad_;
+    mapped_ = mapped_ && node->mapped_;
+    ends_.merge( node->ends_ );
+    
+    clearPaired( false );
+    node->clearPaired( false );
+    verified_ = false;
+    string lSeq = l->seq_.substr( l->seq_.length() - e.ol );
+    string rSeq = r->seq_.substr( 0, e.ol );
+    assert( lSeq == rSeq );
+
+    string seq = l->seq_ + r->seq_.substr( e.ol, r->seq_.length() );
+    seq_ = seq;
+    stop_[drxn] = node->stop_[drxn];
+
+    clearEdges( drxn );
+    for ( Edge &edge : node->edges_[drxn] )
+    {
+        edge.node->removeEdge( node, !drxn );
+        addEdge( edge.node, edge.ol, drxn, false, edge.isLeap );
+    }
+    node->clearEdges( drxn );
+    assert( ends_[1] - ends_[0] == seq_.length() ); 
+
+    reads_.insert( node->reads_.begin(), node->reads_.end() );
+    setCoverage();
+    remark();
+    readTest();
+    
+    if ( !cloned_ ) return node;
+    
+    for ( Node* c : cloned_->nodes )
+    {
+        c->seq_ = seq_;
+        c->clearPaired( false );
+        c->verified_ = false;
+        c->ends_[drxn] = drxn ? c->ends_[0] + size() : c->ends_[1] - size();
+        c->reads_ = reads_;
+        off = c->ends_[0] - ends_[0];
+        for ( auto& read : c->reads_ ) read.second.offset( off );
+        c->setCoverage();
+        c->remark();
+        c->readTest();
+    }
+    
+    return node;
+}
+
 void Node::mergeDrxn( NodeSet &delSet, bool drxn )
 {
     while ( edges_[drxn].size() == 1 )
     {
-        if ( edges_[drxn][0].overlap <= 0 ) edges_[drxn][0].isLeap = true;
+        if ( edges_[drxn][0].ol <= 0 ) edges_[drxn][0].isLeap = true;
         if ( edges_[drxn][0].isLeap ) return;
         Node* node = edges_[drxn][0].node;
         if ( clones_ || node->clones_ || dontExtend_ || node->dontExtend_ ) return;
-        int ol = edges_[drxn][0].overlap;
+        int ol = edges_[drxn][0].ol;
         if ( node->edges_[!drxn].size() != 1 ) return;
         int seqLen = node->seq_.length();
         
@@ -491,7 +555,7 @@ void Node::mergeDrxn( NodeSet &delSet, bool drxn )
         for ( Edge &e : node->edges_[drxn] )
         {
             e.node->removeEdge( node, !drxn );
-            addEdge( e.node, e.overlap, drxn, false, e.isLeap );
+            addEdge( e.node, e.ol, drxn, false, e.isLeap );
         }
         assert( ends_[1] - ends_[0] == seq_.length() ); 
         int32_t x[2] = { node->ends_[1], node->ends_[0] };
@@ -524,6 +588,7 @@ void Node::recoil()
 {
     int32_t ends[2] = { ends_[1], ends_[0] };
     assert( seq_.length() == ends_[1] - ends_[0] );
+    assert( !reads_.empty() );
     for ( auto &read : reads_ )
     {
         ends[0] = min( ends[0], read.second[0] );
@@ -546,7 +611,7 @@ void Node::recoil( int32_t diff, bool drxn )
     for ( Edge &e : edges_[drxn] )
     {
         eNodes.push_back ( e.node ); 
-        ols.push_back( e.overlap - diff );
+        ols.push_back( e.ol - diff );
     }
     clearEdges( drxn );
     for ( int i = 0; i < eNodes.size(); i++ )
@@ -555,198 +620,119 @@ void Node::recoil( int32_t diff, bool drxn )
     }
 }
 
+void Node::recoordinate( NodeRoll& nodes )
+{
+    Nodes tested;
+    for ( Node* node : nodes.getGraph( 2 ).nodes ) node->recoordinate( tested, 1 );
+    
+    int32_t limits[2]{0}, counts[2]{0}, verified[2]{0};
+    for ( Node* node : tested.nodes )
+    {
+        if ( node->cloned_ ) continue;
+        if ( node->verified_ ) verified[0] = min( verified[0], node->ends_[0] );
+        if ( node->verified_ ) verified[1] = max( verified[1], node->ends_[1] );
+        if ( node->isContinue( 0 ) ) limits[0] = min( limits[0], node->ends_[0] );
+        if ( node->isContinue( 1 ) ) limits[1] = max( limits[1], node->ends_[1] );
+        for ( int d : { 0, 1 } ) if ( node->edges_[d].empty() ) counts[d]++;
+    }
+    
+    cout << "Left ends: " << counts[0] << ", right ends: " << counts[1] << endl;
+    cout << "Left verified min: " << verified[0] << ", right verified max: " << verified[1] << endl;
+    cout << "Left min: " << limits[0] << ", right max: " << limits[1] << endl;
+}
+
+void Node::recoordinate( Nodes& tested, bool drxn )
+{
+    if ( drxn_ < 2 ) for ( Edge& e : edges_[!drxn] ) if ( !e.node->bad_ && !tested.find( e.node ) ) return;
+    if ( !tested.add( this ) ) return;
+    assert( !bad_ );
+    if ( drxn_ < 2 )
+    {
+        bool isset = false;
+        int32_t best = 0;
+        for ( Edge& e : edges_[!drxn] )
+        {
+            if ( e.node->bad_ ) continue;
+            int32_t off = e.node->ends_[drxn] - ends_[!drxn] + ( drxn ? -e.ol : e.ol );
+            if ( off )
+            {
+                int x = 0;
+            }
+            if ( !isset || ( drxn ? best < off : off < best ) ) best = off;
+            isset = true;
+        }
+        if ( best )
+        {
+            int x = 0;
+        }
+        assert( isset );
+        if ( best ) offset( best );
+        
+        for ( Edge& e : edges_[drxn] ) e.node->recoordinate( tested, drxn );
+    }
+    else for ( int d : { 0, 1 } ) for ( Edge& e : edges_[d] ) e.node->recoordinate( tested, d );
+}
+
+void Node::remap( Querier& bwt, NodeRoll& nodes )
+{
+    NodeRoll remapped;
+    for ( Node* node : nodes.nodes )
+    {
+        if ( !node->verified_ || node->mapped_ ) continue;
+        node->remap( bwt );
+        remapped += node;
+//        if ( node->cloned_ ) for ( Node* clone : node->cloned_->nodes ) remapped += clone;
+    }
+    if ( remapped.empty() ) return;
+    NodeRoll tar, ignored;
+    for ( Node* node : nodes.nodes ) if ( node->verified_ ) tar += node;
+    for ( Node* node : remapped.nodes ) if ( node->remap( tar ) ) ignored += node;
+    for ( Node* node : ignored.nodes ) node->clearPaired( true );
+    for ( Node* node : remapped.nodes ) node->setVerified();
+}
+
 void Node::remap( Querier &bwt )
 {
-    clearReads();
     vector<ReadId> ids;
     vector<int32_t> coords[2];
     bwt.mapSequence( seq_, ids, coords );
+    int remapped = 0;
     for ( int i = 0; i < ids.size(); i++ )
     {
-        addRead( ids[i], ends_[0] + coords[0][i], ends_[0] + coords[1][i], false );
+        if ( reads_.find( ids[i] ) != reads_.end() ) continue;
+        add( ids[i], ends_[0] + coords[0][i], ends_[0] + coords[1][i], true );
+        if ( cloned_ ) for ( Node* clone : cloned_->nodes ) clone->add( ids[i], clone->ends_[0] + coords[0][i], clone->ends_[0] + coords[1][i], true );
+        remapped++;
     }
     setCoverage();
+    mapped_ = true;
+    if ( cloned_ ) for ( Node* clone : cloned_->nodes ) clone->mapped_ = true;
+    cout << "Remapped " << reads_.size() << " " << remapped << endl;
 }
 
-void Node::remapGenes( Querier &bwt, NodeList &nodes )
+bool Node::remap( NodeRoll& tar )
 {
-//    vector<ReadId> mapIds;
-//    mapIds.push_back(342020973);
-//    mapIds.push_back(427301160);
-//    mapIds.push_back(517859060);
-//    mapIds.push_back(610694375);
-//    mapIds.push_back(484089616);
-//    mapIds.push_back(649063290);
-//    mapIds.push_back(325458350);
-//    mapIds.push_back(500017413);
-//    mapIds.push_back(432882647);
-//    mapIds.push_back(673937720);
-//    mapIds.push_back(445170277);
-//    mapIds.push_back(414561562);
-//    mapIds.push_back(625931473);
-//    mapIds.push_back(390974329);
-//    mapIds.push_back(647460820);
-//    mapIds.push_back(390975725);
-//    mapIds.push_back(346537812);
-//    mapIds.push_back(424493340);
-//    mapIds.push_back(491052479);
-//    mapIds.push_back(547553316);
-//    mapIds.push_back(483926524);
-//    mapIds.push_back(455280565);
-//    mapIds.push_back(519448264);
-//    mapIds.push_back(510918341);
-//    mapIds.push_back(724870756);
-//    
-//    for ( ReadId &id : mapIds )
-//    {
-//        string s = bwt.getSequence( id );
-//        Node* bestNode = NULL;
-//        int ol = 30;
-//        int32_t bestCoords[2];
-//        ReadId x = id % 4;
-//        bool drxn = x == 1 || x == 2;
-//        for ( Node* n : nodes )
-//        {
-//            int32_t coords[2];
-//            if ( mapSeqEnd( s, n->seq_, ol, coords, drxn ) )
-//            {
-//                int thisOl = coords[1] - coords[0];
-//                coords[0] += n->ends_[0];
-//                coords[1] += n->ends_[0];
-//                if ( thisOl == ol && bestNode->ends_[!drxn] == bestCoords[!drxn] )
-//                {
-//                    assert( false );
-//                }
-//                bestNode = n;
-//                bestCoords[0] = coords[0];
-//                bestCoords[1] = coords[1];
-//                ol = thisOl;
-//            }
-//        }
-//        bestNode->addRead( id, bestCoords[0], bestCoords[1], true );
-//    }
-//    
-//    return;
-//    assert( false );
-    
-    
-    vector<string> seqs;
-    seqs.push_back( "ATGGAGTTGAAAGGGACACTGATCGTTGTCATTGTGGCCTCTATTACCATTTCAG" );
-    seqs.push_back( "ATGGAGTTGAAAGGGAAACTGATCGTTGTCATTGTGGCTGCTTTTACTATCTCAG" );
-    seqs.push_back( "ATGGAGTTGAAAGGGACACTGATCGTTGTCATTGTGGCTGCTTTTACTATCTCAG" );
-    seqs.push_back( "ATGGAGTTGAAAGTGAAACTGATCGTTGTTATTGTGGCTGCTATTGCAATCTCAG" );
-    seqs.push_back( "ATGGAGTTGAAAGTGACACTGATCGTTGTTATTGTGGCTGCTATTGCAATCTCAG" );
-    seqs.push_back( "TTCATGCACAAAGAGACGGGGGAGGAAGAGGAAATGGCAGAGAGAGGGGACAAGGCCGCTTTGGAGGAAGGCCACGACCTGATAGACCCCAGATGATGGGTGGACCTAGGCAAGGTGGTCCACCAATGGGCGGAAGGAGGTTTGATGTCCCTGGGCAAGGTGACCAACAGATGGATGGACGTGGACCGAATGGCGGGCCAATGGGTGGTAGGAGATTTGATAGACCAGGATTTGGTGGCTTCAGACCCGAAGGTGCCGGGAGACCTTTCTTCGGTCACGGAGGAAGGCATACTGATGGAGAAGGAGAAATGGAGGCTGCTCAACCAATTGGTGATGGTCAAGGATGGCTTGGTTTTTTCGATGGTACTGGAAGATTTTCCGGACGTCCTCACCCAGGCCGTGGTGATCATCATGGACACCACCATGGTCCTCCCCATGACCAGACCGACGAACACCCATTCGGTCAGCACAACGACAGCAACAGCGAGGAGGATGGCCGACCTCACCGTCACCACCACCACCACCACCACCATCATCACCATGACCGTCATAATGAGACAGACGACCACCGTCATCATAATCACACTGAAGGCCACCGCCACCATCATCATAATAAGACAGAAGAGGGTGACCAGGACAGACCAGAGATGAGGCCATTCCGGTTCAACCCTTTCGGTCGCAAGCCTTTCGGAGGACGTCCATTCGGCATGTTCGGCAGACGCAAACATACCGAAGAAGGATCTCACAGGCGCGATGGCCACCGTCATCCCCATGGCAACCGAGGACGTTGGGATGAGAATGAAGGTGAGGAGGAGGAGGAGGAACATCTTCCAACTGAAAACATGACAACATCGGCAGTGCCTGATGTGGTCGAGATCGACATCAACGAAATAGACAGCAACATTATCCCCGAGGTGTAG" );
-    seqs.push_back( "TTCATGCACAAAGAGACGGGGGAGGAAGAGGAAATGGCAGAGAGAGGGGACAAGGCCGCTTTGGAGGAAGGCCACGACCTGATAGACCCCAGATGATGGGTGGACCTAGGCAAGGTGGTCCACCAATGGGCGGAAGGAGGTTTGATGTCCCTGGGCAAGGTGACCAACAGATGGATGGACGTGGACCGAATGGCAGGCCAATGGGTGGTAGGAGATTTGATAGACCAGGATTTGGTGGCTTCAGACCCGAAGGTGCCGGGAGACCTTTCTTCGGTCACGGAGGAAGGCATACTGATGGAGAAGGAGAAATGGAGGCTGCTCAACCAATTGGTGATGGTCAAGGATGGCTTGGTTTTTTCGATGGTACTGGAAGATTTTCCGGACGTCCTCACCCAGGCCGTGGTGATCATCATGGACACCACCATGGTCCTCCCCATGACCAGGCCGACGAACACCCATTCGGTCAGCACAACGACAGCAACAGCGAGGAGGATGGCCGACCTCACCGTCACCACCACCACCACCACCACCATCATCACCATGACCGTCATAATGAGACAGACGACCACCGTCATCATAATCACACTGAAGGCCACCGCCACCATCATCATAATAAGACAGAAGAGGGTGACCAGGACAGACCAGAGATGAGGCCATTCCGGTTCAACCCTTTCGGTCGCAAGCCTTTCGGAGGACGTCCATTCGGCATGTTCGGCAGACGCAAACATACCGAAGAAGGATCTCACAGGCGCGATGGCCACCGTCATCCCCATGGCAACCGAGGACGTTGGGATGAGAATGAAGGTGAGGAGGAGGAGGAGGAACATCTTCCAACTGAAAAAATGACAACATCGACAGTGCCTGATGTGGTCGAGATCGACATCAACGAAATAGACAGCAACATTATCCCCGAGGTGTAG" );
-    seqs.push_back( "TTCATGCACAAAGAGAAAAGGCAAGAAGAGGGAATGGCAGAGAGAAGGAAGAGGGTCGCTTAAAAGGAAGGCAACGATCTGATAGACCCCAGATGATGGGTAGACCTAGGAAAGGTGGTCCACCAATGGGCGGAAGGGGGTTTGATGGCCCTGGACAAGGTGACCAACAGATGGGTGGACGTGTACCAAATGGCGGACCGATGGGCGGTAGGAGGTTTGATGGCCCTGGACAAGGTGACCAACAGATGGGTGGACGTGGACCAAATGGCGGACCGATGGGCGGTAGGAGGTTTGATGGCCCTGGACAAGGTGACCAACAGATGGGTTGACGTGGACCAAATGGATTTGGTGGCTTCAGACCCGAAGGTACAGGGAGACCTTTCTTCGGTCACGGAGGAAGGCACCGCCACCAAAATCACCACCATGACCGTCATAACAAGATAGACGATCACCGTCATCATAATCACACTGAAGGCCACCGTCATCATCATCATCATAACAAGACAGAAGAGGGTGACCAGGACAGACCAGAAATGTGGCCATTCCGGTTCAACAATACGGAAGAAGGATCTCCCAGGCGCGATGGACACCGTCATCCCAATGGCACTCGAGGACGTTGGGAGGAGAATGAAAGTGAGGAGGAAGGACATCTTTCGACTGAAAGCATGACAACATCTGCAGTGCCTGATGTGGTCGAGACCGACAGCAACGAAAAAGACAACATCATTATCCCTGAGGTGTAG" );
-    seqs.push_back( "TTCATGCACAAAGAGAAAAGGCAAGAAGAGGGAATGGCAGAGAGAAGGAAGAGGGTCGCTTAAAAGGAAGGCAACGATCTGATAGACCCCAGATGATGGGTAGACCTAGGAAAGGTGGTCCACCAATGGGCGGAAGGGGGTTTGATGGCCCTGGACAAGGTGACCAACAGATGGGTGGACGTGTACCAAATGGCGGACCGATGGGCGGTAGGAGGTTAGATGGCCCTGGACAAGGTGACCAACAGATGGGTGGACGTGGACCAAATGGCGGACCGATGGGCGGTAGGAGGTTAGATGGCCCTGGACAAGGTGACCAACAGATGGGTGGACGTGGACCAAATGGATTTGGTGGCTTCAGACCCGAAGGTACAGGGAGACCTTTCTTCGGTCACGGAGGAAGGCACCGCCACCAAAATCACCACCATGACCGTCATAACAAGATAGACGATCACCGTCATCATAATCACACTGAAGGCCACCGTCATCATCATCATCATAACAAGACAGAAGAGGGTGACCAGGACAGACCAGAAATGTGGCCATTCCTGTTCAACCATACGGAAGAAGGATCTCCCAGGCGCGATGGACACCGTCATCCCAATGACACTCGAGGACGTTGGGATGAGAATGAAAGTGAGGAGGAAGGACATCTTTCGGCTGAAAGCATGACAACATCTGCAGTGCCTGATGTGGTCGAGACCGACAGCAACGAAAAAGACAACATCATTATCCCTGAAGTGTAG" );
-    seqs.push_back( "TTCACGCCAAAGGAGAACGGAGAGGAAGAGGAAATGGCAGAGAGAGGGGAAAAGGTCGCGTCGGAGGAAGGCCAGGATCTGATAGACCCGAGATGATGGTTGGACCTATGCAAGGTGATCCACCAATGGGCGGAAGGAACTTTGATGGTTCTCCCCATGACCAGGCCGACAAACAACCATTCGGTCAACACAACGACAGCAGCAGCGAGGAGGATGGCCGACCTCACCGTCACCACCATGACCGTCATAATAAGACAGACGACCACCGTCATCATAATCACACTGAAGGCCACCGCCATCATCACCATAACCAGACAGAAGAGGGTGACCAGGACAGACCAGAGATGAGGCCATTCCGGTTCAACCCTTTCGGTCGCAAGCCCTTCGGAGGACGTCCATTCGGAAGACGCAACCATACCGAAGAAGGATCTCCTAGGCGCGGTGGACACCGTCAACGCAATGGCAACCGTGGACGTTGGGATGAGAATGAAAGCATGACAACATCTGCAGTGCCTGATGTGGTCGAGGTGTAG" );
-    seqs.push_back( "TTCACGCCAAAGGAGAACGGAGAGGAAGAGGAAATGGCAGAGAGAGGGGAAAAGGTCGCGTCGGAGGAAGGCCAGGATCTGATAGACCCGAGATGATGGTTGGACCTAGGCAAGGTGATCCACCAATGGGCGGAAGGAACTTTGATGGTTCTCCCCATGATCAGGCCGACAAACAACCATTCGGTCAACACAACGACAGCAGCAGCGAGGAGGATGGCCGACCTCACCGTCACCACCATGACCGTCATAATAAGACAGACGACCACCGTCATCATAATCACACTGAAGGCCACCGCCATCATCACCATAACCAGACAGAAGAGGGTGACCAGGACAGACCAGAGATGAGGCCATTCCGGTTCAACCCTTTCGGTCGCAAGCCCTTCGGAGGACGTCCATTCGGAAGACGCAACCATACCGAAGAAGGATCTCCTAGGCGCGGTGGACACCGTCAACGCAATGGCAACCGTGGACGTTGGGATGAGAATGAAAGCATGACAACATCTGCAGTGCCTGATGTGGTCGAGGTGTAGTCACCCCC" );
-    unordered_set<ReadId> ids;
-    int i = 0;
-    int geneCount = 0;
-    int pseudoCount = 0;
-    for ( string &seq : seqs )
+    int ignored = 0;
+    for ( auto& read : reads_ )
     {
-        MappedSeqs ms = bwt.mapSeed( seq, 10, false );
-        cout << ">Seq" << to_string( i + 1 ) << endl;
-        cout << string( 101, '-' ) << seq << endl;
-        for ( ReadStruct &read : ms.reads )
+        if ( !read.second.redundant || read.second.ignore ) continue;
+        for ( Node* node : tar.nodes )
         {
-            bool docout = ids.find( read.readId ) == ids.end();
-            if ( docout ) ids.insert( read.readId );
-            for ( Node* n : nodes )
-            {
-                if ( n->reads_.find( read.readId ) == n->reads_.end() ) continue;
-                docout = false;
-            }
-            docout = docout && read.seq.find( "TATAAGAGACAG" ) == read.seq.npos;
-            docout = docout && read.seq.find( "CTGTCTCTTATA" ) == read.seq.npos;
-            if ( docout )
-            {
-                cout << ">" << to_string( read.readId ) << endl;
-                cout << string( 101 + read.coords[0], '-' ) << read.seq << endl;Node* best = NULL;
-//                int ol = 50;
-//                bool bestDrxn;
-//                int32_t bestCoords[2];
-//                Node* best = NULL;
-//                for ( Node* n : nodes )
-//                {
-//                    for ( bool drxn : { 0, 1 } )
-//                    {
-//                        int32_t coords[2];
-//                        if ( mapSeqEnd( read.seq, n->seq_, ol, coords, drxn ) )
-//                        {
-//                            coords[0] += n->ends_[0];
-//                            coords[1] += n->ends_[0];
-//                            if ( best && ol == coords[1] - coords[0] )
-//                            {
-//                                ol++;
-//                                continue;
-//                            }
-//                            best = n;
-//                            bestDrxn = drxn;
-//                            ol = coords[1] - coords[0];
-//                            bestCoords[0] = coords[0];
-//                            bestCoords[1] = coords[1];
-//                        }
-//                    }
-//                }
-//                if ( best )
-//                {
-//                    ol = bestCoords[1] - bestCoords[0];
-//                    string ext = bestDrxn ? read.seq.substr( 0, read.seq.length() - ol )
-//                                          : read.seq.substr( ol );
-//                    string base = "CTGTCTCTTATACACATCTAGATGTGTATAAGAGACAG";
-//                    if ( base.find( ext ) == base.npos && ext.find( "CTGTCTCTTATACACATCT" ) == ext.npos && ext.find( "AGATGTGTATAAGAGACAG" ) == ext.npos ) continue;
-//                    if ( bestDrxn )
-//                    {
-//                        cout << read.seq.substr( 0, read.seq.length() - ol ) << endl;
-//                        cout << read.seq << endl;
-//                    }
-//                    else
-//                    {
-//                        cout << string( ol, '-' ) << read.seq.substr( ol ) << endl;
-//                        cout << read.seq << endl;
-//                    }
-//                    int ans = 1;
-//                    cin >> ans;
-//                    if ( ans )
-//                    {
-//                        best->addRead( read.readId, bestCoords[0], bestCoords[1], true );
-//                    }
-//                }
-            }
+            auto it = node->reads_.find( read.first );
+            if ( it == node->reads_.end() || node == this ) continue;
+            if ( cloned_ && cloned_->find( node ) ) continue;
+            read.second.ignore = true;
+            it->second.ignore = true;
+            ignored++;
         }
-        i++;
-    }
-    
-    int foundCount = 0;
-    int notFoundCount = 0;
-    int peBad = 0;
-    int mpBad = 0;
-    for ( ReadId id : ids )
-    {
-        bool found = false;
-        for ( Node* node : nodes )
+        if ( !read.second.ignore || !cloned_ ) continue;
+        for ( Node* clone : cloned_->nodes )
         {
-            if ( node->reads_.find( id ) == node->reads_.end() ) continue;
-            found = true;
-            if ( node->ends_ [0] > 11000 ) pseudoCount++;
-            else geneCount++;
-            break;
-        }
-        if ( found ) foundCount++;
-        else
-        {
-            string seq = bwt.getSequence( id );
-            if ( seq.find( "TATAAGAGACAG" ) != seq.npos ) continue;
-            if ( seq.find( "CTGTCTCTTATA" ) != seq.npos ) continue;
-            if ( params.isReadPe( id ) ) peBad++;
-            else mpBad++;
-            notFoundCount++;
+            auto it = clone->reads_.find( read.first );
+            assert( it != clone->reads_.end() );
+            it->second.ignore = true;
         }
     }
-    assert( false );
+    cout << "Ignored " << reads_.size() << " " << ignored << endl;
+    return ignored;
 }
-

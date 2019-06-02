@@ -62,6 +62,26 @@ void Node::addPairs( NodeIntMap &pairs, unordered_set<SeqNum> &hitIds, bool drxn
     removeMarks( hitIds, true, false, drxn );
 }
 
+void Node::clearPaired( bool readd )
+{
+    hits_.count = 0;
+    if ( pairedNodes_ ) delete pairedNodes_;
+    pairedNodes_ = NULL;
+    if ( hits_.pairs[0].empty() && hits_.pairs[1].empty() ) return;
+    
+    vector<ReadId> ids[2];
+    for ( auto& read : reads_ )
+    {
+        ReadId id = read.first;
+        int d = params.setPair( id );
+        if ( d < 2 && reads_.find( id ) == reads_.end() ) ids[d].push_back( id );
+    }
+    
+    for ( int d : { 0, 1 } ) for ( auto& np : hits_.pairs[d] ) np.first->addMarks( ids[d] );
+    hits_.clean();
+    if ( readd ) remark();
+}
+
 void Node::clearPairs()
 {
     NodeList tNodes;
@@ -387,10 +407,7 @@ float Node::getMissScore( int32_t* limits, bool drxn )
 int Node::getPairHits( Node* node )
 {
     auto hit = pairs_.find( node );
-    if ( hit != pairs_.end() )
-    {
-        return hit->second;
-    }
+    if ( hit != pairs_.end() ) return hit->second;
     return 0;
 }
 
@@ -439,18 +456,15 @@ int Node::getPairHitsTotal()
     return hits;
 }
 
-vector<SeqNum> Node::getPairsIdsBase()
+vector<ReadId> Node::getPairsIdsBase()
 {
-    vector<SeqNum> pairIds;
+    vector<ReadId> ids;
     for ( auto &read : reads_ )
     {
-        SeqNum pairId = params.getPairId( read.first );
-        if ( reads_.find( pairId ) == reads_.end() )
-        {
-            pairIds.push_back( pairId );
-        }
+        ReadId id = params.getPairId( read.first );
+        if ( reads_.find( id ) == reads_.end() ) ids.push_back( id );
     }
-    return pairIds;
+    return ids;
 }
 
 int32_t Node::getLengthForScoring( float hits )
@@ -538,6 +552,12 @@ void Node::getUnpairedMarks( NodeList &nodes, vector<ReadMark> &peMarks, vector<
             ( isPe ? peMarks : mpMarks ).push_back( mark );
         }
     }
+}
+
+bool Node::isPaired( Node* node )
+{
+    return ( verified_ || ( pairedNodes_ && pairedNodes_->find( node ) ) )
+            && ( node->verified_ || ( node->pairedNodes_ && node->pairedNodes_->find( this ) ) );
 }
 
 void Node::limitScore( Score &score, bool inclNotValidSelf )
@@ -723,6 +743,15 @@ CloneScore Node::setCloneScore( NodeIntMap &pairs, NodeList &tNodes, vector<int3
         }
     }
     return score;
+}
+
+void Node::setPaired( Node* node )
+{
+    if ( !pairedNodes_ && !verified_ ) pairedNodes_ = new Nodes;
+    if ( pairedNodes_ ) pairedNodes_->add( node );
+    if ( !node->pairedNodes_ && !node->verified_ ) node->pairedNodes_ = new Nodes;
+    if ( node->pairedNodes_ ) node->pairedNodes_->add( this );
+    
 }
 
 int Node::setPairs( NodeList &tNodes, bool drxn )

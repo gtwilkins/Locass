@@ -69,8 +69,8 @@ bool Node::resolveBypass( ExtVars &ev, bool doExtend, bool drxn )
         {
             NodeSet offsetSets[2] = { fwdSet, NodeSet() };
             int hitsCount = 0;
-            int32_t diffOffset = drxn ? ends_[0] + e.overlap - e.node->ends_[1]
-                                      : ends_[1] - e.overlap - e.node->ends_[0];
+            int32_t diffOffset = drxn ? ends_[0] + e.ol - e.node->ends_[1]
+                                      : ends_[1] - e.ol - e.node->ends_[0];
             if ( reviewOffset( diffOffset, offsetSets, hitsCount, drxn ) )
             {
                 e.node->removeEdge( this, drxn );

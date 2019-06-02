@@ -52,33 +52,31 @@ bool Lib::doAddMarker( bool thisRev, int &pairRev, bool drxn )
     return false;
 }
 
-bool Lib::getPair( SeqNum &readId, int32_t dist, int &pairDrxn )
+int Lib::getPair( SeqNum &id )
 {
-    if ( readId < endCount )
+    uint8_t readVer = id & 0x3;
+    id = id - readVer;
+    // Unknown
+    if ( orientation == 0 )
     {
-        dist = size;
-        uint8_t readVer = readId & 0x3;
-        readId = readId - readVer;
-        if ( orientation == 0 ) // UK
-        {
-            readId += !readVer;
-            pairDrxn = 2;
-        }
-        else
-        {
-            pairDrxn = orientation < 3 ? !( readVer & 0x1 ) : readVer & 0x1;
-            if ( orientation == 1 ) // FF
-            {
-                readId += ( readVer > 1 ? 0 : 2 ) + ( readVer & 0x1 ? 1 : 0 ); // 0 <-> 2; 1 <-> 3
-            }
-            else // FR or RF
-            {
-                readId += ( readVer > 1 ? 0 : 2 ) + ( readVer & 0x1 ? 0 : 1 ); // 0 <-> 3; 1 <-> 2
-            }
-        }
-        return true;
+        id += !readVer;
+        return 2;
     }
-    return false;
+    
+    // FF
+    if ( orientation == 1 ) id += ( readVer > 1 ? 0 : 2 ) + ( readVer & 0x1 ? 1 : 0 ); // 0 <-> 2; 1 <-> 3
+    // FR or RF
+    else id += ( readVer > 1 ? 0 : 2 ) + ( readVer & 0x1 ? 0 : 1 ); // 0 <-> 3; 1 <-> 2
+    
+    return orientation < 3 ? !( readVer & 0x1 ) : readVer & 0x1;
+}
+
+bool Lib::getPair( SeqNum &id, int32_t dist, int &pairDrxn )
+{
+    if ( id >= endCount ) return false;
+    pairDrxn = getPair( id );
+    dist = size;
+    return true;
 }
 
 void Lib::setMinMax()
@@ -117,11 +115,17 @@ void Parameters::checkReady()
     }
 }
 
-bool Parameters::isReadPe( SeqNum &readId )
+bool Parameters::isReadPe( ReadId id )
 {
-    Lib* lib = getLib( readId );
+    Lib* lib = getLib( id );
     return lib && lib->isPe;
 }
+
+ bool Parameters::isReadMp( ReadId id )
+ {
+    Lib* lib = getLib( id );
+    return lib && !lib->isPe;
+ }
 
 int32_t Parameters::getFurthestMpDist( int32_t coord, bool drxn )
 {
@@ -206,7 +210,7 @@ void Parameters::set()
 {
     CharId totalPe = 0, totalPeMean = 0;
     maxPeMax = maxPeMean = maxMpMax = maxMpMean = 0;
-    branchMinHits = 0;
+    branchMinHits = 1;
     for ( Lib &lib : libs )
     {
         maxMpMean = max( maxMpMean, lib.size );
@@ -218,7 +222,7 @@ void Parameters::set()
             totalPe += lib.count;
             totalPeMean += (CharId)lib.size * (CharId)lib.count;
             branchMinHits += ( (float)lib.count / (float)seqCount ) * cover
-                    * float( max( readLen, lib.size - readLen ) ) / float( readLen * 4 );
+                    * float( max( 0, lib.size - readLen - 10 ) ) / float( readLen * 6 );
         }
     }
     
@@ -240,6 +244,13 @@ void Parameters::setLimits( int32_t &limit )
     locusLimits[1] = limit;
 }
 
+int Parameters::setPair( ReadId &id )
+{
+    Lib* lib = getLib( id );
+    if ( !lib ) return 2;
+    return lib->getPair( id );
+}
+
 bool Parameters::setPairId( ReadId &id, bool pairDrxn )
 {
     if ( !isReadPe( id ) || pairDrxn == bool(id & 0x1) ) return false;
@@ -247,4 +258,7 @@ bool Parameters::setPairId( ReadId &id, bool pairDrxn )
     return true;
 }
 
-
+int32_t Parameters::shortLen()
+{
+    return max( readLen, maxPeMean - readLen );
+}
