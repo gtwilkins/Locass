@@ -18,23 +18,19 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef SHARED_FUNCTIONS_H
-#define SHARED_FUNCTIONS_H
 
-#include "types.h"
+#ifndef LOCUS_PATH_H
+#define LOCUS_PATH_H
 
-int getEndTrim( string &q, string trim, bool drxn );
-int getHomopolymerLen( string &s, bool drxn );
-int getHomopolymerScore( string &s );
-bool isSequence( string &s );
-bool mapSeq( string &q, string &t, int* coords, int minLen );
-int mapCongruence( string &left, string &right, int len );
-bool mapSeqCongruent( string &left, string &right, int offset );
-bool mapSeqEnd( string &q, string &t, int minLen, int32_t* coords, bool drxn );
-int mapSeqOverlap( string &left, string &right, int minLen );
-int mapSeqOverlap( string &q, string &t, int minLen, bool drxn );
-void revComp( string &seq );
-string revCompNew( string &seq );
+#include "node.h"
+#include "node_path.h"
 
-#endif /* SHARED_FUNCTIONS_H */
+//class LocusPath
+//{
+//public:
+//    static vector<LocusPath*> create( Querier& bwt, NodeRoll& nodes );
+//};
+
+
+#endif /* LOCUS_PATH_H */
 

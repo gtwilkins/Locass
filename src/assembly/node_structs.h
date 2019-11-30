@@ -56,7 +56,7 @@ struct Coords
     void offset( int32_t offset );
     int32_t& operator[]( bool i );
     int32_t coords[3];
-    bool redundant, ignore;
+    bool redundant, ignore, unpaired;
 };
 typedef std::unordered_map<SeqNum, Coords> ReadCoords;
 
@@ -219,37 +219,37 @@ struct PairHit
 
 struct Edge
 {
-    Edge( Node* node, int overlap, bool isLeap ): node( node ), ol( overlap ), isLeap( isLeap ) {}
+    Edge( Node* node, int overlap, bool isLeap ): node( node ), ol( overlap ), leap( isLeap ) {}
     Node* node;
     int ol;
-    bool isLeap;
+    bool leap;
 };
 
-struct NodeBlock
-{
-    NodeBlock( Node* node, int base, int ext, bool drxn );
-    NodeBlock( Edge& e, int ext, bool drxn );
-    NodeBlock( NodeRoll& nodes, NodeBlock& prv, NodeBlock& nxt );
-//    void intervene( NodeBlock& l, NodeBlock& r, bool drxn );
-//    void transfer( NodeBlock& tar );
-    void transfer( vector<NodeBlock>& tar, NodeRoll& nodes, NodeRoll& added, bool drxn );
-    Node* node;
-    int32_t coords[2][3], diffs[2];
-};
+//struct NodeBlock
+//{
+//    NodeBlock( Node* node, int base, int ext, bool drxn );
+//    NodeBlock( Edge& e, int ext, bool drxn );
+//    NodeBlock( NodeRoll& nodes, NodeBlock& prv, NodeBlock& nxt );
+////    void intervene( NodeBlock& l, NodeBlock& r, bool drxn );
+////    void transfer( NodeBlock& tar );
+//    void transfer( vector<NodeBlock>& tar, NodeRoll& nodes, NodeRoll& added, bool drxn );
+//    Node* node;
+//    int32_t coords[2][3], diffs[2];
+//};
 
-struct NodeLine
-{
-    NodeLine( Node* node, bool drxn );
-    bool add( Edge& e, bool drxn );
-    void edge( Node* node, NodeRoll& nodes, int32_t coord, int ol, bool drxn );
-    void fold( NodeRoll& nodes, Nodes& mapped, bool drxn );
-    void map( Edge& e, Nodes& mapped, int ext, int align, bool drxn );
-//    void map( NodeLine& line, int len, bool drxn );
-    string seq;
-    int32_t coords[2];
-    vector<NodeBlock> tar, maps;
-    vector< tuple<Node*, int32_t, int32_t> > edges;
-};
+//struct NodeLine
+//{
+//    NodeLine( Node* node, bool drxn );
+//    bool add( Edge& e, bool drxn );
+//    void edge( Node* node, NodeRoll& nodes, int32_t coord, int ol, bool drxn );
+//    void fold( NodeRoll& nodes, Nodesx& mapped, bool drxn );
+//    void map( Edge& e, Nodesx& mapped, int ext, int align, bool drxn );
+////    void map( NodeLine& line, int len, bool drxn );
+//    string seq;
+//    int32_t coords[2];
+//    vector<NodeBlock> tar, maps;
+//    vector< tuple<Node*, int32_t, int32_t> > edges;
+//};
 
 struct MapStruct
 {

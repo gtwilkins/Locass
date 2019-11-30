@@ -61,6 +61,30 @@ float Node::getAlleleCoverage( Node* forks[2], NodeList paths[2], bool drxn )
     return cover;
 }
 
+float Node::getCoverage( vector<Node*>& nodes )
+{
+    auto getOl = []( Node* a, Node* b, bool drxn )
+    {
+        int ol = 0;
+        for ( Edge& e : a->edges_[drxn] ) if ( b ? e.node == b : !e.leap ) ol = max( ol, e.ol );        
+        return ol ? ol : params.readLen-1;
+    };
+    
+    unordered_set<ReadId> used;
+    int32_t len = ( -getOl( nodes[0], NULL, 0 ) - getOl( nodes.back(), NULL, 1 ) ) / 2, multi = 0;
+    int edge[2]{ getOl( nodes[0], NULL, 0 ), 0 };
+    for ( int i = 0; i < nodes.size(); i++ )
+    {
+        for ( auto& read : nodes[i]->reads_ ) used.insert( read.first );
+        edge[1] = getOl( nodes[i], i+1 < nodes.size() ? nodes[i+1] : NULL, 1 );
+        len += nodes[i]->size() - ( i ? edge[0] : 0 );
+        if ( nodes[i]->cloned_ ) multi += nodes[i]->cloned_->size() * ( nodes[i]->size() - ( ( edge[0] + edge[1] ) / 2 ) );
+        edge[0] = edge[1];
+    }
+    float coverage = float( used.size() * params.readLen ) / float( max( len + multi, 1 ) );
+    return float( used.size() * params.readLen ) / float( max( len + multi, 1 ) );
+}
+
 float Node::getCoverageCoeff()
 {
     if ( coverage_ < params.cover ) return (float)1;

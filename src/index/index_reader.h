@@ -34,6 +34,7 @@ public:
     void countRange( uint8_t i, CharId rank, CharId count, CharCount &ranks, CharCount &counts );
     void countRange( uint8_t i, CharId rank, CharId edge, CharId count, CharCount &ranks, CharCount &edges, CharCount &counts );
     void createSeeds( string &fn, int mer );
+    int primeOverlap( uint8_t* q, CharId &rank, CharId &count );
     void primeOverlap( string &seq, vector<uint8_t> &q, CharId &rank, CharId &count, int &ol, bool drxn );
     int setBaseAll( vector<uint8_t> &q, CharId &rank, CharId &count );
     void setBaseAll( uint8_t i, uint8_t j, CharId &rank, CharId &count );

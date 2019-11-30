@@ -108,7 +108,8 @@ Assemble::Assemble( int argc, char** argv )
     {
         cout << "Assembling locus " << to_string( i + 1 ) << " of " << to_string( seqs.size() ) << endl;
         cout << "    Searching for target loci... " << endl;
-        Seed seed( headers[i], seqs[i], bwt, errorCount );
+        Seed seed( "/home/glen/LocassDump/dump2", bwt );
+//        Seed seed( headers[i], seqs[i], bwt, errorCount );
         seedCount++;
         if ( seed.warning() ) continue;
         seed.assemble();

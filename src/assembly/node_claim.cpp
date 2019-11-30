@@ -1,7 +1,21 @@
 /*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
+ * Copyright (C) 2017 Glen T. Wilkins <glen.t.wilkins@gmail.com>
+ * Written by Glen T. Wilkins
+ * 
+ * This file is part of the Locass software package <https://github.com/gtwilkins/Locass>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "node_claim.h"
@@ -27,40 +41,50 @@ int ClaimJoin::diff( bool drxn )
     return drxn ? dist : -dist;
 }
 
-void ClaimJoin::fill( Node* node, NodeOffsets& offs, bool drxn )
+void ClaimJoin::fill( Node* node, NodeDists& dists, bool drxn )
 {
-    if ( offs.find( node ) && bridge.add( node ) )
-    {
-        for ( Edge& e : node->getAltEdges( drxn ) ) fill( e.node, offs, drxn );
-    }
+    if ( dists.find( node ) && bridge.add( node ) ) for ( Edge& e : node->edges_[drxn] ) fill( e.node, dists, drxn );
 }
 
 ClaimRepair::ClaimRepair( Node* l, Node* r )
 {
-    fork[0] = l;
-    fork[1] = r;
-    for ( int d : { 0, 1 } ) fill( fork[d], -fork[d]->size(), d );
+    forks[0].push_back( l );
+    forks[1].push_back( r );
+    for ( int d : { 0, 1 } ) for ( Node* node : forks[d] ) fill( node, -node->size(), d );
 }
 
-void ClaimRepair::dupe()
+ClaimRepair::ClaimRepair( vector<Node*>& l, vector<Node*>& r )
 {
-    ClaimRepair cr( fork[0], fork[1] );
-    unordered_map<Node*, int32_t> diffs[2]{ get( cr, 0 ), get( cr, 1 ) };
+    forks[0] = l;
+    forks[1] = r;
+    for ( int d : { 0, 1 } ) for ( Node* node : forks[d] ) fill( node, -node->size(), d );
+}
+
+void ClaimRepair::dupe( vector< pair<ClaimNode*, ClaimNode*> >& cloned, NodeRoll& nodes )
+{
+    Node* cloneForks[2]{ cloned[0].second->path_[0], cloned.back().second->path_.back() };
+    ClaimRepair cr[2]{ ClaimRepair( forks[0], forks[1] ), ClaimRepair( cloneForks[0], cloneForks[1] ) };
+    unordered_map<Node*, int32_t> diffs[2][2]{ { get( cr[0], 0 ), get( cr[1], 0 ) }, { get( cr[0], 1 ), get( cr[1], 1 ) } };
+    
+    for ( int d : { 0, 1 } ) cloneForks[d]->setState();
+    nodes.updateBad();
+    
+    bool verified[2]{ false, false };
+    for ( int d : { 0, 1 } ) for ( Edge& e : cloneForks[d]->edges_[d] ) if ( e.node->verified_ ) verified[d] = true;
+    for ( pair<ClaimNode*, ClaimNode*>& clones : cloned ) if ( verified[0] && verified[1] ) for ( Node* node : clones.second->path_ ) node->verified_ = true;
     
     Nodes repairs;
-    for ( int d : { 0, 1 } ) for ( auto& no : offs[d] ) if ( diffs[d].find( no.first ) == diffs[d].end() ) for ( auto& np : no.first->hits_.pairs[!d] )
+    for ( pair<ClaimNode*, ClaimNode*>& clones : cloned )
     {
-        if ( !no.first->cloned_ && !np.first->cloned_ ) continue;
-        auto it = diffs[!d].find( np.first );
-        if ( it != diffs[!d].end() && ( no.second + it->second ) < np.second.maxLen + 500 )
-        {
-            if ( no.first->cloned_ ) repairs += no.first;
-            if ( np.first->cloned_ ) repairs += np.first;
-            break;
-        }
+        for ( Node* node : clones.first->path_ ) for ( int d : { 0, 1 } ) for ( int i : { 0, 1 } ) diffs[d][i].erase( node );
+        for ( Node* node : clones.second->path_ ) for ( int d : { 0, 1 } ) for ( int i : { 0, 1 } ) diffs[d][i].erase( node );
+        for ( Node* node : clones.first->path_ ) node->clearPaired( true );
+        for ( Node* node : clones.second->path_ ) node->clearPaired( true );
+        for ( Node* node : clones.second->path_ ) repairs += node;
     }
-    
     for ( Node* node : repairs.nodes ) node->reverify();
+    
+    for ( int d : { 0, 1 } ) for ( int i : { 0, 1 } ) for ( auto& no : diffs[d][i] ) sever( no.first, diffs[!d][!i], !d );
 }
 
 void ClaimRepair::fill( Node* node, int32_t off, bool drxn )
@@ -72,13 +96,7 @@ void ClaimRepair::fill( Node* node, int32_t off, bool drxn )
         it.first->second = off;
     }
     
-    if ( node->cloned_ ) for ( Node* clone : node->cloned_->nodes ) if ( !clone->edges_[0].empty() || !clone->edges_[1].empty() )
-    {
-        if ( node->edges_[drxn].empty() || clone->edges_[!drxn].empty() ) fill( clone, off, drxn );
-    }
-    
-    for ( Edge& e : node->edges_[drxn] ) fill( e.node, off + node->size() - e.ol, drxn );
-    
+    if ( off < params.maxMpMean ) for ( Edge& e : node->edges_[drxn] ) fill( e.node, off + node->size() - e.ol, drxn );
 }
 
 unordered_map<Node*, int32_t> ClaimRepair::get( ClaimRepair& cr, bool drxn )
@@ -92,22 +110,47 @@ unordered_map<Node*, int32_t> ClaimRepair::get( ClaimRepair& cr, bool drxn )
     return diffs;
 }
 
-void ClaimRepair::trim()
+void ClaimRepair::sever( Node* node, unordered_map<Node*, int32_t>& tar, bool drxn )
 {
-    ClaimRepair cr( fork[0], fork[1] );
-    unordered_map<Node*, int32_t> diffs[2]{ get( cr, 0 ), get( cr, 1 ) };
-    
-    Nodes repairs;
-    for ( int d : { 0, 1 } ) for ( auto& no : diffs[d] ) if ( no.first->cloned_ ) for ( auto& np : no.first->hits_.pairs[!d] )
+    Nodes used;
+    vector< vector< pair<Node*, int32_t> > > repairs;
+    for ( auto& np : node->hits_.pairs[drxn] ) if ( np.first->cloned_ && tar.find( np.first ) != tar.end() && !used.find( np.first ) )
     {
-        auto it = diffs[!d].find( np.first );
-        if ( it != diffs[!d].end() && ( no.second + it->second ) < np.second.maxLen + 500 )
+        vector< pair<Node*, int32_t> > ests = { make_pair( np.first, np.second.estimate() ) };
+        for ( Node* clone : np.first->cloned_->nodes )
         {
-            repairs += no.first;
-            break;
+            used += clone;
+            auto it = node->hits_.pairs[drxn].find( clone );
+            if ( it != node->hits_.pairs[drxn].end() ) ests.push_back( make_pair( clone, it->second.estimate() ) );
+        }
+        if ( ests.size() > 1 ) repairs.push_back( ests );
+    }
+    
+    if ( repairs.empty() ) return;
+    
+    int32_t limit = 0;
+    for ( vector< pair<Node*, int32_t> >& ests : repairs ) for ( pair<Node*, int32_t>& est : ests ) limit = max( limit, abs( est.second ) );
+    
+    NodeDists dists( node, limit+500, drxn, drxn, true );
+    int32_t* dist = NULL;
+    for ( vector< pair<Node*, int32_t> >& ests : repairs )
+    {
+        for ( pair<Node*, int32_t>& est : ests ) est.second = ( dist = dists.get( est.first ) ) ? abs( est.second - *dist ) : params.maxMpMean+1;
+        sort( ests.begin(), ests.end(), []( pair<Node*, int32_t>& a, pair<Node*, int32_t>& b ){ return a.second < b.second; } );
+        for ( pair<Node*, int32_t>& est : ests ) if ( est.second > min( ests[0].second*2 + 200, params.maxMpMean ) )
+        {
+            assert( est.second > params.maxMpMean );
+            node->hits_.erase( est.first, drxn );
+            est.first->hits_.erase( node, !drxn );
         }
     }
-    for ( Node* node : repairs.nodes ) node->reverify();
+}
+
+void ClaimRepair::trim()
+{
+    ClaimRepair cr( forks[0], forks[1] );
+    unordered_map<Node*, int32_t> diffs[2]{ get( cr, 0 ), get( cr, 1 ) };
+    for ( int d : { 0, 1 } ) for ( auto& no : diffs[d] ) sever( no.first, diffs[!d], !d );
 }
 
 ClaimRedundant::ClaimRedundant( vector<ClaimNode*> alts[2], Node* paired[2], int hits )
@@ -151,9 +194,51 @@ bool ClaimRedundant::disregard( Node* paired[2] )
     return false;
 }
 
+int ClaimRedundant::get( unordered_set<ClaimNode*>& lTar, unordered_set<ClaimNode*>& rTar, ClaimNode* l, ClaimNode* r, bool lEdge, bool rEdge )
+{
+    for ( ClaimNode* cn : nodes[0] ) if ( lTar.find( cn ) == lTar.end() ) return 0;
+    for ( ClaimNode* cn : nodes[1] ) if ( rTar.find( cn ) == rTar.end() ) return 0;
+    
+    vector<bool> tars( nodes[1].size(), false );
+    unordered_set<ClaimNode*> pathed;
+    for ( ClaimNode* cn : nodes[0] )
+    {
+        bool reached = false;
+        if ( !reach( cn, l, r, tars, pathed, reached, lEdge, rEdge ) || !reached ) return 0;
+    }
+    for ( bool reached : tars ) if ( !reached ) return 0;
+    return score;
+}
+
+bool ClaimRedundant::reach( ClaimNode* cn, ClaimNode* l, ClaimNode* r, vector<bool>& tars, unordered_set<ClaimNode*>& pathed, bool& reached, bool lEdge, bool rEdge )
+{
+    for ( int i = 0; i < nodes[1].size(); i++ ) if ( cn == nodes[1][i] )
+    {
+        if ( l || r ) return false;
+        tars[i] = reached = true;
+        return true;
+    }
+    
+    if ( !pathed.insert( cn ).second ) return true;
+    if ( !lEdge && !rEdge && cn == l ) l = NULL;
+    
+    for ( ClaimEdge& ce : cn->edges_[1] )
+    {
+        if ( ce.node == r && !lEdge && !rEdge && l ) return false;
+        
+        bool edged = lEdge == ( cn == l ) && rEdge == ( ce.node == r );
+        if ( !lEdge && !rEdge ) edged = ce.node == r;
+        
+        if ( !reach( ce.node, edged ? NULL : l, edged ? NULL : r, tars, pathed, reached, lEdge, rEdge ) ) return false;
+    }
+    
+    for ( ClaimJoin* cj : cn->joins_[1] ) if ( !reach( cj->node[1], l, !l && cj->node[1] == r ? NULL : r, tars, pathed, reached, lEdge, rEdge ) ) return false;
+    pathed.erase( cn );
+    return true;
+}
 
 ClaimPairing::ClaimPairing( ClaimNode* l, ClaimNode* r, int32_t dist )
-: diffs{ dist }, missed{ 0 }, paths( 1 ), score( 0 )
+: diffs{ dist }, missed{ 0 }, hits( 0 )
 {
     node[0] = l;
     node[1] = r;
@@ -167,10 +252,73 @@ ClaimPairing::~ClaimPairing()
 
 int ClaimPairing::hit( vector<int32_t>& hitDiffs )
 {
-    int miss = -score;
+    int miss = -hits;
     for ( int32_t d : hitDiffs ) for ( int i = 0; i < diffs.size(); i++ ) if ( diffs[i] == d ) miss = max( miss, -missed[i] );
     assert( !miss );
-    return miss + score;
+    return miss + hits;
+}
+
+int ClaimPairing::get( ClaimNode* l, ClaimNode* r, bool lEdge, bool rEdge )
+{
+    unordered_set<ClaimNode*> pathed;
+    int score = 0;
+    return reach( node[0], l, r, pathed, 0, score, lEdge, rEdge ) ? score : 0;
+}
+
+int ClaimPairing::get( vector<ClaimNode*>& path, int mode )
+{
+    unordered_set<ClaimNode*> pathed;
+    int score = 0;
+    return reach( node[0], path, 0, mode, pathed, 0, score, false, false ) ? score : 0;
+}
+
+bool ClaimPairing::reach( ClaimNode* cn, vector<ClaimNode*>& path, int i, int mode, unordered_set<ClaimNode*>& pathed, int32_t diff, int& score, bool success, bool fail )
+{
+    if ( cn == path[0] ) ( mode == 0 ? fail : success ) = true;
+    if ( cn == path.back() ) ( mode == 1 ? fail : success ) = true;
+    if ( i < path.size() ) i = ( cn == path[i] ? i+1 : 0 );
+    
+    if ( cn == node[1] )
+    {
+        if ( mode == 2 ? ( i != path.size() ) : ( !success || fail ) ) return false;
+        for ( int i = 0; i < diffs.size(); i++ ) if ( diff == diffs[i] ) score = max( score, hits - missed[i] );
+        return true;
+    }
+    
+    if ( !pathed.insert( cn ).second ) return true;
+    for ( ClaimEdge& ce : cn->edges_[1] ) if ( !reach( ce.node, path, i, mode, pathed, diff+ce.diff, score, success, fail ) ) return false;
+    for ( ClaimJoin* cj : cn->joins_[1] ) if ( !reach( cj->node[1], path, i, mode, pathed, diff+cj->dist, score, success, fail ) ) return false;
+    pathed.erase( cn );
+    
+    return true;
+}
+
+bool ClaimPairing::reach( ClaimNode* cn, ClaimNode* l, ClaimNode* r, unordered_set<ClaimNode*>& pathed, int32_t diff, int& score, bool lEdge, bool rEdge )
+{
+    if ( cn == node[1] )
+    {
+        if ( l || r ) return false;
+        for ( int i = 0; i < diffs.size(); i++ ) if ( diff == diffs[i] ) score = max( score, hits - missed[i] );
+        return true;
+    }
+    
+    if ( !pathed.insert( cn ).second ) return true;
+    if ( !lEdge && !rEdge && cn == l ) l = NULL;
+    
+    for ( ClaimEdge& ce : cn->edges_[1] )
+    {
+        if ( ce.node == r && !lEdge && !rEdge && l ) return false;
+        
+        bool edged = lEdge == ( cn == l ) && rEdge == ( ce.node == r );
+        if ( !lEdge && !rEdge ) edged = ce.node == r;
+        
+        if ( !reach( ce.node, edged ? NULL : l, edged ? NULL : r, pathed, diff + ce.diff, score, lEdge, rEdge ) ) return false;
+    }
+    
+    for ( ClaimJoin* cj : cn->joins_[1] ) if ( !reach( cj->node[1], l, !l && cj->node[1] == r ? NULL : r, pathed, diff + cj->dist, score, lEdge, rEdge ) ) return false;
+    pathed.erase( cn );
+    
+    return true;
 }
 
 ClaimScore::ClaimScore( Node* l, Node* r, ClaimPairing* cp, int32_t dist, int32_t est )
@@ -184,26 +332,21 @@ ClaimScore::ClaimScore( Node* l, Node* r, ClaimPairing* cp, int32_t dist, int32_
 
 void ClaimScore::addRedundant( vector<ClaimNode*> alts[2], int hits )
 {
-    assert( alts[0].size() == 1 || alts[1].size() == 1 );
+    if ( alts[0].size() > 1 && alts[1].size() > 1 ) return;
     assert( alts[0].size() > 1 || alts[1].size() > 1 );
     for ( ClaimRedundant* cr : pairs[0]->node[0]->redundant_[1] ) if ( cr->add( alts, node, hits ) ) return;
     new ClaimRedundant( alts, node, hits );
 }
 
-bool ClaimScore::cull( int32_t cutoff )
+void ClaimScore::cull( int32_t cutoff )
 {
-    bool incomplete = false;
     for ( int i = 0; i < pairs.size(); i++ )
     {
         bool good = false, bad = false;
         for ( int32_t diff : diffs[i] ) ( diff < cutoff ? good : bad ) = true;
-        assert( good );
-        if ( good && bad ) incomplete = true;
         if ( !good ) diffs.erase( diffs.begin() + i );
         if ( !good ) pairs.erase( pairs.begin() + i-- );
     }
-    assert( !incomplete );
-    return !incomplete;
 }
 
 bool ClaimScore::redundant( vector<ClaimNode*>& claims, int32_t est, int32_t best, int32_t cutoff, int hits )
@@ -236,10 +379,8 @@ bool ClaimScore::redundant( vector<ClaimNode*>& claims, int32_t est, int32_t bes
         ClaimPairing* cp = cns[0][i]->getPairing( cns[1][j], 1 );
         if ( !cp ) continue;
         
-        assert( !cp->node[0]->isInvalid( nodes[0][i], offs[1][j], cp->node[1], 1 ) );
-        assert( !cp->node[1]->isInvalid( nodes[1][j], offs[0][i], cp->node[0], 0 ) );
-        if ( cp->node[0]->isInvalid( nodes[0][i], offs[1][j], cp->node[1], 1 ) ) return true;
-        if ( cp->node[1]->isInvalid( nodes[1][j], offs[0][i], cp->node[0], 0 ) ) return true;
+        if ( cp->node[0]->isInvalid( nodes[0][i], offs[0][i], cp->node[1], 1 ) ) return true;
+        if ( cp->node[1]->isInvalid( nodes[1][j], offs[1][j], cp->node[0], 0 ) ) return true;
         
         for ( ClaimScore& cs : scores ) if ( cs.node[0] == nodes[0][i] && cs.node[1] == nodes[1][j] )
         {
@@ -255,8 +396,8 @@ bool ClaimScore::redundant( vector<ClaimNode*>& claims, int32_t est, int32_t bes
     for ( ClaimScore& cs : scores ) for ( int i = 0; i < cs.diffs.size(); i++ ) for ( int32_t diff : cs.diffs[i] ) best = min( best, diff );
     
     cutoff += best;
-    if ( !cull( cutoff ) ) return true;
-    for ( ClaimScore& cs : scores ) if ( !cs.cull( cutoff ) ) return true;
+    cull( cutoff );
+    for ( ClaimScore& cs : scores ) cs.cull( cutoff );
     
     vector<ClaimNode*> alts[2];
     for ( int d : { 0, 1 } ) setClaims( alts[d], d );
@@ -269,7 +410,6 @@ bool ClaimScore::redundant( vector<ClaimNode*>& claims, int32_t est, int32_t bes
     
     Nodes usedNodes;
     for ( int d : { 0, 1 } ) for ( ClaimNode* cn : alts[d] ) cn->setBase( usedNodes, true );
-//    for ( int d : { 0, 1 } ) for ( Node* clone : clones[d].nodes ) if ( !usedNodes.find( clone ) ) assert( alts[0].size() == 1 && alts[1].size() == 1 );
     for ( int d : { 0, 1 } ) for ( Node* clone : clones[d].nodes ) if ( !usedNodes.find( clone ) ) return true;
     
     if ( alts[0].size() == 1 && alts[1].size() == 1 ) return false;
@@ -296,7 +436,7 @@ void ClaimScore::score( vector<ClaimNode*>& claims, int32_t est, int32_t cutoff,
         return;
     }
     cutoff += best;
-    if ( !cull( cutoff ) && pairs.size() > 1 ) return;
+    cull( cutoff );
     
     bool distal[2]{ false, false };
     if ( setDistal( distal ) ) return;
@@ -311,7 +451,7 @@ void ClaimScore::score( vector<ClaimNode*>& claims, int32_t est, int32_t cutoff,
         return;
     }
     
-    pairs[0]->score += hits;
+    pairs[0]->hits += hits;
     assert( pairs[0]->diffs.size() == diffs[0].size() );
     for ( int i = 0; i < diffs[0].size(); i++ ) if ( cutoff < diffs[0][i] ) pairs[0]->missed[i] += hits;
     for ( int i = 0; i < diffs[0].size(); i++ ) if ( cutoff < diffs[0][i] ) assert( false );
@@ -346,334 +486,291 @@ void ClaimScore::setClaims( vector<ClaimNode*>& claims, bool drxn )
     for ( ClaimPairing* cp : pairs ) if ( find( claims.begin(), claims.end(), cp->node[drxn] ) == claims.end() ) claims.push_back( cp->node[drxn] );
 }
 
-ClaimDupe::ClaimDupe( ClaimNode* seed, vector<ClaimDupe*>& paths, bool drxn )
-: path{ seed }, duped( false ), ignored( false )
+ClaimBranch::ClaimBranch( ClaimEdge& ce, bool shared, bool drxn )
+: edge( ce ), path{ ce.node }, claimed( false ), shared( shared )
 {
-    paths.push_back( this );
-    extend( paths, drxn );
+    if ( !drxn ) while ( path[0]->edges_[0].size() == 1 ) path.insert( path.begin(), path[0]->edges_[0][0].node );
+    if ( drxn ) while ( path.back()->edges_[1].size() == 1 ) path.push_back( path.back()->edges_[1][0].node );
+    fill( ce.node, drxn );
 }
 
-ClaimDupe::ClaimDupe( ClaimDupe* seed, ClaimNode* branch, vector<ClaimDupe*>& paths, bool drxn )
-: path( seed->path ), duped( false ), ignored( false )
+bool ClaimBranch::claim( unordered_set<ClaimBranch*> claims[2] )
 {
-    paths.push_back( this );
-    path.insert( drxn ? path.end() : path.begin(), branch );
-    extend( paths, drxn );
-}
-
-bool ClaimDupe::create( ClaimNode* fork, vector<ClaimDupe*> paths[2], bool drxn )
-{
-    new ClaimDupe( fork, paths[!drxn], !drxn );
-    for ( ClaimEdge& ce : fork->edges_[drxn] ) new ClaimDupe( ce.node, paths[drxn], drxn );
+    if ( dumped[1].empty() ) return false;
+    assert( !dumped[0].empty() );
     
-    unordered_set<ClaimNode*> shared;
-    for ( int d : { 0, 1 } ) for ( int i = 0; i+1 < paths[d].size(); i++ ) for ( int j = i+1; j < paths[d].size(); j++ )
+    // Catalog the paths to keep or discard
+    unordered_set<ClaimBranch*> discard[2];
+    for ( int i : { 0, 1 } ) for ( pair<ClaimBranch*, int>& cbp : dumped[i] ) ( i ? discard : claims )[1].insert( cbp.first );
+    for ( int i : { 0, 1 } ) for ( pair<ClaimBranch*, int>& cbp : dumped[0][0].first->dumped[i] ) ( i ? discard : claims )[0].insert( cbp.first );
+    
+    // Ensure all path pairs can be cleanly claimed
+    for ( int d : { 0, 1 } ) for ( ClaimBranch* cb : claims[d] )
     {
-        for ( ClaimNode* cn : paths[d][i]->pathed ) if ( paths[d][j]->pathed.find( cn ) != paths[d][j]->pathed.end() ) shared.insert( cn );
-    }
-    
-    return paths[0].size() > 1 && paths[1].size() > 1;
-}
-
-bool ClaimDupe::dump( ClaimNode* fork, ClaimDupe* l, ClaimDupe* r, vector<ClaimDupe*> paths[2], int& pairing )
-{
-    ClaimDupe* cds[2]{ l, r };
-    unordered_set<ClaimNode*> shared, tar[2], alt[2];
-    int misses = 0, hits[2]{0};
-    
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : paths[d] ) if ( cd != cds[d] ) for ( ClaimNode* cn : cd->pathed )
-    {
-        ( cds[d]->pathed.find( cn ) != cds[d]->pathed.end() ? shared : alt[d] ).insert( cn );
-    }
-    for ( int d : { 0, 1 } ) for ( ClaimNode* cn : cds[d]->path ) if ( shared.find( cn ) == shared.end() ) tar[d].insert( cn );
-    
-    for ( ClaimNode* cn : tar[0] ) for ( ClaimPairing* cp : cn->pairs_[1] ) if ( tar[1].find( cp->node[1] ) != tar[1].end() )
-    {
-        vector<int32_t> diffs;
-        if ( !cn->reach( cp->node[1], fork, 0, diffs, false, 1 ) ) continue;
-        assert( cp->hit( diffs ) );
-        pairing += cp->hit( diffs );
-    }
-    if ( pairing ) return false;
-    
-    unordered_set<ClaimRedundant*> used[2];
-    for ( int d : { 0, 1 } ) for ( ClaimNode* cn : tar[d] )
-    {
-        for ( ClaimPairing* cp : cn->pairs_[!d] ) if ( alt[!d].find( cp->node[!d] ) != alt[!d].end() )
-        {
-            vector<int32_t> diffs;
-            if ( !cn->reach( cp->node[!d], fork, 0, diffs, false, !d ) ) continue;
-            hits[d] += cp->hit( diffs );
-            assert( cp->hit( diffs ) );
-        }
-        for ( ClaimRedundant* cr : cn->redundant_[!d] ) if ( used[d].insert( cr ).second )
-        {
-            bool good = true;
-            for ( ClaimNode* cnp : cr->nodes[d] ) if ( tar[d].find( cnp ) == tar[d].end() ) good = false;
-            for ( ClaimNode* cnp : cr->nodes[!d] ) if ( alt[!d].find( cnp ) == alt[!d].end() ) good = false;
-            if ( !good ) continue;
-            hits[d] += cr->score;
-        }
-    }
-    
-    if ( !hits[0] || !hits[1] ) return false;
-    assert( !misses );
-    
-    misses /= 2;
-    bool failed = min( hits[0], hits[1] ) - misses < 2;
-    if ( !( hits[0] + hits[1] - misses > 7 ) ) failed = true;
-    
-    cout << "        " << ( failed ? "NOT DUPED: " : "DUPED: " ) << hits[0] << "-" << hits[1] << endl;
-    
-    if ( min( hits[0], hits[1] ) - misses < 2 ) return false;
-    
-    return hits[0] + hits[1] - misses > 7;
-}
-
-bool ClaimDupe::dupe( ClaimNode* fork, NodeRoll& nodes, bool drxn )
-{
-    vector<ClaimDupe*> paths[2];
-    
-    bool duped = false;
-    
-    if ( ClaimDupe::create( fork, paths, drxn ) )
-    {
-        cout << "    Duplicate attempt, coords: " << fork->getFork( 1 )->ends_[1] << ", paths: " << paths[0].size() << "-" << paths[1].size() << endl;
-        duped = setDumps( fork, paths ) && setIgnores( paths ) && setDupes( fork->getFork( drxn ), paths, nodes, drxn );
-        if ( !duped ) setSplits( paths );
-        cout << "    " << ( duped ? "DUPLICATED!" : "FAILED!" ) << endl << endl;
-    }
-    else assert( false );
-    
-    if ( duped ) for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : paths[d] ) for ( ClaimNode* cn : cd->path ) if ( cn->setState( d ) ) break;
-    
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : paths[d] ) delete cd;
-    
-    
-    return duped;
-}
-
-void ClaimDupe::dupeNodes( unordered_set<ClaimNode*>& dupes, NodeRoll& cloned, Nodes& base, bool drxn )
-{
-    for ( int i = 0; i < path.size(); i++ )
-    {
-        ClaimNode* cn = drxn ? path[i] : path.end()[-i-1];
-        if ( dupes.find( cn ) == dupes.end() ) return;
-        if ( cn == cn->clone_ ) cn->clone_ = new ClaimNode( cn, cloned, base );
-    }
-}
-
-bool ClaimDupe::dupePath( Node* fork, NodeRoll& cloned, Nodes& base, bool drxn )
-{
-    vector<ClaimDupe*> claim[2];
-    unordered_set<ClaimNode*> alts;
-    if ( !isDupe( claim, alts, drxn ) ) return false;
-    
-    ClaimRepair cr( fork, fork );
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : claim[d] ) cd->dupeNodes( alts, cloned, base, d );
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : claim[d] ) cd->dupeEdges( alts, d );
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : claim[d] ) cd->duped = true;
-    cr.dupe();
-    
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : claim[d] ) for ( ClaimNode* cn : cd->path ) if ( cn->clone_ != cn )
-    {
-        delete cn->clone_;
-        cn->clone_ = cn;
+        if ( cb->dumped[0].size() != claims[!d].size() ) return false;
+        for ( pair<ClaimBranch*, int>& cbp : cb->dumped[0] ) if ( claims[!d].find( cbp.first ) == claims[!d].end() ) return false;
     }
     
     return true;
 }
 
-void ClaimDupe::dupeEdges( unordered_set<ClaimNode*>& trims, bool drxn )
-{
-    ClaimNode* cn = NULL;
-    for ( int i = 0; ( !cn || cn != cn->clone_ ) && i < path.size(); i++ )
-    {
-        cn = drxn ? path[i] : path.end()[-i-1];
-        for ( ClaimEdge& ce : cn->edges_[!drxn] ) if ( trims.find( ce.node->clone_ ) == trims.end() )
-        {
-            cn->clone_->getFork( !drxn )->addEdge( ce.node->clone_->getFork( drxn ), ce.ol, !drxn, false, ce.isLeap );
-            cn->clone_->addEdge( ce.node->clone_, ce.ol, ce.diff, ce.isLeap, !drxn );
-        }
-    }
-    assert( cn == cn->clone_ );
-    for ( int i = 0; i < cn->edges_[!drxn].size(); i++ ) if ( trims.find( cn->edges_[!drxn][i].node ) != trims.end() )
-    {
-        assert( cn->removeEdge( cn->edges_[!drxn][i--].node, !drxn ) );
-    }
-    cn = drxn ? path[0] : path.back();
-    if ( cn == cn->clone_ || !cn->clone_->edges_[!drxn].empty() ) return;
-//    for ( ClaimEdge& ce : cn->edges_[!drxn] ) if ( trims.find( ce.node->clone_ ) == trims.end() )
-//    {
-//        
-//    }
-    assert( false );
-}
-
-void ClaimDupe::extend( vector<ClaimDupe*>& paths, bool drxn )
-{
-    for ( ClaimNode* cn = drxn ? path.back() : path[0]; !cn->edges_[drxn].empty(); )
-    {
-        for ( int i = 1; i < cn->edges_[drxn].size(); i++ ) new ClaimDupe( this, cn->edges_[drxn][i].node, paths, drxn );
-        cn = cn->edges_[drxn][0].node;
-        path.insert( drxn ? path.end() : path.begin(), cn );
-    }
-    
-    for ( ClaimNode* cn : path )
-    {
-        pathed.insert( cn );
-        for ( ClaimJoin* cj : cn->joins_[drxn] ) fill( cj->node[drxn], drxn );
-    }
-}
-
-void ClaimDupe::fill( ClaimNode* cn, bool drxn )
+void ClaimBranch::fill( ClaimNode* cn, bool drxn )
 {
     if ( !pathed.insert( cn ).second ) return;
     for ( ClaimEdge& ce : cn->edges_[drxn] ) fill( ce.node, drxn );
     for ( ClaimJoin* cj : cn->joins_[drxn] ) fill( cj->node[drxn], drxn );
 }
 
-bool ClaimDupe::isDupe( vector<ClaimDupe*>& paths )
+bool ClaimBranch::isShared( unordered_set<ClaimBranch*>& alts )
 {
-    assert( !kept.empty() );
-    if ( dumped.empty() || duped ) return false;
-    
-    for ( ClaimDupe* cd : paths ) if ( cd != this && cd->dumped.size() >= kept.size() )
-    {
-        bool doDupe = false;
-        for ( ClaimDupe* cdp : dumped ) if ( !cdp->duped ) doDupe = true;
-        for ( ClaimDupe* cdp : kept ) if ( find( cd->dumped.begin(), cd->dumped.end(), cdp ) == cd->dumped.end() ) doDupe = false;
-        if ( doDupe ) return true;
-    }
-    
+    if ( shared ) return true;
+    for ( pair<ClaimBranch*, int>& cbp : dumped[0] ) if ( !cbp.first->claimed && alts.find( cbp.first ) == alts.end() ) return true;
     return false;
 }
 
-bool ClaimDupe::isDupe( vector<ClaimDupe*> claim[2], unordered_set<ClaimNode*>& alts, bool drxn )
+ClaimDupe::ClaimDupe( ClaimNode* seed )
+: path{ seed }, gen( 0 )
 {
-    if ( kept.empty() || dumped.empty() || duped ) return false;
-    claim[drxn] = kept;
-    claim[!drxn] = kept[0]->kept;
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : claim[d] )
+    while ( path[0]->edges_[0].size() == 1 ) path.insert( path.begin(), path[0]->edges_[0][0].node );
+    while ( path.back()->edges_[1].size() == 1 ) path.push_back( path.back()->edges_[1][0].node );
+    forks[0] = path[0];
+    forks[1] = path.back();
+    edge[0] = edge[1] = NULL;
+    for ( int d : { 0, 1 } ) for ( ClaimEdge& ce : forks[d]->edges_[d] ) branches[d].push_back( new ClaimBranch( ce, false, d ) );
+    for ( int d : { 0, 1 } ) for ( ClaimBranch* cb : branches[d] ) edged[d].insert( cb->edge.node );
+}
+
+ClaimDupe::ClaimDupe( ClaimBranch* seed, ClaimDupe* cd, bool drxn )
+: path( seed->path ), gen( cd->gen+1 )
+{
+    forks[drxn] = drxn ? path.back() : path[0];
+    forks[!drxn] = cd->forks[!drxn];
+    while ( cd->edge[drxn] ) cd = cd->edge[drxn];
+    edge[drxn] = NULL;
+    edge[!drxn] = cd;
+    cd->edge[drxn] = this;
+    for ( ClaimEdge& ce : ( drxn ? path.back() : path[0] )->edges_[drxn] ) branches[drxn].push_back( new ClaimBranch( ce, false, drxn ) );
+    for ( ClaimBranch* cb : branches[drxn] ) edged[drxn].insert( cb->edge.node );
+//    for ( int d : { 0, 1 } ) edged[d].insert( cd->edged[d].begin(), cd->edged[d].end() );
+    edged[!drxn].insert( drxn ? cd->path.back() : cd->path[0] );
+}
+
+ClaimDupe::~ClaimDupe()
+{
+    for ( int d : { 0, 1 } ) for ( ClaimBranch* cb : branches[d] ) delete cb;
+    for ( int d : { 0, 1 } ) if ( edge[d] ) edge[d]->edge[!d] = NULL;
+}
+
+bool ClaimDupe::advance( ClaimBranch* cb, vector<ClaimNode*>& claims, NodeRoll& nodes, bool& split, bool drxn )
+{
+    int branched = 0;
+    for ( pair<ClaimBranch*, int>& cbp : cb->dumped[0] ) if ( cbp.second > 4 ) branched++;
+    if ( branched < 2 ) return false;
+    
+    ClaimNode* cn = drxn ? cb->path.back() : cb->path[0];
+    if ( !cn->edged_[drxn] || cn->edges_[drxn].empty() )
     {
-        if ( cd->kept.size() != claim[!d].size() ) return false;
-        for ( int i = 0; i < cd->kept.size(); i++ ) if ( cd->kept[i] != claim[!d][i] ) return false;
+        cn->split_ = split = true;
+        return false;
     }
     
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : claim[d][0]->dumped ) if ( !cd->duped ) for ( ClaimNode* cn : cd->path ) alts.insert( cn );
+    ClaimDupe cd( cb, this, drxn );
+    for ( pair<ClaimBranch*, int>& cbp : cb->dumped[0] )
+    {
+        cd.branches[!drxn].push_back( new ClaimBranch( cbp.first->edge, cbp.first->shared || cbp.first->dumped[0].size() > 1, !drxn ) );
+    }
+    cout << string( ( gen+2 )*4, ' ' ) << "ADVANCING " << ( drxn ? "RIGHT" : "LEFT" ) << endl;
+    if ( cd.resolve( claims, nodes ) ) return true;
+    return false;
+}
+
+bool ClaimDupe::claim( unordered_set<ClaimBranch*> claimed[2], vector<ClaimNode*>& claims, NodeRoll& nodes )
+{
+    assert( !edge[0] || !edge[1] );
+    vector<ClaimDupe*> dupes = { this };
+    while ( dupes[0]->edge[0] ) dupes.insert( dupes.begin(), dupes[0]->edge[0] );
+    while ( dupes.back()->edge[1] ) dupes.insert( dupes.end(), dupes.back()->edge[1] );
+    
+    unordered_set<ClaimNode*> edges[2];
+    for ( int d : { 0, 1 } ) for ( ClaimEdge& ce : ( d ? dupes.back()->path.back() : dupes[0]->path[0] )->edges_[d] ) edges[d].insert( ce.node );
+    for ( int d : { 0, 1 } ) for ( ClaimBranch* cb : claimed[d] ) assert( edges[d].find( cb->edge.node ) != edges[d].end() );
+    
+    bool unduped[2]{ edges[0].size() == claimed[0].size(), edges[1].size() == claimed[1].size() };
+    for ( int d : { 0, 1 } ) for ( ClaimBranch* cb : claimed[d] ) if ( cb->shared ) unduped[d] = false;
+    
+    if ( dupes.size() == 1 && unduped[0] && unduped[1] ) return true;
+    if ( dupes.size() == 1 ) assert( !unduped[0] && !unduped[1] );
+    if ( unduped[0] && unduped[1] ) assert( dupes.size() != 2 );
+    
+    vector< pair<ClaimNode*, ClaimNode*> > cloned;
+    for ( int i = unduped[0]; i + unduped[1] < dupes.size(); i++ ) dupes[i]->setPath( cloned, claims, nodes );
+    
+    ClaimRepair cr( dupes[ unduped[0] ]->path[0]->getFork( 0 ), dupes.end()[ -1-unduped[1] ]->path.back()->getFork( 1 ) );
+    for ( int d : { 0, 1 } ) if ( unduped[d] ) ( d ? dupes.back() : dupes[0] )->setDettached( cloned, d );
+    for ( int d : { 0, 1 } ) if ( !unduped[d] ) for ( ClaimBranch* cb : claimed[d] )
+    {
+        ( d ? cloned.back() : cloned[0] ).second->addEdge( cb->edge.node, cb->edge.ol, cb->edge.diff, cb->edge.isLeap, d, true, true );
+        if ( !cb->isShared( claimed[!d] ) ) ( d ? cloned.back() : cloned[0] ).first->removeEdge( cb->edge.node, d );
+    }
+    cr.dupe( cloned, nodes );
     
     return true;
 }
 
-bool ClaimDupe::setDumps( ClaimNode* fork, vector<ClaimDupe*> paths[2] )
+bool ClaimDupe::dupe( ClaimNode* fork, vector<ClaimNode*>& claims, NodeRoll& nodes )
 {
-    bool anyDumped = false;
-    for ( ClaimDupe* l : paths[0] ) for ( ClaimDupe* r : paths[1] )
-    {
-        int pairing = 0;
-        bool dumped = dump( fork, l, r, paths, pairing );
-        ( dumped ? l->dumped : l->kept ).push_back( r );
-        ( dumped ? r->dumped : r->kept ).push_back( l );
-        if ( !dumped ) l->pairings.push_back( pairing );
-        if ( !dumped ) r->pairings.push_back( pairing );
-        if ( dumped ) anyDumped = true;
-    }
-    return anyDumped;
+    ClaimDupe cd( fork );
+    bool duped = cd.resolve( claims, nodes );
+    cout << endl;
+    return duped;
 }
 
-bool ClaimDupe::setDupes( Node* fork, vector<ClaimDupe*> paths[2], NodeRoll& nodes, bool drxn )
+bool ClaimDupe::resolve( vector<ClaimNode*>& claims, NodeRoll& nodes )
 {
-    Nodes base;
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : paths[d] ) if ( !cd->kept.empty() ) for ( ClaimNode* cn : cd->path ) cn->setBase( base, false );
+    cout << string( ( gen+1 )*4, ' ' ) << "Duplicate attempt, coords: " << forks[0]->getFork( 0 )->ends_[0] << " to " << forks[1]->getFork( 1 )->ends_[1] << ", paths: " << branches[0].size() << "-" << branches[1].size() << endl;
     
-    NodeRoll cloned;
-    bool duped = false;
-    for ( ClaimDupe* cd : paths[!drxn] ) if ( cd->dupePath( fork, cloned, base, drxn ) ) duped = true;
+    bool duped = false, split = false, announced = false;
     
-    for ( Node* clone : cloned.nodes )
+    if ( forks[0]->getFork( 0 )->ends_[0] == -3201 && forks[1]->getFork( 1 )->ends_[1] == -3022 )
     {
-        assert( nodes.add( clone ) );
-        clone->reverify();
+        int x = 0;
     }
     
-    if ( duped ) assert( !cloned.empty() );
+    // Pair branches and dump false pairings
+    for ( ClaimBranch* l : branches[0] ) for ( ClaimBranch* r : branches[1] )
+    {
+        int unique = setUniques( l, r );
+        bool dumped = !unique && setDump( l, r );
+        l->dumped[dumped].push_back( make_pair( r, unique ) );
+        r->dumped[dumped].push_back( make_pair( l, unique ) );
+    }
+    
+    if ( forks[0]->getFork( 0 )->ends_[0] == -3383 && forks[1]->getFork( 1 )->ends_[1] == -3126 )
+    {
+        int x = 0;
+    }
+    
+    // Claim any clean pairings
+    for ( ClaimBranch* l : branches[0] )
+    {
+        unordered_set<ClaimBranch*> claimed[2];
+        if ( l->claim( claimed ) && claim( claimed, claims, nodes ) ) duped = true;
+    }
+    if ( duped && ( announced = true ) ) cout << string( ( gen+1 )*4, ' ' ) << "DUPED CLEANLY" << endl;
+    
+    // Extend any branch that pairs strongly to more than one branch
+    if ( !duped ) for ( int d : { 0, 1 } ) for ( ClaimBranch* cb : branches[d] ) if ( !duped && ( duped = advance( cb, claims, nodes, split, d ) ) ) break;
+    if ( duped && !announced && ( announced = true ) ) cout << string( ( gen+1 )*4, ' ' ) << "DUPED AHEAD" << endl;
+    
+    // Claim any branch than has only one pairing, but that pair has multiple in return
+    if ( !duped && !split )
+    {
+        vector<ClaimBranch*> claimable[2];
+        for ( int d : { 0, 1 } ) for ( ClaimBranch* cb : branches[d] ) if ( cb->dumped[0].size() == 1 ) claimable[d].push_back( cb );
+        for ( int d : { 0, 1 } ) for ( ClaimBranch* cb : claimable[d] )
+        {
+            unordered_set<ClaimBranch*> claimed[2];
+            claimed[d].insert( cb );
+            claimed[!d].insert( cb->dumped[0][0].first );
+//            if ( claim( claimed, claims, nodes ) ) cb->claimed = duped = true;
+        }
+    }
+    if ( duped && !announced && ( announced = true ) ) cout << string( ( gen+1 )*4, ' ' ) << "DUPED SOLO" << endl;
+    if ( !announced && split ) cout << string( ( gen+1 )*4, ' ' ) << "SET SPLIT" << endl;
+    else if ( !announced && !duped ) cout << string( ( gen+1 )*4, ' ' ) << "NOT DUPED!" << endl;
     
     return duped;
 }
 
-bool ClaimDupe::setIgnores( vector<ClaimDupe*> paths[2] )
+void ClaimDupe::setDettached( vector< pair<ClaimNode*, ClaimNode*> >& cloned, bool drxn )
 {
-    unordered_set<ClaimDupe*> ignore[2], include[2];
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : paths[d] ) ( cd->dumped.empty() ? ignore : include )[d].insert( cd );
-    
-    if ( include[0].size() < 2 || include[1].size() < 2 ) return false;
-    if ( ignore[0].empty() && ignore[1].empty() ) return true;
-    
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : ignore[d] ) for ( int pairing : cd->pairings ) if ( pairing > 1 ) assert( false );
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : ignore[d] ) for ( int pairing : cd->pairings ) if ( pairing > 1 ) return false;
-    
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : ignore[d] )
-    {
-        int maxLen = 0, minLen = cd->path.size();
-        for ( ClaimDupe* alt : include[d] ) 
-        {
-            int i = 0, limit = min( cd->path.size(), alt->path.size() );
-            while ( i < limit && ( d ? cd->path[i] == alt->path[i] : cd->path.end()[-i-1] == alt->path.end()[-i-1] ) ) i++;
-            assert( i < limit );
-            minLen = min( minLen, i );
-            maxLen = max( maxLen, i );
-        }
-        if ( maxLen != minLen )
-        {
-            if ( cd->path[maxLen]->getFork( !d )->isBlunt( 0, 5, d ) )
-            {
-                continue;
-            }
-            return false;
-        }
-    }
-    
-    for ( int d : { 0, 1 } ) if ( !ignore[d].empty() ) for ( ClaimDupe* cd : include[!d] )
-    {
-        bool unclaimed = true;
-        for ( int i = 0; i < cd->kept.size(); i++ ) if ( include[d].find( cd->kept[i] ) != include[d].end() && cd->pairings[i] > 4 ) unclaimed = false;
-        if ( unclaimed )
-        {
-            return false;
-        }
-    }
-    
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : ignore[d] ) cd->kept.clear();
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : include[d] ) for ( int i = 0; i < cd->kept.size(); i++ )
-    {
-        if ( ignore[!d].find( cd->kept[i] ) == ignore[!d].end() ) continue;
-        cd->kept.erase( cd->kept.begin() + i );
-        cd->pairings.erase( cd->pairings.begin() + i-- );
-    }
-    
-    return true;
+    ClaimEdge ce = drxn ? path[0]->getEdge( cloned.back().first, 0 ) : path.back()->getEdge( cloned[0].first, 1 );
+    assert( ce.node );
+    ( drxn ? path[0] : path.back() )->addEdge( ( drxn ? cloned.back() : cloned[0] ).second, ce.ol, ce.diff, ce.isLeap, !drxn, true, true );
+    ( drxn ? path[0] : path.back() )->removeEdge( ce.node, !drxn );
 }
 
-void ClaimDupe::setSplits( vector<ClaimDupe*> paths[2] )
+bool ClaimDupe::setDump( ClaimBranch* l, ClaimBranch* r )
 {
-    for ( int d : { 0, 1 } ) for ( ClaimDupe* cd : paths[d] )
+    unordered_set<ClaimNode*> alts[2];
+    for ( ClaimBranch* cb : branches[0] ) if ( cb != l ) for ( ClaimNode* cn : cb->pathed ) if ( l->pathed.find( cn ) == l->pathed.end() ) alts[0].insert( cn );
+    for ( ClaimBranch* cb : branches[1] ) if ( cb != r ) for ( ClaimNode* cn : cb->pathed ) if ( r->pathed.find( cn ) == r->pathed.end() ) alts[1].insert( cn );
+    for ( ClaimBranch* ll : branches[0] ) if ( ll != l ) for ( ClaimBranch* rr : branches[1] ) if ( rr != r )
     {
-        int pairings = 0;
-        for ( int pairing : cd->pairings ) if ( pairing > 5 ) pairings++;
-        if ( pairings > 1 )
+        ClaimBranch* cb[2][2]{ { l, ll }, { r, rr } };
+        int hits[2]{ setScore( cb, alts, 0, 1 ), setScore( cb, alts, 1, 0 ) };
+        if ( !hits[0] || !hits[1] ) continue;
+        bool success = min( hits[0], hits[1] ) > 1 && hits[0] + hits[1] > 6;
+        cout << string( ( gen+2 )*4, ' ' ) << ( success ? "DUPED: " : "NOT DUPED: " ) << hits[0] << "-" << hits[1] << endl;
+        if ( min( hits[0], hits[1] ) > 1 && hits[0] + hits[1] > 6 ) return true;
+    }
+    return false;
+}
+
+void ClaimDupe::setPath( vector< pair<ClaimNode*, ClaimNode*> >& cloned, vector<ClaimNode*>& claims, NodeRoll& nodes )
+{
+    for ( int i = 0; i < path.size(); i++ )
+    {
+        ClaimNode* clone = new ClaimNode( path[i], claims, nodes );
+        for ( int d : { 0, 1 } ) for ( ClaimEdge& ce : path[i]->edges_[d] )
         {
-            cout << "        SPLITABLE: ";
-            for ( int i = 0; i < cd->pairings.size(); i++ ) cout << ( i ? "-" : "" ) << cd->pairings[i];
-            cout << endl;
-            ( d ? cd->path.back() : cd->path[0] )->split_ = true;
+            if ( !d && !cloned.empty() && ce.node == cloned.back().first )
+                clone->addEdge( cloned.back().second, ce.ol, ce.diff, ce.isLeap, 0, true, true );
+            if ( !d && ( i ? ce.node != path[i-1] : edged[0].find( ce.node ) == edged[0].end() ) )
+                clone->addEdge( ce.node, ce.ol, ce.diff, ce.isLeap, 0, true, true );
+            if ( d && ( i+1 < path.size() ? ce.node != path[i+1] : edged[1].find( ce.node ) == edged[1].end() ) )
+                clone->addEdge( ce.node, ce.ol, ce.diff, ce.isLeap, 1, true, true );
         }
+        cloned.push_back( make_pair( path[i], clone ) );
     }
 }
 
-ClaimTrim::ClaimTrim( ClaimNode* fork, ClaimNode* branch, ClaimNode* bridge, bool drxn )
+int ClaimDupe::setScore( ClaimBranch* cb[2][2], unordered_set<ClaimNode*> alts[2], int l, int r )
 {
-    forks[0] = drxn ? fork : branch;
-    forks[1] = drxn ? branch : fork;
+    int hits = 0;
+    unordered_set<ClaimNode*> tar[2];
+    unordered_set<ClaimRedundant*> used;
+    for ( ClaimNode* cn : cb[0][l]->pathed ) if ( cb[0][!l]->pathed.find( cn ) == cb[0][!l]->pathed.end() ) tar[0].insert( cn );
+    for ( ClaimNode* cn : cb[1][r]->pathed ) if ( cb[1][!r]->pathed.find( cn ) == cb[1][!r]->pathed.end() ) tar[1].insert( cn );
+    
+    for ( ClaimNode* cn : tar[0] )
+    {
+        for ( ClaimPairing* cp : cn->pairs_[1] ) if ( tar[1].find( cp->node[1] ) != tar[1].end() ) 
+            hits += cp->get( cb[0][l]->path.back(), cb[1][r]->path[0], false, false );
+        for ( ClaimRedundant* cr : cn->redundant_[1] ) if ( used.insert( cr ).second )
+        {
+            bool good = !r;
+            if ( r ) for ( ClaimNode* cnp : cr->nodes[1] ) if ( tar[1].find( cnp ) != tar[1].end() ) good = true;
+            if ( good ) hits += cr->get( ( l ? alts : tar )[0], ( r ? alts : tar )[1], cb[0][l]->path.back(), cb[1][r]->path[0], false, false );
+        }
+    }
+    return hits;
+}
+
+int ClaimDupe::setUniques( ClaimBranch* l, ClaimBranch* r )
+{
+    int unique = 0;
+    unordered_set<ClaimNode*> tar[2]{ l->pathed, r->pathed };
+    for ( ClaimBranch* cd : branches[0] ) if ( cd != l ) for ( ClaimNode* cn : cd->pathed ) tar[0].erase( cn );
+    for ( ClaimBranch* cd : branches[1] ) if ( cd != r ) for ( ClaimNode* cn : cd->pathed ) tar[1].erase( cn );
+    unordered_set<ClaimRedundant*> redundants;
+    for ( ClaimNode* cn : tar[0] )
+    {
+        for ( ClaimPairing* cp : cn->pairs_[1] ) if ( tar[1].find( cp->node[1] ) != tar[1].end() )
+            unique += cp->get( l->path.back(), r->path[0], false, false );
+        int x = 0;
+        for ( ClaimRedundant* cr : cn->redundant_[1] ) if ( redundants.insert( cr ).second )
+            unique += cr->get( tar[0], tar[1], l->path.back(), r->path[0], false, false );
+        x = 0;
+    }
+    return unique;
+}
+
+ClaimTrim::ClaimTrim( ClaimNode* l, ClaimNode* r, ClaimNode* bridge )
+{
+    forks[0] = l;
+    forks[1] = r;
+    path = bridge ? vector<ClaimNode*>{ l, bridge, r } : vector<ClaimNode*>{ l, r };
     for ( int d : { 0, 1 } )
     {
         ols[d] = 0;
@@ -684,7 +781,9 @@ ClaimTrim::ClaimTrim( ClaimNode* fork, ClaimNode* branch, ClaimNode* bridge, boo
             ols[d] = max( ols[d], re.ol );
         }
         
-        for ( ClaimNode* cn : groups[d][0] ) if ( groups[d][1].find( cn ) != groups[d][1].end() ) shared[d].insert( cn );
+        vector<ClaimNode*> shared;
+        for ( ClaimNode* cn : groups[d][0] ) if ( groups[d][1].find( cn ) != groups[d][1].end() ) shared.push_back( cn );
+        for ( ClaimNode* cn : shared ) for ( int i : { 0, 1 } ) groups[d][i].erase( cn );
     }
 }
 
@@ -695,20 +794,36 @@ void ClaimTrim::fill( ClaimNode* cn, unordered_set<ClaimNode*>& group, bool drxn
     for ( ClaimJoin* cj : cn->joins_[drxn] ) fill( cj->node[drxn], group, drxn );
 }
 
+int ClaimTrim::score( int l, int r )
+{
+    int hits = 0;
+    unordered_set<ClaimRedundant*> used;
+    for ( ClaimNode* cn : groups[0][l] )
+    {
+        for ( ClaimPairing* cp : cn->pairs_[1] ) if ( groups[1][r].find( cp->node[1] ) != groups[1][r].end() )
+            hits += cp->get( path, !l && !r ? 2 : (int)r );
+        for ( ClaimRedundant* cr : cn->redundant_[1] ) if ( used.insert( cr ).second )
+            hits += cr->get( groups[0][l], groups[1][r], forks[0], forks[1], !l, !r );
+    }
+    return hits;
+}
+
 void ClaimTrim::score( int l, int r, int& hits, int& unique )
 {
 //    unordered_set<ClaimNode*> pathable[2];
 //    for ( int i : { 0, 1 } ) for ( ClaimNode* cn : groups[0][i] ) pathable[ i == l ].insert( cn );
 //    for ( int i : { 0, 1 } ) for ( ClaimNode* cn : groups[1][i] ) pathable[ i == r ].insert( cn );
-    bool path[2]{ !l, !r };
+    bool bools[2]{ !l, !r };
     for ( ClaimNode* cn : groups[0][l] ) for ( ClaimPairing* cp : cn->pairs_[1] ) if ( groups[1][r].find( cp->node[1] ) != groups[1][r].end() )
     {
-        if ( shared[0].find( cn ) != shared[0].end() && shared[1].find( cp->node[1] ) != shared[1].end() ) continue;
+        int test = cp->get( path, !l && !r ? 2 : (int)r );
         vector<int32_t> diffs;
-        if ( !cn->reach( cp->node[1], forks, 0, diffs, path, false, 1 ) ) continue;
+        unordered_set<ClaimNode*> pathed;
+        if ( !cn->reachViaEdgeOnly( cp->node[1], forks, pathed, 0, diffs, bools, false, 1 ) ) continue;
 //        if ( !cn->reach( cp->node[1], 0, pathable, diffs, false, false, 1 ) ) continue;
         assert( !diffs.empty() );
         int pairScore = cp->hit( diffs );
+        assert( pairScore == test );
         hits += pairScore;
         unique += pairScore;
     }
@@ -721,7 +836,8 @@ void ClaimTrim::score( int l, int r, int& hits, int& unique )
         if ( good ) for ( ClaimNode* cnl : cr->nodes[0] ) for ( ClaimNode* cnr : cr->nodes[1] )
         {
             vector<int32_t> diffs;
-            if ( !cnl->reach( cnr, forks, 0, diffs, path, false, 1 ) ) good = false;
+            unordered_set<ClaimNode*> pathed;
+            if ( !cnl->reachViaEdgeOnly( cnr, forks, pathed, 0, diffs, bools, false, 1 ) ) good = false;
         }
         if ( good ) shares.insert( cr );
     }
@@ -732,57 +848,91 @@ void ClaimTrim::score( int l, int r, int& hits, int& unique )
     }
 }
 
-bool ClaimTrim::trim( ClaimNode* fork, bool drxn )
+bool ClaimTrim::trim( ClaimNode* fork, NodeRoll& nodes, bool drxn )
 {
     for ( ClaimEdge& ce : fork->edges_[drxn] )
     {
-        ClaimEdge* edge[2]{ &ce, &ce };
-        ClaimNode* branch = ce.node,* bridge = ce.node->isBridge() ? ce.node : NULL;
-        if ( bridge )
+        if ( ce.node->edges_[!drxn].size() > 1 )
         {
-            edge[1] = &branch->edges_[drxn][0];
-            branch = edge[1]->node;
-        }
-        if ( branch->edges_[!drxn].size() < 2 ) continue;
-        
-        cout << "    Trim attempt, coords: " << fork->getFork( drxn )->ends_[1] << ", edges: " << fork->edges_[drxn].size() << endl; 
-        
-        ClaimTrim ct( fork, branch, bridge, drxn );
-        
-        if ( ct.trim( min( edge[0]->ol, edge[1]->ol ) ) )
-        {
-            if ( bridge )
+            ClaimTrim ct( drxn ? fork : ce.node, drxn ? ce.node : fork, NULL );
+            
+            cout << "    Trim attempt, coords: " << fork->getFork( drxn )->ends_[1] << ", edges: " << fork->edges_[drxn].size() << endl; 
+            
+            if ( ct.trim( ce.ol ) )
             {
-                ( edge[1]->ol < edge[0]->ol ? fork : branch ) = bridge;
+                cout << "    TRIMMED!" << endl << endl;
+                ClaimRepair cr( ( drxn ? ce.node : fork )->getFork( 1 ), ( drxn ? fork : ce.node )->getFork( 0 ) );
+                assert( fork->removeEdge( ce.node, drxn ) );
+                cr.trim();
+                nodes.updateBad();
+                if ( fork->edges_[drxn].size() > 1 ) trim( fork, nodes, drxn );
+                return true;
             }
             
-            ClaimRepair cr( ( drxn ? branch : fork )->getFork( 1 ), ( drxn ? fork : branch )->getFork( 0 ) );
-            assert( fork->removeEdge( branch, drxn ) );
-            cr.trim();
-        
-            fork->setState( !drxn );
-            branch->setState( drxn );
-            if ( fork->edges_[drxn].size() > 1 ) trim( fork, drxn );
-            cout << "    TRIMMED!" << endl << endl;
-            return true;
+            cout << "    FAILED!" << endl << endl;
         }
-        else cout << "    FAILED!" << endl << endl;
+        
+        if ( ce.node->isBridge() )
+        {
+            cout << "    Trim attempt, coords: " << fork->getFork( drxn )->ends_[1] << ", bridge with: " << ce.node->edges_[0].size() << "-" << ce.node->edges_[1].size() <<  " edges" << endl; 
+            
+            bool failed = false;
+            for ( ClaimEdge& l : ce.node->edges_[0] ) for ( ClaimEdge& r : ce.node->edges_[1] )
+            {
+                ClaimTrim ct( l.node, r.node, ce.node );
+                if ( !ct.trim( min( l.ol, r.ol ) ) ) failed = true;
+            }
+            
+            if ( !failed )
+            {
+                cout << "    TRIMMED!" << endl << endl;
+                vector<Node*> forks[2];
+                for ( int d : { 0, 1 } ) for ( ClaimEdge& re : ce.node->edges_[d] ) forks[!d].push_back( re.node->getFork( !d ) );
+                ClaimRepair cr( forks[0], forks[1] );
+                ce.node->dismantle();
+                cr.trim();
+                nodes.updateBad();
+                return true;
+            }
+            
+            cout << "    FAILED!" << endl << endl;
+        }
     }
-//    for ( ClaimEdge& ce : fork->edges_[drxn] ) if ( ce.node->edges_[!drxn].size() > 1 )
+//    for ( ClaimEdge& ce : fork->edges_[drxn] )
 //    {
-//        ClaimTrim ct( fork, ce.node, drxn );
-//        if ( !ct.trim( ce ) ) continue;
+//        ClaimEdge* edge[2]{ &ce, &ce };
+//        ClaimNode* branch = ce.node,* bridge = ce.node->isBridge() ? ce.node : NULL;
+//        if ( bridge )
+//        {
+//            edge[1] = &branch->edges_[drxn][0];
+//            branch = edge[1]->node;
+//        }
+//        if ( branch->edges_[!drxn].size() < 2 ) continue;
 //        
-//        ClaimNode* branch = ce.node;
-//        ClaimRepair cr( ( drxn ? branch : fork )->getFork( 1 ), ( drxn ? fork : branch )->getFork( 0 ) );
-//        assert( fork->removeEdge( branch, drxn ) );
-//        cr.trim();
+//        cout << "    Trim attempt, coords: " << fork->getFork( drxn )->ends_[1] << ", edges: " << fork->edges_[drxn].size() << endl; 
 //        
-//        fork->setState( !drxn );
-//        branch->setState( drxn );
-//        if ( fork->edges_[drxn].size() > 1 ) trim( fork, drxn );
-//        cout << "    TRIMMED!" << endl << endl;
-//        return true;
+//        ClaimTrim ct( fork, branch, bridge, drxn );
+//        nodes.test( true );
+//        
+//        if ( ct.trim( min( edge[0]->ol, edge[1]->ol ) ) )
+//        {
+//            if ( bridge && bridge->path_[0]->cloned_ )
+//            {
+//                int x = 0;
+//            }
+//            if ( bridge ) ( edge[1]->ol < edge[0]->ol ? fork : branch ) = bridge;
+//            ClaimRepair cr( ( drxn ? branch : fork )->getFork( 1 ), ( drxn ? fork : branch )->getFork( 0 ) );
+//            assert( fork->removeEdge( branch, drxn ) );
+//            cr.trim();
+//            nodes.updateBad();
+//            
+//            if ( bridge ) bridge->setUnverified();
+//            cout << "    TRIMMED!" << endl << endl;
+//            nodes.test( true );
+//            if ( fork->edges_[drxn].size() > 1 ) trim( fork, nodes, drxn );
+//            return true;
+//        }
+//        else cout << "    FAILED!" << endl << endl;
 //    }
     
     return false;
@@ -792,25 +942,26 @@ bool ClaimTrim::trim( int ol )
 {
     for ( int d : { 0, 1 } ) if ( groups[d][0].empty() || groups[d][1].empty() ) return false;
     
-    int hits[3]{0}, unique[3]{0}, diff = min( 100, min( 60, ols[0] - ol ) + min( 60, ols[1] - ol ) ) / 10;
-    score( 0, 1, hits[0], unique[0] );
-    score( 1, 0, hits[1], unique[1] );
-    score( 0, 0, hits[2], unique[2] );
+    int hits[3]{ score( 0, 1 ), score( 1, 0 ), score( 0, 0 ) }, diff = min( 100, min( 60, ols[0] - ol ) + min( 60, ols[1] - ol ) ) / 10;
     
     // Filter out contended paths
-    if ( !unique[0] || !unique[1] || unique[2] ) return false;
+    if ( !hits[0] || !hits[1] || min( hits[0], hits[1] ) / 15 < hits[2] ) return false;
+    if ( hits[2] )
+    {
+        int x = 0;
+    }
     
-    bool failed = min( hits[0] + unique[0], hits[1] + unique[1] ) - hits[2] < 4;
-    if ( !( hits[0] + hits[1] + unique[0] + unique[1] + diff - hits[2] > 8 ) ) failed = true;
+    bool failed = min( hits[0], hits[1] ) - hits[2] < 2;
+    if ( !( hits[0] + hits[1] + diff - hits[2] > 8 ) ) failed = true;
     
-    cout << "        " << ( failed ? "NOT TRIMMED: " : "TRIMMED: " ) << unique[0] << "(" << hits[0] << ")-" << unique[1] << "(" << hits[1] << ")" << endl;
+    cout << "        " << ( failed ? "NOT TRIMMED: " : "TRIMMED: " ) << hits[0] << "-" << hits[1] << endl;
     
-    if ( min( hits[0] + unique[0], hits[1] + unique[1] ) - hits[2] < 4 ) return false;
+    if ( min( hits[0], hits[1] ) - hits[2] < 2 ) return false;
     
-    return hits[0] + hits[1] + unique[0] + unique[1] + diff - hits[2] > 8;
+    return hits[0] + hits[1] + diff - hits[2] > 8;
 }
 
-ClaimNode::ClaimNode( ClaimNode* cn, NodeRoll& cloned, Nodes& base )
+ClaimNode::ClaimNode( ClaimNode* cn, vector<ClaimNode*>& claims, NodeRoll& nodes )
 : clone_( this ), split_( false )
 {
     for ( int d : { 0, 1 } )
@@ -819,27 +970,40 @@ ClaimNode::ClaimNode( ClaimNode* cn, NodeRoll& cloned, Nodes& base )
         edged_[d] = cn->edged_[d];
     }
     
+    Nodes base( cn->path_ );
+    for ( int d : { 0, 1 } ) for ( ClaimEdge& ce : cn->edges_[d] ) base += ce.node->getFork( !d );
+    
     for ( Node* node : cn->path_ )
     {
-        vector<Edge> edges[2];
-//        for ( int d : { 0 , 1 } ) for ( Edge& e : getEdges( node, d ) ) if ( !base.find( e.node ) ) edges[d].push_back( e );
-        for ( int d : { 0 , 1 } ) for ( Edge& e : node->getAltEdges( d ) ) if ( !base.find( e.node ) ) edges[d].push_back( e );
-        path_.push_back( new Node( node, cloned, node->drxn_, false ) );
-        for ( int d : { 0 , 1 } ) for ( Edge& e : edges[d] ) path_.back()->addEdge( e, d, true );
+        path_.push_back( new Node( node, nodes, node->drxn_, node->bad_ ) );
+        for ( int d : { 0 , 1 } ) for ( Edge& e : node->edges_[d] ) if ( !base.find( e.node ) ) path_.back()->addEdge( e, d, true );
     }
-    for ( int i = 0; i+1 < path_.size(); i++ ) path_[i]->addEdge( cn->path_[i]->getEdge( path_[i+1], 1, true, true ), 1, true );
+    
+    for ( int i = 1; i < path_.size(); i++ ) for ( Edge& e : cn->path_[i]->edges_[0] ) if ( e.node == cn->path_[i-1] )
+    {
+        path_[i]->addEdge( path_[i-1], e.ol, 0, false, e.leap );
+    }
+    claims.push_back( this );
+}
+
+ClaimNode::ClaimNode( ClaimNode* cn, NodeRoll& cloned, Nodes& base )
+: clone_( this ), split_( false )
+{
+    for ( Node* node : cn->path_ )
+    {
+        path_.push_back( new Node( node, cloned, node->drxn_, node->bad_ ) );
+        for ( int d : { 0 , 1 } ) for ( Edge& e : node->edges_[d] ) if ( !base.find( e.node ) ) path_.back()->addEdge( e, d, true );
+    }
+    
+    for ( int i = 1; i < path_.size(); i++ ) path_[i]->addEdge( cn->path_[i]->getEdge( path_[i-1], 0 ), 0, true );
 }
 
 ClaimNode::ClaimNode( Node* node, vector<ClaimNode*>& claims, int32_t coord, bool orient, bool drxn )
-: clone_( this ), path_{ node }, split_( false )
+: clone_( this ), path_{ node }, offs_{ make_pair( node, coord ) }, split_( false )
 {
     claims.push_back( this );
-    for ( int d : { 0, 1 } )
-    {
-        ends_[d] = coord;
-        edged_[d] = false;
-        for ( Node* fork : getForks( node, d ) ) offs_.insert( make_pair( fork, coord ) );
-    }
+    ends_[0] = ends_[1] = coord;
+    edged_[0] = edged_[1] = false;
     extend( claims, orient, drxn );
 }
 
@@ -855,11 +1019,12 @@ void ClaimNode::addDistal( Node* node, bool drxn )
     for ( Edge& e : node->edges_[drxn] ) addDistal( e.node, drxn );
 }
 
-void ClaimNode::addEdge( ClaimNode* cn, int ol, int32_t diff, bool isLeap, bool drxn, bool reciprocate )
+void ClaimNode::addEdge( ClaimNode* cn, int ol, int32_t diff, bool isLeap, bool drxn, bool reciprocate, bool nodeEdge )
 {
     for ( ClaimEdge& ce : edges_[drxn] ) if ( ce.node == cn ) return;
     edges_[drxn].push_back( ClaimEdge( cn, ol, diff, isLeap ) );
-    if ( reciprocate ) cn->addEdge( this, ol, -diff, isLeap, !drxn, false );
+    if ( nodeEdge ) getFork( drxn )->addEdge( cn->getFork( !drxn ), ol, drxn, false, isLeap );
+    if ( reciprocate ) cn->addEdge( this, ol, diff, isLeap, !drxn, false );
 }
 
 bool ClaimNode::addEdge( Edge& e, vector<ClaimNode*>& claims, bool orient, bool drxn )
@@ -868,59 +1033,35 @@ bool ClaimNode::addEdge( Edge& e, vector<ClaimNode*>& claims, bool orient, bool 
     bool edged = false;
     for ( ClaimNode* cn : claims ) if ( cn != this && cn->findFork( e.node, !drxn ) )
     {
-        addEdge( cn, e.ol, cn->ends_[!drxn] - coord, e.isLeap, drxn );
+        addEdge( cn, e.ol, drxn ? cn->ends_[0] - coord : coord - cn->ends_[1], e.leap, drxn );
         edged = true;
     }
-    if ( !edged ) addEdge( new ClaimNode( e.node, claims, coord, orient, drxn ), e.ol, 0, e.isLeap, drxn );
+    if ( !edged ) addEdge( new ClaimNode( e.node, claims, coord, orient, drxn ), e.ol, 0, e.leap, drxn );
     
     return edged_[drxn] = true;
 }
 
-void ClaimNode::addJoin( ClaimNode* cn, Node* hang, NodeOffsets& offs, int32_t dist, bool drxn )
+void ClaimNode::addJoin( ClaimNode* cn, Node* hang, NodeDists& dists, int32_t dist, bool drxn )
 {
     if ( dist < -500 ) return;
-    if ( abs( dist ) > 500 )
-    {
-        assert( false );
-    }
     ClaimJoin* joined = NULL;
     for ( ClaimJoin* cj : joins_[drxn] ) if ( cj->node[drxn] == cn ) joined = cj;
     if ( joined ) joined->dist = min( joined->dist, dist );
     else joined = new ClaimJoin( this, cn, dist, drxn );
-    joined->fill( hang, offs, !drxn );
+    joined->fill( hang, dists, !drxn );
 }
 
-//void ClaimNode::addJoin( ClaimNode* cn, int32_t diff, bool drxn, bool reciprocate )
-//{
-//    bool added = false;
-//    for ( ClaimJoin& ce : joins_[drxn] ) if ( added = ( ce.node == cn ) )
-//    {
-//        if ( drxn ? ce.diff <= diff : diff <= ce.diff ) return;
-//        ce.diff = diff;
-//        break;
-//    }
-//    if ( !added ) joins_[drxn].push_back( ClaimEdge( cn, 0, diff, true ) );
-//    
-//    if ( reciprocate ) cn->addJoin( this, -diff, !drxn, false );
-//}
-
-bool ClaimNode::branch( vector<ClaimNode*>& claims, vector<ClaimNode*>& forks, bool orient, bool test )
+bool ClaimNode::branch( vector<ClaimNode*>& claims, vector<ClaimNode*>& forks, bool orient )
 {
-    if ( test )
-    {
-        if ( forks.size() > 1 || forks[0]->isBranched( !orient ) ) return true;
-        for ( ClaimEdge& ce : forks[0]->edges_[orient] ) if ( ce.node->edges_[!orient].size() > 1 ) return true;
-        if ( !forks[0]->split( claims, orient, !orient ) ) return false;
-        return true;
-    }
     assert( !forks.empty() );
-    bool success = false;;
+    bool success = false;
+    unordered_set<ClaimNode*> tested[2];
     for ( ClaimNode* cn : forks )
     {
         bool branched = false;
-        for ( ClaimEdge& ce : cn->edges_[orient] ) ce.node->setBranched( claims, cn->edges_[orient].size() > 1, orient, orient );
+        for ( ClaimEdge& ce : cn->edges_[orient] ) ce.node->setBranched( claims, tested[orient], cn->edges_[orient].size() > 1, orient, orient );
         for ( ClaimEdge& ce : cn->edges_[orient] ) if ( ce.node->edges_[!orient].size() > 1 ) branched = true;
-        if ( cn->setBranched( claims, branched, orient, !orient ) || branched ) success = true;
+        if ( cn->setBranched( claims, tested[!orient], branched, orient, !orient ) || branched ) success = true;
     }
     return success;
     
@@ -930,50 +1071,62 @@ bool ClaimNode::branch( vector<ClaimNode*>& claims, vector<ClaimNode*>& forks, b
 //    return true;
 }
 
-bool ClaimNode::claim( Node* fork, NodeRoll& nodes, bool drxn )
+bool ClaimNode::branch( vector<ClaimNode*>& claims, unordered_set<ClaimNode*>& tested, bool branched, bool orient, bool drxn )
 {
-    cout << "Claim coords: " << fork->ends_[0] << " " << fork->ends_[1] << endl << endl;
+    split_ = false;
+    
+    if ( !tested.insert( this ).second ) return branched;
+    
+    if ( !edged_[drxn] && ( !branched || !edges_[drxn].empty() ) ) edge( claims, orient, drxn );
+    
+    if ( edges_[drxn].empty() ) return branched;
+    
+    if ( edges_[drxn].size() > 1 )
+    {
+        for ( ClaimNode* cn = this; cn->edges_[!drxn].size() == 1; )
+        {
+            ClaimNode* nxt = cn->edges_[!drxn][0].node;
+            cn->edge( claims, orient, !drxn );
+            for ( ClaimEdge& ce : cn->edges_[!drxn] ) if ( ce.node != nxt ) ce.node->setBranched( claims, false, orient, !drxn );
+            cn = nxt;
+        }
+        
+        for ( ClaimEdge& ce : edges_[drxn] ) ce.node->setBranched( claims, false, orient, drxn );
+        for ( ClaimEdge& ce : edges_[drxn] ) ce.node->branch( claims, tested, true, orient, drxn );
+        
+        return true;
+    }
+    
+    return edges_[drxn][0].node->branch( claims, tested, branched, orient, drxn );
+}
+
+bool ClaimNode::claim( Node* node, NodeRoll& nodes, bool drxn )
+{
+    cout << "Claim coords: " << node->ends_[0] << " " << node->ends_[1] << endl << endl;
     
     bool claimed = false;
     
     for ( int again = 1; again-- > 0; )
     {
-        if ( fork->ends_[1] == -3844 )
+        if ( node->ends_[1] == -4264 )
         {
             int x = 0;
         }
-        if ( fork->ends_[1] == -3322 )
+        
+        vector<ClaimNode*> claims;
+        ClaimNode* fork = new ClaimNode( node, claims, 0, drxn, !drxn );
+        for ( int retry = 1; retry-- > 0; )
         {
-            int x = 0;
-        }
-        if ( fork->ends_[1] == -3954 )
-        {
-            int x = 0;
-        }
-        if ( fork->ends_[1] == -4794 )
-        {
-            int x = 0;
-        }
-        bool success = false;
-        vector<ClaimNode*> claims, forks;
-        if ( create( fork, claims, forks, drxn ) ) for ( int retry = 1; retry-- > 0; )
-        {
-//            branch( claims, forks, drxn, fork->ends_[1] == -3322 );
-            branch( claims, forks, drxn, false );
+            if ( !fork->create( claims, drxn ) ) break;;
             complete( claims, drxn );
             score( claims, drxn );
-            for ( ClaimNode* cn : forks )
+            unordered_set<ClaimNode*> trimmed[2], duped[2];
+            if ( fork->trim( trimmed, nodes, 2 ) || fork->dupe( duped, claims, nodes, 2 ) )
             {
-                if ( success = cn->trim( 2 ) ) break;
-                if ( success = cn->dupe( nodes, 2 ) ) break;
-            }
-            
-            if ( success )
-            {
-                for ( ClaimNode* cn : forks ) if ( cn->edges_[drxn].size() > 1 ) again = 1;
+                if ( fork->edges_[drxn].size() > 1 ) again = 1;
                 claimed = true;
             }
-            else retry = resplit( forks, claims, drxn );
+            else retry = resplit( claims, drxn );
         }
         
         for ( ClaimNode* cn : claims ) delete cn;
@@ -984,7 +1137,7 @@ bool ClaimNode::claim( Node* fork, NodeRoll& nodes, bool drxn )
     return claimed;
 }
 
-bool ClaimNode::complete( vector<ClaimNode*>& claims, bool orient )
+void ClaimNode::complete( vector<ClaimNode*>& claims, bool orient )
 {
     Nodes base;
     for ( ClaimNode* cn : claims ) cn->setBase( base, true );
@@ -1000,101 +1153,68 @@ bool ClaimNode::complete( vector<ClaimNode*>& claims, bool orient )
         setJoins( claims, base, limit, orient, d );
         for ( ClaimNode* cn : ends ) cn->setDistal( d );
     }
-    for ( ClaimNode* cn : claims ) cn->testLoop( NULL );
 }
 
-bool ClaimNode::create( Node* fork, vector<ClaimNode*>& claims, vector<ClaimNode*>& forks, bool orient )
+bool ClaimNode::create( vector<ClaimNode*>& claims, bool orient )
 {
-    bool looped = fork->cloned_ && fork->edges_[!orient].empty();
-    if ( fork->cloned_ ) for ( Node* node : fork->cloned_->nodes ) if ( node->edges_[!orient].empty() && !node->edges_[orient].empty() ) looped = true;
-    
-    if ( looped ) for ( Node* node : fork->clones() )
-    {
-        if ( node->edges_[!orient].empty() ) continue;
-        bool found = false;
-        for ( ClaimNode* cn : claims ) if ( cn->findFork( node, orient ) ) found = true;
-        assert( !found );
-        if ( !found ) forks.push_back( new ClaimNode( node, claims, 0, orient, !orient ) );
-    }
-    else ( forks.push_back( new ClaimNode( fork, claims, 0, orient, !orient ) ) );
-    
-    for ( ClaimNode* cn : forks ) cn->edge( claims, orient, orient );
-    for ( ClaimNode* cn : forks ) for ( ClaimEdge& ce : cn->edges_[orient] ) ce.node->edge( claims, orient, !orient );
-    for ( int i = 0; i < forks.size(); i++ ) if ( forks[i]->edges_[orient].size() < 2 ) forks.erase( forks.begin() + i-- );
-    
     for ( int again = 1; again-- > 0; )
     {
+        unordered_set<ClaimNode*> tested[2];
+        for ( int d : { 0, 1 } ) branch( claims, tested[d], false, orient, d );
+    
         Nodes branches[2];
         vector<ClaimNode*> unended[2];
         for ( int d : { 0, 1 } ) for ( ClaimNode* cn : claims ) if ( !cn->edged_[d] ) unended[d].push_back( cn );
         for ( int d : { 0, 1 } ) for ( ClaimNode* cn : unended[d] ) if ( !cn->edges_[d].empty() ) for ( Edge& e : cn->getEdges( NULL, d ) ) branches[d] += e.node;
         for ( int d : { 0, 1 } ) for ( ClaimNode* cn : unended[d] )
         {
-            bool doEdge = false;
-            for ( Node* node : cn->getForks( NULL, d ) ) if ( branches[!d].find( node ) ) again = doEdge = true;
-            for ( Edge& e: cn->getEdges( NULL, d ) ) if ( branches[!d].find( e.node ) ) again = doEdge = true;
-            if ( doEdge )
-            {
-                cn->edge( claims, orient, d );
-            }
+            bool doEdge = branches[!d].find( cn->getFork( d ) );
+            for ( Edge& e: cn->getEdges( NULL, d ) ) if ( branches[!d].find( e.node ) ) doEdge = true;
+            if ( doEdge && cn->edge( claims, orient, d ) ) again = 1;
         }
     }
-//    for ( int again = 1; again-- > 0; ) for ( int d : { 0, 1 } )
-//    {
-//        Nodes branches[2];
-//        vector<ClaimNode*> ends[2];
-//        unordered_set<ClaimNode*> added;
-//        bool extended[2]{ false, false };
-//        for ( ClaimNode* cn : claims ) if ( !cn->edged_[d] ) ends[ cn->edges_[d].empty() ].push_back( cn );
-//        for ( int i : { 0, 1 } ) for ( ClaimNode* cn : ends[i] ) for ( Edge& e: cn->getEdges( NULL, orient ) ) branches[i] += e.node;
-//        for ( int i : { 0, 1 } ) for ( ClaimNode* cn : ends[i] ) for ( Edge& e: cn->getEdges( NULL, orient ) ) if ( branches[!i].find( e.node ) )
-//        {
-//            cn->edge( claims, orient, d );
-//            for ( ClaimEdge& ce : cn->edges_[d] ) added.insert( ce.node );
-//            extended[i] = true;
-//            again = 1;
-//            break;
-//        }
-//        int x = 0;
-//        for ( ClaimNode* cn : added ) cn->edge( claims, orient, !d );
-//    }
     
-    return !forks.empty();
+    return true;
 }
 
-bool ClaimNode::dupe( NodeRoll& nodes, int drxn )
+void ClaimNode::dismantle()
+{
+    for ( int d : { 0, 1 } ) while ( !edges_[d].empty() ) removeEdge( edges_[d].back().node, d );
+    for ( Node* node : path_ ) node->dismantle();
+}
+
+bool ClaimNode::dupe( unordered_set<ClaimNode*> duped[2], vector<ClaimNode*>& claims, NodeRoll& nodes, int drxn )
 {
     for ( int d : { 0, 1 } ) if ( drxn == 2 || d == drxn )
     {
-        for ( ClaimEdge& ce : edges_[d] ) if ( ce.node->dupe( nodes, d ) ) return true;
+        if ( !duped[d].insert( this ).second ) return false;
+        for ( ClaimEdge& ce : edges_[d] ) if ( ce.node->dupe( duped, claims, nodes, d ) ) return true;
     }
     
     for ( int d : { 0, 1 } ) if ( (bool)d == (bool)drxn && edges_[d].size() > 1 )
     {
-        if ( isBranched( !d ) && ClaimDupe::dupe( this, nodes, d ) ) return true;
+        if ( isBranched( !d ) && ClaimDupe::dupe( this, claims, nodes ) ) return true;
     }
     
     return false;
 }
 
-void ClaimNode::edge( vector<ClaimNode*>& claims, bool orient, bool drxn )
+bool ClaimNode::edge( vector<ClaimNode*>& claims, bool orient, bool drxn )
 {
-    if ( edged_[drxn] ) return;
-    for ( Node* fork : getForks( NULL, drxn ) ) if ( !fork->isForkComplete( params.shortLen(), 20, drxn ) ) return;
-    for ( Edge& e : getEdges( NULL, drxn ) ) addEdge( e, claims, orient, drxn );
-    edged_[drxn] = true;
+    if ( edged_[drxn] ) return false;
+    if ( !getFork( drxn )->isForkComplete( params.shortLen(), 20, drxn ) ) return false;
+    for ( Edge& e : getFork( drxn )->edges_[drxn] ) addEdge( e, claims, orient, drxn );
+    return edged_[drxn] = true;
 }
 
 void ClaimNode::extend( vector<ClaimNode*>& claims, bool orient, bool drxn )
 {
-    vector<Edge> edges = getEdges( NULL, drxn );
-    while ( edges.size() == 1 && edges_[drxn].empty() )
+    for ( vector<Edge> edges = getEdges( NULL, drxn ); edges.size() == 1 && edges_[drxn].empty(); )
     {
-        vector<Edge> rEdges = getEdges( edges[0].node, !drxn );
-        if ( rEdges.size() > 1 && addEdge( edges[0], claims, orient, drxn ) ) return;
+        if ( getEdges( edges[0].node, !drxn ).size() > 1 && addEdge( edges[0], claims, orient, drxn ) ) return;
         ends_[drxn] = getCoord( NULL, edges[0], ends_[drxn], orient, drxn );
         path_.insert( drxn ? path_.end() : path_.begin(), edges[0].node );
-        for ( Node* fork : getForks( NULL, drxn ) ) offs_.insert( make_pair( fork, ends_[drxn] ) );
+        offs_.insert( make_pair( edges[0].node, ends_[drxn] ) );
         edges = getEdges( NULL, drxn );
         if ( edges.empty() ) edged_[drxn] = true;
     }
@@ -1103,15 +1223,11 @@ void ClaimNode::extend( vector<ClaimNode*>& claims, bool orient, bool drxn )
 void ClaimNode::fill( Node* node, Nodes& block, int32_t dist, int32_t limit, bool orient, bool drxn )
 {
     if ( block.find( node ) || abs( dist ) > abs( limit ) ) return;
-    for ( Node* fork : getForks( node ) )
-    {
-        assert( !block.find( fork ) );
-        auto it = offs_.insert( make_pair( fork, dist ) );
-        if ( it.second ) continue;
-        if ( it.first->second <= dist ) assert( fork == node );
-        if ( it.first->second > dist ) it.first->second = dist;
-        else return;
-    }
+    
+    auto it = offs_.insert( make_pair( node, dist ) );
+    if ( !it.second && ( drxn ? it.first->second <= dist : dist <= it.first->second ) ) return;
+    if ( !it.second ) it.first->second = dist;
+    
     for ( Edge& e : getEdges( node, drxn ) ) fill( e.node, block, getCoord( node, e, dist, orient, drxn ), limit, orient, drxn );
 }
 
@@ -1121,16 +1237,15 @@ void ClaimNode::fill( Node* node, Nodes& include, int32_t dist, bool orient, boo
     {
         int32_t coord = getCoord( node, e, dist, orient, drxn );
         auto it = offs_.insert( make_pair( e.node, coord ) );
-        if ( !it.second && it.first->second <= coord ) continue;
-        for ( Node* fork : getForks( e.node ) ) offs_[fork] = coord;
+        if ( !it.second && ( drxn ? it.first->second <= coord : coord <= it.first->second ) ) continue;
+        if ( !it.second ) it.first->second = coord;
         fill( e.node, include, dist, orient, drxn );
     }
 }
 
 bool ClaimNode::findFork( Node* q, bool drxn )
 {
-    for ( Node* fork : getForks( NULL, drxn ) ) if ( q == fork ) return true;
-    return false;
+    return q == getFork( drxn );
 }
 
 int32_t* ClaimNode::get( Node* node )
@@ -1145,19 +1260,23 @@ int32_t ClaimNode::getCoord( Node* fork, Edge& e, int32_t dist, bool orient, boo
     return dist + ( ( ( drxn ? e.node : fork )->size() - e.ol ) * ( drxn ? 1 : -1 ) );
 }
 
+ClaimEdge ClaimNode::getEdge( ClaimNode* cn, bool drxn )
+{
+    ClaimEdge edge( NULL, 0, 0, false );
+    for ( ClaimEdge& ce : edges_[drxn] ) if ( ce.node == cn ) edge = ce;
+    return edge;
+}
+
 vector<Edge> ClaimNode::getEdges( Node* fork, bool drxn, bool blunt )
 {
     vector<Edge> edges;
     bool isEnd = !fork;
-    for ( Node* node : getForks( fork, drxn ) ) for ( Edge& e : node->edges_[drxn] )
+    if ( !fork ) fork = getFork( drxn );
+    for ( Edge& e : fork->edges_[drxn] ) if ( blunt || !e.node->isBlunt( 0, 3 , drxn ) )
     {
-        for ( Node* branch : getForks( e.node, drxn ) )
-        {
-            bool added = !blunt && branch->isBlunt( 0, 3, drxn );
-            for ( Edge& edge : edges ) if ( edge.node == branch ) added = true;
-            if ( isEnd ) for ( ClaimEdge& ce : edges_[drxn] ) if ( ce.node->findFork( e.node, !drxn ) ) added = true;
-            if ( !added ) edges.push_back( Edge( branch, e.ol, e.isLeap ) );
-        }
+        bool added = false;
+        if ( isEnd ) for ( ClaimEdge& ce : edges_[drxn] ) if ( e.node == ce.node->getFork( !drxn ) ) added = true;
+        if ( !added ) edges.push_back( Edge( e.node, e.ol, e.leap ) );
     }
     return edges;
 }
@@ -1172,32 +1291,6 @@ Nodes ClaimNode::getExts()
 Node* ClaimNode::getFork( bool drxn )
 {
     return drxn ? path_.back() : path_[0];
-}
-
-vector<Node*> ClaimNode::getForks( Node* fork, bool drxn )
-{
-    if ( !fork ) fork = getFork( drxn );
-    vector<Node*> forks;
-    if ( !fork->cloned_ || !fork->edges_[drxn].empty() ) forks.push_back( fork );
-    if ( fork->cloned_ ) for ( Node* node : fork->cloned_->nodes )
-    {
-        if ( node->edges_[drxn].empty() ) continue;
-        if ( node->edges_[0].empty() && node->edges_[1].empty() ) continue;
-        if ( fork->edges_[0].empty() || fork->edges_[1].empty() || node->edges_[!drxn].empty() ) forks.push_back( node );
-    }
-    assert( !forks.empty() );
-    return forks;
-}
-
-vector<Node*> ClaimNode::getForks( Node* fork )
-{
-    vector<Node*> forks{ fork };
-    if ( fork->cloned_ ) for ( Node* clone : fork->cloned_->nodes )
-    {
-        if ( clone->edges_[0].empty() && clone->edges_[1].empty() ) continue;
-        if ( clone->edges_[0].empty() || clone->edges_[1].empty() || fork->edges_[0].empty() || fork->edges_[1].empty() ) forks.push_back( clone );
-    }
-    return forks;
 }
 
 vector< pair<Node*, int32_t> > ClaimNode::getHangs( bool orient, bool drxn )
@@ -1230,8 +1323,24 @@ bool ClaimNode::isBranched( bool drxn )
 
 bool ClaimNode::isBridge()
 {
-    if ( path_.size() != 1 || !edged_[0] || !edged_[1] || edges_[0].size() != 1 || edges_[1].size() != 1 ) return false;
-    return path_[0]->countReads( true ) < 2;
+    if ( !edged_[0] || !edged_[1] || edges_[0].empty() || edges_[1].empty() ) return false;
+    for ( int d : { 0, 1 } ) for ( ClaimEdge& ce : edges_[d] ) if ( ce.node->edges_[!d].size() == 1 ) return false;
+    
+    int readCount = 0;
+    for ( Node* node : path_ ) readCount += node->countReads( true );
+    if ( readCount < 2 ) return true;
+    
+    for ( Node* node : path_ ) if ( !node->cloned_ ) return false;
+    
+    for ( int d : { 0, 1 } ) for ( ClaimEdge& ce : edges_[d][0].node->edges_[!d] ) if ( ce.node != this )
+    {
+        if ( ( d ? ce.node->path_.back() : ce.node->path_[0] )->isClone( path_, 0, !d ) )
+        {
+            int x = 0;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool ClaimNode::isExtend( int32_t coord )
@@ -1280,7 +1389,7 @@ bool ClaimNode::reach( ClaimNode* tar, bool drxn )
     return false;
 }
 
-bool ClaimNode::reach( ClaimNode* tar, ClaimNode* forks[2], int32_t diff, vector<int32_t>& diffs, bool path[2], bool forked, bool drxn )
+bool ClaimNode::reachViaEdgeOnly( ClaimNode* tar, ClaimNode* forks[2], unordered_set<ClaimNode*>& pathed, int32_t diff, vector<int32_t>& diffs, bool path[2], bool forked, bool drxn )
 {
     if ( this == tar )
     {
@@ -1289,27 +1398,28 @@ bool ClaimNode::reach( ClaimNode* tar, ClaimNode* forks[2], int32_t diff, vector
         return true;
     }
     
+    if ( !pathed.insert( this ).second ) return true;
+    
     for ( ClaimEdge& ce : edges_[drxn] )
     {
-        bool pathed = forked;
-        if ( forks[!drxn] == this ) pathed = path[!drxn] && ( ( forks[drxn] == ce.node ) == path[drxn] );
-        if ( forks[drxn] == ce.node ) pathed = path[drxn] && ( ( forks[!drxn] == this ) == path[!drxn] );
-        if ( !ce.node->reach( tar, forks, diff + ce.diff, diffs, path, pathed, drxn ) ) return false;
+        bool forkPath = forked;
+        if ( forks[!drxn] == this ) forkPath = path[!drxn] && ( ( forks[drxn] == ce.node ) == path[drxn] );
+        if ( forks[drxn] == ce.node ) forkPath = path[drxn] && ( ( forks[!drxn] == this ) == path[!drxn] );
+        if ( !ce.node->reachViaEdgeOnly( tar, forks, pathed, diff + ce.diff, diffs, path, forkPath, drxn ) ) return false;
     }
     for ( ClaimJoin* cj : joins_[drxn] )
     {
-        bool pathed = forked;
-        assert( forks[!drxn] != this );
-        assert( forks[drxn] != cj->node[drxn] );
-        if ( forks[!drxn] == this ) pathed = path[!drxn] && !path[drxn] && ( forks[drxn] != cj->node[drxn] );
-        if ( forks[drxn] == cj->node[drxn] ) pathed = path[drxn] && !path[!drxn] && ( forks[!drxn] != this );
-        if ( !cj->node[drxn]->reach( tar, forks, diff + cj->diff( drxn ), diffs, path, pathed, drxn ) ) return false;
+        bool forkPath = forked;
+        if ( forks[!drxn] == this ) forkPath = path[!drxn] && !path[drxn] && ( forks[drxn] != cj->node[drxn] );
+        if ( forks[drxn] == cj->node[drxn] ) forkPath = path[drxn] && !path[!drxn] && ( forks[!drxn] != this );
+        if ( !cj->node[drxn]->reachViaEdgeOnly( tar, forks, pathed, diff + cj->diff( drxn ), diffs, path, forkPath, drxn ) ) return false;
     }
     
+    pathed.erase( this );
     return true;
 }
 
-bool ClaimNode::reach( ClaimNode* tar, ClaimNode* fork, int32_t diff, vector<int32_t>& diffs, bool forked, bool drxn )
+bool ClaimNode::reachViaForkOnly( ClaimNode* tar, ClaimNode* fork, unordered_set<ClaimNode*>& pathed, int32_t diff, vector<int32_t>& diffs, bool forked, bool drxn )
 {
     if ( this == fork ) forked = true;
     if ( this == tar )
@@ -1319,25 +1429,29 @@ bool ClaimNode::reach( ClaimNode* tar, ClaimNode* fork, int32_t diff, vector<int
         return true;
     }
     
-    for ( ClaimEdge& ce : edges_[drxn] ) if ( !ce.node->reach( tar, fork, diff + ce.diff, diffs, forked, drxn ) ) return false;
-    for ( ClaimJoin* cj : joins_[drxn] ) if ( !cj->node[drxn]->reach( tar, fork, diff + cj->diff( drxn ), diffs, forked, drxn ) ) return false;
+    if ( !pathed.insert( this ).second ) return true;
     
+    for ( ClaimEdge& ce : edges_[drxn] ) if ( !ce.node->reachViaForkOnly( tar, fork, pathed, diff + ce.diff, diffs, forked, drxn ) ) return false;
+//    for ( ClaimJoin* cj : joins_[drxn] ) if ( !cj->node[drxn]->reach( tar, fork, diff + cj->diff( drxn ), diffs, forked, drxn ) ) return false;
+    for ( ClaimJoin* cj : joins_[drxn] ) if ( !cj->node[drxn]->reachViaForkOnly( tar, fork, pathed, diff + cj->dist, diffs, forked, drxn ) ) return false;
+    
+    pathed.erase( this );
     return true;
 }
 
-bool ClaimNode::reach( ClaimNode* tar, int32_t diff, vector<int32_t>& diffs, bool drxn )
-{
-    if ( tar == this )
-    {
-        if ( find( diffs.begin(), diffs.end(), diff ) == diffs.end() ) diffs.push_back( diff );
-        return true;
-    }
-    
-    bool reached = false;
-    for ( ClaimEdge& ce : edges_[drxn] ) if ( ce.node->reach( tar, diff + ce.diff, diffs, drxn ) ) reached = true;
-    for ( ClaimJoin* cj : joins_[drxn] ) if ( cj->node[drxn]->reach( tar, diff + cj->diff( drxn ), diffs, drxn ) ) reached = true;
-    return reached;
-}
+//bool ClaimNode::reach( ClaimNode* tar, int32_t diff, vector<int32_t>& diffs, bool drxn )
+//{
+//    if ( tar == this )
+//    {
+//        if ( find( diffs.begin(), diffs.end(), diff ) == diffs.end() ) diffs.push_back( diff );
+//        return true;
+//    }
+//    
+//    bool reached = false;
+//    for ( ClaimEdge& ce : edges_[drxn] ) if ( ce.node->reach( tar, diff + ce.diff, diffs, drxn ) ) reached = true;
+//    for ( ClaimJoin* cj : joins_[drxn] ) if ( cj->node[drxn]->reach( tar, diff + cj->diff( drxn ), diffs, drxn ) ) reached = true;
+//    return reached;
+//}
 
 bool ClaimNode::removeEdge( ClaimNode* cn, bool drxn, bool reciprocate )
 {
@@ -1349,28 +1463,23 @@ bool ClaimNode::removeEdge( ClaimNode* cn, bool drxn, bool reciprocate )
     }
     if ( removed && reciprocate )
     {
-        bool trimmed = false;
-        Nodes forks( getForks( NULL, drxn ) ), branches( cn->getForks( NULL, !drxn ) );
-        if ( clone_ != this ) forks -= clone_->getFork( drxn );
-        for ( ClaimEdge& ce : edges_[drxn] ) branches -= ce.node->getFork( !drxn );
-        for ( Node* node : forks.nodes ) for ( Node* branch : branches.nodes ) if ( node->removeEdge( branch, drxn, true ) ) trimmed = true;
-        assert( trimmed );
+        assert( getFork( drxn )->removeEdge( cn->getFork( !drxn ), drxn, true ) );
         cn->removeEdge( this, !drxn, false );
     }
     return removed;
 }
 
-bool ClaimNode::removeJoin( ClaimNode* cn, bool drxn, bool reciprocate )
-{
-    bool removed = false;
-    for ( int i = 0; i < joins_[drxn].size(); i++ ) if ( joins_[drxn][i]->node[drxn] == cn )
-    {
-        joins_[drxn].erase( joins_[drxn].begin() + i-- );
-        removed = true;
-    }
-    if ( removed && reciprocate ) cn->removeJoin( this, !drxn, false );
-    return removed;
-}
+//bool ClaimNode::removeJoin( ClaimNode* cn, bool drxn, bool reciprocate )
+//{
+//    bool removed = false;
+//    for ( int i = 0; i < joins_[drxn].size(); i++ ) if ( joins_[drxn][i]->node[drxn] == cn )
+//    {
+//        joins_[drxn].erase( joins_[drxn].begin() + i-- );
+//        removed = true;
+//    }
+//    if ( removed && reciprocate ) cn->removeJoin( this, !drxn, false );
+//    return removed;
+//}
 
 void ClaimNode::reset()
 {
@@ -1385,19 +1494,14 @@ void ClaimNode::reset()
     distal_.clear();
 }
 
-bool ClaimNode::resplit( vector<ClaimNode*>& forks, vector<ClaimNode*>& claims, bool orient )
+bool ClaimNode::resplit( vector<ClaimNode*>& claims, bool orient )
 {
-    bool splitable = false, didSplit = false;
-    for ( ClaimNode* cn : claims ) if ( cn->split_ ) splitable = true;
-    if ( !splitable )
-    {
-        for ( ClaimNode* cn : forks ) if ( !cn->isBranched( !orient ) && cn->split( claims, orient, !orient ) )
-        {
-            didSplit = true;
-        }
-    }
+    bool didSplit = false;
     
-    if ( !splitable && !didSplit ) return false;
+    unordered_set<ClaimNode*> splitable[2], tested[2];
+    for ( ClaimNode* cn : claims ) if ( cn->split_ ) for ( int d : { 0, 1 } ) if ( cn->edges_[d].empty() ) splitable[d].insert( cn );
+    
+    if ( splitable[0].empty() && splitable[1].empty() ) return false;
     
     for ( ClaimNode* cn : claims )
     {
@@ -1409,18 +1513,7 @@ bool ClaimNode::resplit( vector<ClaimNode*>& forks, vector<ClaimNode*>& claims, 
         }
     }
     
-    if ( !didSplit ) for ( int i = 0; i < claims.size(); i++ ) if ( claims[i]->split_ )
-    {
-        assert( claims[i]->edges_[0].empty() || claims[i]->edges_[1].empty() );
-        for ( int d : { 0, 1 } ) if ( claims[i]->edges_[d].empty() )
-        {
-            assert( claims[i]->split_ );
-            claims[i]->split_ = false;
-            claims[i]->edge( claims, orient, d );
-            if ( !claims[i]->edges_[d].empty() ) didSplit = true;
-        }
-        assert( !claims[i]->split_ );
-    }
+    for ( int d : { 0, 1 } ) for ( ClaimNode* cn : splitable[d] ) if ( cn->branch( claims, tested[d], false, orient, d ) ) didSplit = true;
     
     return didSplit;
 }
@@ -1430,11 +1523,16 @@ void ClaimNode::score( vector<ClaimNode*>& claims, bool orient )
     Nodes base;
     for ( ClaimNode* cn : claims ) for ( pair<Node*, int32_t> no : cn->offs_ ) base += no.first;
     
-    for ( ClaimNode* cn : claims ) cn->setPairs( cn, 0, false, false );
+    for ( ClaimNode* cn : claims )
+    {
+        unordered_set<ClaimNode*> pathed;
+        cn->setPairs( cn, pathed, 0, false, false );
+        assert( pathed.empty() );
+    }
     
     for ( int d : { 0, 1 } ) for ( ClaimNode* cn : claims ) if ( cn->edges_[d].size() > 1 || !cn->joins_[d].empty() )
     {
-        for ( Node* node : cn->getForks( NULL, d ) ) node->verifyFork( params.maxPeMean, false, d );
+        cn->getFork( d )->verifyFork( params.maxPeMean, false, d );
     }
     
     for ( ClaimNode* cn : claims ) cn->setScores( claims, base );
@@ -1451,31 +1549,33 @@ void ClaimNode::setBase( Nodes& base, bool distal )
     }
 }
 
-void ClaimNode::setBlocked( Node* node, bool drxn )
-{
-    if ( offs_.find( node ) == offs_.end() ) return;
-    for ( Node* fork : getForks( node ) ) offs_.erase( fork );
-    for ( Edge& e : getEdges( node, drxn ) ) setBlocked( e.node, drxn );
-}
-
-//void ClaimNode::setBlocks( Nodes& block, bool drxn )
+//void ClaimNode::setBlocked( Node* node, bool drxn )
 //{
-//    vector<ClaimNode*> forks;
-//    setForks( forks, drxn );
-//    assert( !forks.empty() );
-//    int32_t limit = ends_[drxn];
-//    for ( ClaimNode* cn : forks ) limit = drxn ? max( limit, cn->ends_[1]+500 ) : min( limit, cn->ends_[0]-500 );
-//    for ( const pair<Node*, int32_t>& no : offs_ ) if ( drxn ? limit < no.second : no.second < limit ) block += no.first;
+//    if ( offs_.find( node ) == offs_.end() ) return;
+//    for ( Node* fork : getForks( node ) ) offs_.erase( fork );
+//    for ( Edge& e : getEdges( node, drxn ) ) setBlocked( e.node, drxn );
 //}
 
-bool ClaimNode::setBranched( vector<ClaimNode*>& claims, bool branched, bool orient, bool drxn )
+void ClaimNode::setBranched( vector<ClaimNode*>& claims, bool reversed, bool orient, bool drxn )
 {
+    if ( !edged_[!drxn] ) edge( claims, orient, !drxn );
+    
+    ClaimNode* cn = isBridge() ? edges_[drxn][0].node : this;
+    if ( !cn->edged_[!drxn] ) cn->edge( claims, orient, !drxn );
+    
+    if ( !reversed ) for ( ClaimEdge& ce : cn->edges_[!drxn] ) ce.node->setBranched( claims, true, orient, !drxn );
+}
+
+bool ClaimNode::setBranched( vector<ClaimNode*>& claims, unordered_set<ClaimNode*>& tested, bool branched, bool orient, bool drxn )
+{
+    if ( !tested.insert( this ).second ) return false;
+    
     // branched = path has already branched, forked = path branches forward
     if ( !branched && !edged_[drxn] ) edge( claims, orient, drxn );
     if ( edges_[drxn].size() > 1 ) setForked( claims, orient, drxn );
     
     bool forked = edges_[drxn].size() > 1;
-    for ( ClaimEdge& ce : edges_[drxn] ) if ( ce.node->setBranched( claims, branched || forked, orient, drxn ) ) forked = true;
+    for ( ClaimEdge& ce : edges_[drxn] ) if ( ce.node->setBranched( claims, tested, branched || forked, orient, drxn ) ) forked = true;
     if ( forked ) setForked( claims, orient, !drxn );
     return forked;
 }
@@ -1529,27 +1629,6 @@ void ClaimNode::setEnds( vector<ClaimNode*>& ends, Nodes& base, bool orient, boo
     vector<ClaimNode*> alts;
     for ( int i = 0; i < ends.size(); i++ ) if ( ends[i]->setExts( shared, limits[i], drxn ) ) alts.push_back( ends[i] );
     for ( ClaimNode* cn : alts ) for ( ClaimNode* alt : alts ) if ( cn != alt ) cn->alts_.push_back( alt );
-//    for ( int i = 0; i < ends.size(); i++ ) if ( !ends[i]->setExts( shared, limits[i], drxn ) ) ends.erase( ends.begin() + i-- );
-//    for ( ClaimNode* cn : ends ) for ( ClaimNode* alt : ends ) if ( cn != alt ) cn->alts_.push_back( alt );
-    
-//    // Extend further
-//    for ( ClaimNode* cn : ends ) for ( pair<Node*, int32_t>& no : cn->getHangs( orient, drxn ) ) cn->fill( no.first, base, no.second, limit+500, orient, drxn );
-//    for ( ClaimNode* cn : ends ) for ( pair<Node*, int32_t> no : cn->offs_ ) exts += no.first;
-//    for ( Node* node : exts.nodes ) for ( ClaimNode* cn : ends )
-//    {
-//        auto it = cn->offs_.find( node );
-//        if ( it != cn->offs_.end() ) cn->fill( node, base, exts, it->second, orient, drxn );
-//    }
-//
-//    // Catalogue all nodes remaining nodes to block
-//    for ( ClaimNode* cn : ends ) cn->setBlocks( block, drxn );
-//    for ( ClaimNode* cn : ends ) for ( pair<Node*, int32_t> no : cn->offs_ ) if ( !base.find( no.first ) )
-//    {
-//        for ( ClaimNode* alt : ends ) if ( cn != alt && alt->offs_.find( no.first ) != alt->offs_.end() ) block += no.first;
-//    }
-//
-//    // Remove blocked
-//    for ( Node* node : block.nodes ) for ( ClaimNode* cn : ends ) if ( cn->offs_.find( node ) != cn->offs_.end() ) cn->setBlocked( node, drxn );
 }
 
 bool ClaimNode::setExts( Nodes& shared, int32_t limit, bool drxn )
@@ -1590,25 +1669,28 @@ void ClaimNode::setJoins( vector<ClaimNode*>& claims, Nodes& base, int32_t limit
         if ( !ext.empty() ) ends.push_back( make_pair( cn, ext ) );
     }
     
-    for ( ClaimNode* cn : claims ) if ( !cn->edged_[drxn] && !cn->edges_[0].empty() )
+    for ( ClaimNode* cn : claims ) if ( !cn->edged_[drxn] )
     {
-        NodeOffsets offs;
-        NodeOffset* off;
-        for ( pair<Node*, int32_t>& hang : cn->getHangs( orient, drxn ) ) offs.fillNot( hang.first, base, hang.second, limit+500, orient, drxn, true );
+        NodeDists dists;
+        int32_t* dist;
+        for ( pair<Node*, int32_t>& hang : cn->getHangs( orient, drxn ) ) dists.fillNot( hang.first, base, hang.second, limit+500, orient, drxn, true );
         
         for ( ClaimNode* alt : claims ) if ( cn != alt && !alt->edged_[!drxn] )
         {
             for ( pair<Node*, int32_t>& hang : alt->getHangs( orient, !drxn ) )
             {
-//                if ( off = offs.get( hang.first ) ) cn->addJoin( alt, hang.first, offs, hang.second - (*off)[0], drxn );
-                if ( off = offs.get( hang.first ) ) cn->addJoin( alt, hang.first, offs, drxn ? hang.second - (*off)[0] : (*off)[0] - hang.second, drxn );
+                if ( cn->findFork( hang.first, drxn ) )
+                {
+                    cn->addJoin( alt, hang.first, dists, drxn ? hang.second - cn->ends_[1] : cn->ends_[0] - hang.second, drxn );
+                }
+                else if ( dist = dists.get( hang.first ) ) cn->addJoin( alt, hang.first, dists, drxn ? hang.second - *dist : *dist - hang.second, drxn );
             }
         }
         
-        if ( !offs.empty() && !cn->edges_[drxn].empty() ) for ( pair<ClaimNode*, Nodes>& ext : ends )
+        if ( !dists.empty() && !cn->edges_[drxn].empty() ) for ( pair<ClaimNode*, Nodes>& ext : ends )
         {
             ClaimShared cs( cn );
-            for ( Node* node : ext.second.nodes ) if ( offs.find( node ) ) cs.shared.fillIn( node, ext.second, drxn, true );
+            for ( Node* node : ext.second.nodes ) if ( dists.find( node ) ) cs.shared.fillIn( node, ext.second, drxn, true );
             if ( !cs.shared.empty() ) ext.first->shared_.push_back( cs );
         }
     }
@@ -1622,23 +1704,27 @@ void ClaimNode::setKeep( Node* node, Nodes& keep, bool drxn )
     for ( Node* clone : node->clones( false ) ) if ( ( off[1] = get( clone ) ) && off[0] == off[1] ) setKeep( clone, keep, drxn );
 }
 
-void ClaimNode::setPairs( ClaimNode* cn, int32_t diff, bool lFork, bool rFork )
+void ClaimNode::setPairs( ClaimNode* cn, unordered_set<ClaimNode*>& pathed, int32_t diff, bool lFork, bool rFork )
 {
+    if ( cn->ends_[0] - cn->path_[0]->size() - diff - ends_[1] > params.maxMpMean ) return;
+    if ( !pathed.insert( cn ).second ) return;
+    
     if ( !lFork ) for ( ClaimEdge& ce : cn->edges_[1] ) if ( ce.node->isForked( 0 ) ) lFork = true;
     if ( !joins_[1].empty() ) lFork = true;
     
-    bool added = false;
+    bool added = false, failed = false;
     for ( ClaimPairing* cp : pairs_[1] ) if ( !added && ( added = ( cp->node[1] == cn ) ) )
     {
         for ( int i = 0; i <= cp->diffs.size(); i++ )
         {
-            if ( i == cp->diffs.size() || diff < cp->diffs[i] )
-            {
-                cp->diffs.insert( cp->diffs.begin() + i, diff );
-                cp->missed.insert( cp->missed.begin() + i, 0 );
-            }
-            if ( cp->diffs[i] == diff ) break;
+            if ( failed = ( i < cp->diffs.size() && diff == cp->diffs[i] ) ) break;
+            if ( i < cp->diffs.size() && cp->diffs[i] < diff ) continue;
+//            if ( !i && ( diff < cp->diffs.back() - int32_t( params.maxMpMean / max( 1, (int)cp->diffs.size() - 1 ) ) ) ) return;
+            cp->diffs.insert( cp->diffs.begin() + i, diff );
+            cp->missed.insert( cp->missed.begin() + i, 0 );
+            break;
         }
+        break;
     }
     if ( !added && lFork && rFork ) new ClaimPairing( this, cn, diff );
     
@@ -1646,58 +1732,9 @@ void ClaimNode::setPairs( ClaimNode* cn, int32_t diff, bool lFork, bool rFork )
     for ( ClaimEdge& ce : cn->edges_[1] ) for ( ClaimEdge& re : ce.node->edges_[0] ) if ( re.node->isForked( 1 ) ) rFork = true;
     if ( !joins_[1].empty() ) rFork = true;
     
-    for ( ClaimEdge& ce : cn->edges_[1] ) setPairs( ce.node, diff+ce.diff, lFork, lFork && rFork );
-    for ( ClaimJoin* cj : cn->joins_[1] ) setPairs( cj->node[1], diff+cj->diff( 1 ), lFork, lFork && rFork );
-}
-
-bool ClaimNode::setRedundant( vector<ClaimNode*>& claims, ClaimPairing* cp, Node* paired[2], int32_t cutoff, int32_t est, int hits, bool orient )
-{
-    if ( !paired[0]->cloned_ && !paired[1]->cloned_ ) return false;
-    for ( ClaimRedundant* cr : redundant_[orient] ) if ( cr->disregard( paired ) ) return true;
-    
-    Nodes clones[2];
-    paired[0]->hits_.setRedundant( clones[0], clones[1], paired[1], 1 );
-    if ( clones[0].size() < 2 && clones[1].size() < 2 ) return false;
-    if ( clones[0].size() > 1 && clones[1].size() > 1 ) return true;
-    
-    int32_t* off;
-    vector< pair<ClaimNode*, int32_t> > offs[2];
-    for ( int d : { 0, 1 } ) for ( ClaimNode* cn : claims ) if ( cn != cp->node[d] )
-    {
-        for ( Node* clone : clones[d].nodes ) if ( off = cn->get( clone ) ) break;
-        if ( off ) offs[d].push_back( make_pair( cn, *off ) );
-    }
-    
-    assert( offs[0].empty() || offs[1].empty() );
-    if ( offs[0].empty() && offs[1].empty() ) return true;
-    
-    bool drxn = !offs[1].empty();
-    assert( off = cp->node[!drxn]->get( paired[!drxn] ) );
-    est = *off + ( drxn ? est : -est );
-    vector<ClaimNode*> alts[2]{ { cp->node[0] }, { cp->node[1] } };
-    
-    for ( pair<ClaimNode*, int32_t>& no : offs[drxn] )
-    {
-        ClaimPairing* matched = NULL;
-        for ( ClaimPairing* acp : cp->node[!drxn]->pairs_[drxn] ) if ( acp->node[drxn] == no.first ) matched = acp;
-        if ( !matched ) return true;
-        bool success = false, fail = false;
-        for ( int32_t diff : matched->diffs ) if ( abs( no.second - diff - est ) >= cutoff ) assert( false );
-        for ( int32_t diff : matched->diffs ) ( abs( no.second - diff - est ) < cutoff ? success : fail ) = true;
-        if ( success && fail ) assert( false );
-        if ( success && fail ) return true;
-        if ( !fail ) alts[drxn].push_back( no.first );
-    }
-    
-    Nodes base;
-    for ( int d : { 0, 1 } ) for ( ClaimNode* cn : alts[d] ) cn->setBase( base, true );
-    for ( int d : { 0, 1 } ) for ( Node* clone : clones[d].nodes ) if ( !base.find( clone ) ) return true;
-    
-    for ( ClaimRedundant* cr : redundant_[orient] ) if ( cr->add( alts, paired, hits ) ) return true;
-    
-    new ClaimRedundant( alts, paired, hits );
-    
-    return true;
+    if ( !failed ) for ( ClaimEdge& ce : cn->edges_[1] ) setPairs( ce.node, pathed, diff+ce.diff, lFork, lFork && rFork );
+    if ( !failed ) for ( ClaimJoin* cj : cn->joins_[1] ) setPairs( cj->node[1], pathed, diff+cj->diff( 1 ), lFork, lFork && rFork );
+    pathed.erase( cn );
 }
 
 void ClaimNode::setScores( vector<ClaimNode*>& claims, Nodes& base )
@@ -1714,94 +1751,35 @@ void ClaimNode::setScores( vector<ClaimNode*>& claims, Nodes& base )
                 if ( !cp->node[1]->isValid( np.first, 1 ) ) break;
                 if ( isInvalid( no.first, no.second, cp->node[1], 1 ) ) break;
                 if ( cp->node[1]->isInvalid( np.first, *off, this, 0 ) ) break;
-                if ( path_[0]->ends_[0] == -4858 && cp->node[1]->path_.back()->ends_[1] == -4466 )
-                {
-                    int x = 0;
-                }
                 ClaimScore cs( no.first, np.first, cp, *off - no.second, est );
-                cs.score( claims, est, 200 + np.second.maxLen / 3, np.second.count );
+                cs.score( claims, est, np.second.margin(), np.second.count );
                 break;
             }
         }
     }
     
-    for ( int i = 0; i < pairs_[1].size(); i++ ) if ( !pairs_[1][i]->score ) delete pairs_[1][i--];
+    for ( int i = 0; i < pairs_[1].size(); i++ ) if ( !pairs_[1][i]->hits ) delete pairs_[1][i--];
 }
 
-void ClaimNode::setScores( vector<ClaimNode*>& claims, Nodes& base, bool orient )
-{
-    if ( pairs_[orient].empty() ) return;
-    
-    for ( pair<Node*, int32_t> no : offs_ ) if ( isValid( no.first, !orient ) )
-    {
-        bool bad = false;
-        for ( ClaimNode* alt : alts_ ) if ( alt->get( no.first ) ) bad = true;
-        if ( bad ) continue;
-        for ( auto& np : no.first->hits_.pairs[orient] ) if ( base.find( np.first ) && !get( np.first ) )
-        {
-            int32_t* off, est = np.second.estimate();
-            for ( ClaimPairing* cp : pairs_[orient] ) if ( off = cp->node[orient]->get( np.first ) )
-            {
-                if ( !cp->node[orient]->isValid( np.first, orient ) ) break;
-                if ( isInvalid( no.first, no.second, cp->node[orient], orient ) ) break;
-                if ( cp->node[orient]->isInvalid( np.first, *off, this, !orient ) ) break;
-                if ( isShared( no.first, cp->node[orient], orient ) ) break;
-                if ( cp->node[orient]->isShared( np.first, this, !orient ) ) break;
-                if ( distal_.find( no.first ) && cp->node[orient]->distal_.find( np.first ) ) break;
-                for ( ClaimNode* alt : cp->node[orient]->alts_ ) if ( alt->get( np.first ) ) bad = true;
-                if ( bad ) break;
-                
-                int32_t dist = orient ? *off - no.second : no.second - *off;
-                int32_t cutoff = 200 + np.second.maxLen / 3;
-                int32_t best = -1;
-                vector<int32_t> diffs;
-                for ( int32_t diff : cp->diffs ) diffs.push_back( abs( abs( dist - diff ) - est ) );
-                for ( int32_t diff : diffs ) if ( best == -1 || diff < best ) best = diff;
-                bool good = dist > 0;
-                for ( int32_t diff : cp->diffs ) if ( dist - diff > 0 ) good = true;
-                assert( good && !diffs.empty() );
-                if ( cutoff < best )
-                {
-                    break;
-                }
-                cutoff += best;
-                Node* paired[2]{ orient ? no.first : np.first, orient ? np.first : no.first };
-                if ( setRedundant( claims, cp, paired, cutoff, est, np.second.count, orient ) ) break;
-                cp->score += np.second.count;
-                for ( int i = 0; i < diffs.size(); i++ ) if ( cutoff < diffs[i] ) cp->missed[i] += np.second.count;
-                for ( int i = 0; i < diffs.size(); i++ ) if ( cutoff < diffs[i] ) assert( false );
-                break;
-            }
-        }
-    }
-    
-    for ( int i = 0; i < pairs_[orient].size(); i++ ) if ( !pairs_[orient][i]->score ) delete pairs_[orient][i--];
-}
-
-bool ClaimNode::setState( bool drxn )
-{
-    for ( int i = 0; i < path_.size(); i++ )
-    {
-        if ( ( drxn ? path_[i] : path_.end()[-i-1] )->setState() ) return true;
-    }
-    return false;
-}
+//bool ClaimNode::setState( bool drxn )
+//{
+//    for ( int i = 0; i < path_.size(); i++ )
+//    {
+//        Node* node = ( drxn ? path_[i] : path_.end()[-i-1] );
+//        if ( node->setState() ) return true;
+//    }
+//    return false;
+//}
 
 bool ClaimNode::split( vector<ClaimNode*>& claims, bool orient, bool drxn )
 {
     if ( !edged_[!drxn] )
     {
-        for ( Node* fork : getForks( NULL, !drxn ) ) if ( !fork->isForkComplete( params.shortLen(), 20, !drxn ) )
-        {
-            return false;
-        }
+        if ( !getFork( !drxn )->isForkComplete( params.shortLen(), 20, !drxn ) ) return false;
         edge( claims, orient, !drxn );
         for ( ClaimEdge& ce : edges_[!drxn] )
         {
-            for ( Node* fork : ce.node->getForks( NULL, drxn ) ) if ( !fork->isForkComplete( params.shortLen(), 20, drxn ) )
-            {
-                return false;
-            }
+            if ( !ce.node->getFork( drxn )->isForkComplete( params.shortLen(), 20, drxn ) ) return false;
             ce.node->edge( claims, orient, drxn );
         }
     }
@@ -1827,979 +1805,15 @@ void ClaimNode::testLoop( ClaimNode* cn )
     for ( ClaimJoin* cj : joins_[1] ) cj->node[1]->testLoop( cn );
 }
 
-bool ClaimNode::trim( int drxn )
+bool ClaimNode::trim( unordered_set<ClaimNode*> trimmed[2], NodeRoll& nodes, int drxn )
 {
     for ( int d : { 0, 1 } ) if ( drxn == 2 || d == drxn )
     {
-        for ( ClaimEdge& ce : edges_[d] ) if ( ce.node->trim( d ) ) return true;
+        if ( !trimmed[d].insert( this ).second ) return false;
+        for ( ClaimEdge& ce : edges_[d] ) if ( ce.node->trim( trimmed, nodes, d ) ) return true;
     }
     
-    for ( int d : { 0, 1 } ) if ( edges_[d].size() > 1 && ClaimTrim::trim( this, d ) ) return true;
-//    for ( int d : { 0, 1 } ) if ( edges_[d].size() > 1 )
-//    {
-//        bool good = false;
-//        for ( ClaimEdge& ce : edges_[d] ) if ( ce.node->edges_[!d].size() > 1 ) good = true;
-//        if ( good && ClaimTrim::trim( this, d ) ) return true;
-//    }
+    for ( int d : { 0, 1 } ) if ( edges_[d].size() > 1 && ClaimTrim::trim( this, nodes, d ) ) return true;
     
     return false;
-}
-
-Claim::Claim( Node* fork, int32_t dist, bool orient, bool drxn )
-: path{ fork }, coord( dist )
-{
-    for ( Edge& e : fork->edges_[drxn] ) if ( !e.node->isBlunt( 0, 3, drxn ) ) edges.push_back( e );
-    offs.add( fork, dist );
-    advance( fork, orient, drxn );
-}
-
-Claim::Claim( Claim* fork, Edge& e, bool orient, bool drxn )
-: path( fork->path ), edges{ e }, offs( fork->offs ), coord( fork->coord )
-{
-    advance( terminus( drxn ), orient, drxn );
-}
-
-void Claim::advance( Node* fork, bool orient, bool drxn )
-{
-    while ( fork && edges.size() == 1 )
-    {
-        path.insert( drxn ? path.end() : path.begin(), edges[0].node );
-        offs.add( fork, edges[0], coord, orient, drxn );
-        fork = edges[0].node;
-        coord = ( *offs.get( fork ) )[0];
-        edges.clear();
-        for ( Edge& e : fork->edges_[drxn] ) if ( !e.node->isBlunt( 0, 3, drxn ) ) edges.push_back( e );
-        if ( !fork->cloned_ ) continue;
-        for ( Node* clone : fork->cloned_->nodes )
-        {
-            if ( !fork->edges_[drxn].empty() && !clone->edges_[!drxn].empty() ) continue;
-            offs.add( clone, coord );
-            for ( Edge& e : clone->edges_[drxn] )
-            {
-                bool good = !e.node->isBlunt( 0, 3, drxn );
-                for ( Edge& f : edges ) if ( e.node == f.node ) good = false;
-                if ( good ) edges.push_back( e );
-            }
-        }
-    }
-}
-
-void Claim::block( vector<Claim*>& claims, bool drxn )
-{
-    Nodes base, blocked;
-    for ( Claim* c : claims ) for ( Node* node : c->path ) base += node;
-    for ( auto& no : claims[0]->offs.map )
-    {
-        bool bad = !base.find( no.first );
-        for ( int i = 1; bad && i < claims.size(); i++ )
-        {
-            NodeOffset* off = claims[i]->offs.get( no.first );
-            if ( !off || abs( no.second[0] - (*off)[0] ) > 500 ) bad = false;
-        }
-        if ( bad ) blocked += no.first;
-    }
-    for ( Claim* c : claims )
-    {
-        Nodes keep;
-        c->block( c->terminus( !drxn ), blocked, keep, drxn );
-        c->cull( keep );
-    }
-}
-
-void Claim::block( Node* node, Nodes& blocked, Nodes& keep, bool drxn )
-{
-    if ( !offs.find( node ) || blocked.find( node ) || !keep.add( node ) ) return;
-    for ( Edge& e : node->edges_[drxn] ) block( e.node, blocked, keep, drxn );
-    if ( !node->cloned_ || node->edges_[!drxn].empty() ) return;
-    for ( Node* clone : node->cloned_->nodes )
-    {
-        if ( node->edges_[drxn].empty() || clone->edges_[!drxn].empty() ) block( clone, blocked, keep, drxn );
-    }
-}
-
-void Claim::cull( Nodes& keep )
-{
-    for ( auto it = offs.map.begin(); it != offs.map.end(); )
-    {
-        if ( keep.find( it->first ) ) it++;
-        else it = offs.map.erase( it );
-    }
-}
-
-//int32_t Claim::estimate( Claim* f, int32_t& best, int32_t est, bool drxn )
-//{
-//    if ( !valid || !f->valid ) return -1;
-//    int32_t diff = off.diff( f->off, est, drxn );
-//    best = min( best, diff );
-//    return diff;
-//}
-
-bool Claim::identical( Claim* rhs, bool drxn )
-{
-    if ( path.size() < rhs->path.size() ) return false;
-    for ( int i = 0; i < rhs->path.size(); i++ ) if ( place( i, drxn ) != rhs->place( i, drxn ) ) return false;
-    return true;
-}
-
-Node* Claim::place( int i, bool drxn )
-{
-    assert( i < path.size() );
-    if ( i >= path.size() ) return NULL;
-    return drxn ? path[i] : path.end()[-i-1];
-}
-
-bool Claim::redundant( Claim* rhs, bool drxn, bool reciprocate )
-{
-    Node* fork = rhs->terminus( !drxn );
-    if ( fork == terminus( !drxn ) ) return false;
-    NodeOffset* no[2]{ offs.get( fork ), rhs->offs.get( fork ) };
-    if ( no[0] && no[1] && abs( (*no[0])[0] - (*no[1])[0] ) < 100 ) return true;
-    if ( reciprocate && rhs->redundant( this, drxn, false ) ) return true;
-    return false;
-}
-
-void Claim::retract()
-{
-    Nodes keep( path );
-    for ( auto it = offs.map.begin(); it != offs.map.end(); )
-    {
-        if ( keep.find( it->first ) )
-        {
-            it->second[2] = it->second[1] = it->second[0];
-            it++;
-        }
-        else it = offs.map.erase( it );
-    }
-    assert( offs.map.size() == path.size() );
-}
-
-vector<Claim*> Claim::split( bool init, bool orient, bool drxn )
-{
-    vector<Claim*> branches;
-    int edgeCount = 0;
-    for ( Edge& e : edges ) if ( e.node->isBranchComplete( 0, 15, drxn ) ) edgeCount++;
-    if ( edgeCount < 2 ) return branches;
-    if ( !init ) for ( Edge& e : edges ) if ( !offs.find( e.node ) ) return branches;
-    
-    retract();
-    while ( edges.size() > 1 )
-    {
-        branches.push_back( new Claim( this, edges.back(), orient, drxn ) );
-        edges.pop_back();
-    }
-    advance( terminus( drxn ), orient, drxn );
-    for ( Claim* c : branches ) assert( !c->identical( this, drxn ) );
-    return branches;
-}
-
-Nodes Claim::target( vector<Claim*>& branches )
-{
-    Nodes tar;
-    for ( Claim* cb : branches ) for ( auto& no : cb->offs.map ) tar += no.first;
-    for ( auto& no : branches[0]->offs.map )
-    {
-        bool bad = true;
-        for ( int j = 1; bad && j < branches.size(); j++ ) if ( !branches[j]->offs.get( no.first ) ) bad = false;
-        if ( bad ) tar -= no.first;
-    }
-    return tar;
-}
-
-Node* Claim::terminus( bool drxn )
-{
-    assert( !path.empty() );
-    if ( path.empty() ) return NULL;
-    return drxn ? path.back() : path[0];
-}
-
-ClaimPair::ClaimPair( Claim* fwd, Edge e, int altCount )
-: path( fwd ), edge( e ), alts( altCount, 0 ), uniques( 0 ), drop( false )
-{}
-
-ClaimBlocks::ClaimBlocks( vector<Claim*> test[2] )
-{
-    Nodes used[3], inter[3];
-    for ( int d : { 0, 1 } ) for ( Claim* c : test[d] ) for ( auto& no : c->offs.map ) used[d] += no.first;
-    for ( int d : { 0, 1 } ) used[2] += used[d];
-    
-    NodeRoll branches[2], forks[2];
-    for ( int d : { 0, 1 } ) for ( Node* node : used[d].nodes ) for ( Edge& e : node->edges_[!d] ) if ( !used[2].find( e.node ) ) branches[d].add( e.node );
-    for ( Node* node : branches[0].nodes ) inter[0].fillNot( node, used[2], 1, true );
-    for ( Node* node : branches[1].nodes ) if ( inter[0].find( node ) ) inter[1].fillNot( node, used[2], 0, true );
-    for ( Node* node : inter[1].nodes ) if ( inter[0].find( node ) ) inter[2] += node;
-    for ( int d : { 0, 1 } ) for ( int i = 0; i < branches[d].size(); i++ ) if ( !inter[2].find( branches[d][i] ) ) branches[d].remove( branches[d][i--] );
-    for ( int d : { 0, 1 } ) for ( Node* node : branches[d].nodes ) for ( Edge& e : node->edges_[d] ) if ( used[2].find( e.node  ) ) forks[d].add( e.node );
-    if ( inter[2].empty() ) return;
-    
-    bool pairs[forks[0].size()][forks[1].size()], paired[forks[0].size()]{false};
-    for ( int i = 0; i < forks[0].size(); i++ )
-    {
-        Nodes btw = Nodes::inSet( forks[0][i], inter[2], 1, false );
-        for ( int j = 0; j < forks[1].size(); j++ ) pairs[i][j] = false;
-        for ( int j = 0; j < forks[1].size(); j++ ) for ( Edge& e : forks[1][j]->edges_[0] ) if ( btw.find( e.node ) ) pairs[i][j] = true;
-    }
-    for ( int i = 0; i < forks[0].size(); i++ )
-    {
-        if ( paired[i] ) continue;
-        vector<int> same{ i };
-        for ( int j = i+1; j < forks[0].size(); j++ )
-        {
-            bool diff = false;
-            for ( int k = 0; k < forks[1].size(); k++ ) if ( pairs[i][k] != pairs[j][k] ) diff = true;
-            if ( !diff ) same.push_back( j );
-        }
-        Nodes block[2];
-        for ( int j : same ) block[0].fillIn( forks[0][j], used[0], 0, true );
-        for ( int j = 0; j < forks[1].size(); j++ ) if ( pairs[i][j] ) block[1].fillIn( forks[1][j], used[1], 1, true );
-        for ( int j : same ) paired[j] = true;
-        block[0] += block[1];
-        blocks.push_back( block[0] );
-    }
-    for ( int i = 0; i < blocks.size(); i++ )
-    {
-        for ( int j = 0; j < blocks.size(); j++ )
-        {
-            if ( i == j || blocks[i].size() < blocks[j].size() ) continue;
-            bool bad = true;
-            for ( Node* node : blocks[j].nodes ) if ( !( bad = blocks[i].find( node ) ) ) break;
-            if ( bad && j < i ) i--;
-            if ( bad ) blocks.erase( blocks.begin() + j-- );
-        }
-    }
-}
-
-bool ClaimBlocks::ambiguous( vector<Claim*> test[2], Node* bck, Node* fwd, bool drxn )
-{
-    Nodes clones[2];
-    bck->hits_.setRedundant( clones[0], clones[1], fwd, drxn );
-    if ( clones[0].size() < 2 && clones[1].size() < 2 ) return false;
-    for ( int d : { 0, 1 } )
-    {
-        if ( clones[d].size() < 2 ) continue;
-        for ( Claim* c : test[drxn ? d : !d] )
-        {
-            bool found[2]{ false, false };
-            for ( Node* node : clones[d].nodes )
-            {
-                if ( !node->edges_[0].empty() && !node->edges_[1].empty() ) found[ c->offs.find( node ) ] = true;
-            }
-            if ( found[0] && found[1] ) return true;
-        }
-    }
-    
-    for ( Nodes& block : blocks )
-    {
-        bool bad[2]{ false, false };
-        for ( int d : { 0, 1 } ) for ( Node* node : clones[d].nodes ) if ( block.find( node ) ) bad[d] = true;
-        if ( bad[0] && bad[1] ) return true;
-    }
-    
-    used.push_back( make_pair( clones[0], clones[1] ) );
-    return false;
-}
-
-bool ClaimBlocks::disregard( vector<Claim*> test[2], Node* bck, Node* fwd, bool drxn )
-{
-    for ( pair<Nodes, Nodes>& block : used ) if ( block.first.find( bck ) && block.second.find( fwd ) ) return true;
-    
-    if ( ( bck->cloned_ || fwd->cloned_ ) && ambiguous( test, bck, fwd, drxn ) ) return true;
-    
-    for ( Nodes& block : blocks )
-    {
-        bool bad[2]{ block.find( bck ), block.find( fwd ) };
-        if ( bck->cloned_ ) for ( Node* node : bck->cloned_->nodes ) if ( block.find( bck ) ) bad[0] = true;
-        if ( fwd->cloned_ ) for ( Node* node : fwd->cloned_->nodes ) if ( block.find( fwd ) ) bad[1] = true;
-        if ( bad[0] && bad[1] ) return true;
-    }
-    return false;
-}
-
-ClaimScores::ClaimScores( Claim* path, vector<Claim*> test[2], bool drxn )
-: path( path ), claimed( false ), dropped( false )
-{
-    for ( Claim* c : test[drxn] )
-    {
-        Edge edge( NULL, 0, false );
-        Nodes branches;
-        for ( Node* branch : c->terminus( !drxn )->getAltForks( !drxn ) ) branches += branch;
-        
-        for ( Node* fork : path->terminus( drxn )->getAltForks( drxn ) )
-        {
-            for ( Edge& e : fork->edges_[drxn] ) if ( branches.find( e.node ) && edge.node != c->terminus( !drxn ) ) edge = e;
-        }
-        
-        if ( edge.node ) pairs.push_back( ClaimPair( c, edge, test[!drxn].size()-1 ) );
-    }
-    
-    for ( ClaimPair& cp : pairs ) cp.pairs = vector<int>( pairs.size(), 0 );
-}
-
-void ClaimScores::create( vector<Claim*> test[2], vector<ClaimScores*>& scores, bool orient, bool drxn )
-{
-    for ( ClaimScores* cs : scores ) delete cs;
-    scores.clear();
-    for ( Claim* c : test[!drxn] ) scores.push_back( new ClaimScores( c, test, drxn ) );
-    for ( ClaimScores* a : scores ) for ( ClaimScores* b : scores ) if ( b != a ) a->alts.push_back( b );
-    
-    ClaimScores::score( test, scores, orient, drxn );
-    for ( ClaimScores* cs : scores ) cs->trim( drxn );
-}
-
-bool ClaimScores::disregard( Node* bck, Node* fwd, Nodes& used, bool drxn )
-{
-    if ( !bck->cloned_ ) return false;
-    for ( Node* b : bck->cloned_->nodes )
-    {
-        if ( !used.find( b ) ) continue;
-        for ( Node* f : fwd->clones() ) if ( b->hits_.get( f, drxn ) ) return true;
-    }
-    return false;
-}
-
-int ClaimScores::get( ClaimScores* alt, Claim* branch )
-{
-    for ( ClaimPair& cp : pairs ) if ( cp.path == branch ) for ( int i = 0; i < alts.size(); i++ ) if ( alts[i] == alt ) return cp.alts[i];
-    return 0;
-}
-
-bool ClaimScores::paired( Claim* c, bool exists )
-{
-    for ( ClaimPair& cp : pairs ) if ( cp.path == c ) return exists ? true : cp.work;
-    return false;
-}
-
-bool ClaimScores::preferred( int hits[2][3], int ols[2], int altHits[2][3], int altOl, bool dual )
-{
-    // Filter out contended paths
-    if ( hits[0][0] || !hits[1][0] || !altHits[1][0] ) return false;
-    if ( min( hits[1][0] + hits[1][1], altHits[1][0] + altHits[1][2] ) - min( hits[0][1], hits[0][2] ) < 4 )return false;
-//    if ( min( hits[0], hits[1] ) * 5 >= min( hits[2], altHits[3] )-1 ) return false;
-//    if ( hits[0] * 5 >= min( hits[1], altHits[1] )-1 ) return false;
-    
-    if ( altHits[0][0] ) return min( hits[1][0], altHits[1][0] ) - max( hits[0][1], hits[0][2] ) > 8;
-    
-    // Assign bonus score for preferential overlap if different forks
-    int diff = dual ? min( 100, min( 60, ols[1] - ols[0] ) + min( 60, altOl - ols[0] ) ) / 10 : 0;
-    int hit = hits[1][1] + altHits[1][2] + hits[1][0] + altHits[1][0];
-//    int hit = hits[2] + altHits[3] + diff;
-//    if ( hits[0] || hits[1] || altHits[0] || altHits[1] ) hit = min( hits[2], altHits[3] );
-//    int hit = hits[1] + altHits[1] + diff;
-//    if ( max( hits[0], altHits[0] ) * 5 >= min( hits[1], altHits[1] )-1 ) hit = min( hits[1], altHits[1] );
-    
-    return hit + diff - min( hits[0][1], hits[0][2] ) > 8;
-}
-
-bool ClaimScores::remove( Claim* branch )
-{
-    for ( int i = 0; i < pairs.size(); i++ )
-    {
-        if ( pairs[i].path != branch ) continue;
-        pairs.erase( pairs.begin() + i );
-        dropped = true;
-        for ( ClaimPair& cp : pairs ) cp.pairs.erase( cp.pairs.begin() + i );
-        return true;
-    }
-    return false;
-}
-
-void ClaimScores::score( vector<Claim*> test[2], vector<ClaimScores*>& scores, bool orient, bool drxn )
-{
-    ClaimBlocks cb( test );
-    Nodes tars[2]{ Claim::target( test[0] ), Claim::target( test[1] ) };
-    int d = tars[0].nodes.size() < tars[1].nodes.size();
-    
-    for ( Node* b : tars[!d].nodes )
-    {
-        for ( auto& np : b->hits_.pairs[d] )
-        {
-            if ( !tars[d].find( np.first ) ) continue;
-            if ( cb.disregard( test, b, np.first, d ) ) continue;
-            
-            // Prepare
-            Node* bck = d == drxn ? b : np.first,* fwd = d == drxn ? np.first : b;
-            int32_t est = np.second.estimate() + ( d == orient ? 0 : b->size() - np.first->size() ); 
-            int32_t cutoff = 200 + np.second.maxLen / 3;
-            int32_t best = cutoff * 2;
-            
-            // Set distance estimates for each branch pair
-            for ( ClaimScores* cs : scores ) cs->score( bck, fwd, est, best, drxn );
-            
-            // Abort if estimates look dubious
-            assert( best >= 0 );
-            if ( best > cutoff ) continue;
-            
-            // Convert estimates to boolean if better than cutoff
-            bool unique = score( scores, cutoff+best, drxn );
-            
-            // Record where one back branch matches, but another doesn't
-            for ( ClaimScores* cs : scores ) cs->score( np.second.count, unique );
-        }
-    }
-}
-
-bool ClaimScores::score( vector<ClaimScores*>& scores, int32_t cutoff, bool drxn )
-{
-    vector<Claim*> claims[2];
-    for ( ClaimScores* cs : scores )
-    {
-        for ( ClaimPair& cp : cs->pairs )
-        {
-            if ( !( cp.work = ( cp.work >= 0 && cp.work < cutoff ) ) ) continue;
-            claims[!drxn].push_back( cs->path );
-            claims[drxn].push_back( cp.path );
-        }
-    }
-    
-    for ( int d : { 0, 1 } ) if ( claims[d].size() == 1 && claims[!d].size() != 1 ) return false;
-    for ( int d : { 0, 1 } ) for ( int i = 0; i+1 < claims[d].size(); i++ ) for ( int j = i+1; j < claims[d].size(); j++ )
-    {
-        if ( claims[d][i] == claims[d][j] ) return false;
-    }
-    for ( int d : { 0, 1 } ) for ( int i = 0; i+1 < claims[d].size(); i++ ) for ( int j = i+1; j < claims[d].size(); j++ )
-    {
-        if ( !claims[d][i]->redundant( claims[d][j], d ) ) return false;
-    }
-    return true;
-}
-
-void ClaimScores::score( Node* bck, Node* fwd, int32_t est, int32_t& best, bool drxn )
-{
-    for ( ClaimPair& cp : pairs ) cp.work = -1;
-    NodeOffset* offs[2];
-    for ( Node* b : bck->clones() )
-    {
-        if ( !( offs[0] = path->offs.get( b ) ) ) continue;
-        for ( ClaimPair& cp : pairs )
-        {
-            for ( Node* f : fwd->clones() )
-            {
-                if ( !( offs[1] = cp.path->offs.get( f ) ) ) continue;
-                int32_t diff = offs[0]->diff( *offs[1], est, drxn );
-                cp.work = cp.work < 0 || diff < cp.work ? diff : cp.work;
-                best = min( best, diff );
-            }
-        }
-    }
-}
-
-void ClaimScores::score( int hit, bool unique )
-{
-    for ( ClaimPair& cp : pairs )
-    {
-        if ( !cp.work ) continue;
-        for ( int i = 0; i < alts.size(); i++ ) if ( !alts[i]->paired( cp.path ) ) cp.alts[i] += hit;
-        for ( int i = 0; i < pairs.size(); i++ ) if ( !pairs[i].work ) cp.pairs[i] += hit;
-        if ( unique ) cp.uniques += hit;
-    }
-}
-
-bool ClaimScores::set( ClaimScores* alt, Claim* weak, Claim* strong, int hits[2][3], int ols[2], bool& paired )
-{
-    int i = 0, j = 0, k = 0;
-    while ( i < pairs.size() && pairs[i].path != weak ) i++;
-    while ( j < pairs.size() && pairs[j].path != strong ) j++;
-    while ( k < alts.size() && alts[k] != alt ) k++;
-    assert( k < alts.size() );
-    if ( j == pairs.size() || !pairs[j].uniques ) return false;
-    paired = i < pairs.size();
-    hits[0][0] = paired ? pairs[i].uniques : 0;
-    hits[0][1] = paired ? pairs[i].pairs[j] : 0;
-    hits[0][2] = paired ? pairs[i].alts[k] : 0;
-    hits[1][0] = pairs[j].uniques;
-    hits[1][1] = paired ? pairs[j].pairs[i] : 0;
-    hits[1][2] = pairs[j].alts[k];
-    ols[0] = paired ? pairs[i].edge.ol : 0;
-    ols[1] = pairs[j].edge.ol;
-    return true;
-}
-
-void ClaimScores::trim( bool drxn )
-{
-    int hits[2][3], altHits[2][3];
-    for ( int i = 0; i < pairs.size(); i++ )
-    {
-        // Only path pairs that share no unique read pairs are able to be trimmed
-        if ( hits[0][0] = pairs[i].uniques ) continue;
-        
-        for ( int j = 0; !pairs[i].drop && j < pairs.size(); j++ )
-        {
-            // Stronger branch must have at least some unique read pairs
-            if ( i == j || !( hits[1][0] = pairs[j].uniques ) ) continue;
-            // Stronger branch must be favoured over the weaker branch by this path
-            if ( ( hits[0][1] = pairs[i].pairs[j] ) >= ( hits[1][1] = pairs[j].pairs[i] ) ) continue;
-            
-            for ( int k = 0; !pairs[i].drop && k < alts.size(); k++ )
-            {
-//                // Ensure that either this path is redundant with the alt, or pair [i] is redundant with pair [j]
-//                if ( pairs[i].alts[j] && pairs[i].alts[k] ) continue;
-                // Stronger branch must be favoured over the weaker branch by this path
-                if ( ( hits[0][2] = pairs[i].alts[k] ) >= ( hits[1][2] = pairs[j].alts[k] ) ) continue;
-                
-                bool dual = path->terminus( drxn ) != alts[k]->path->terminus( drxn ), paired;
-                int ols[2][2]{ { pairs[i].edge.ol, pairs[j].edge.ol }, { 0, 0 } };
-                
-                if ( !alts[k]->set( this, pairs[j].path, pairs[i].path, altHits, ols[1], paired ) ) continue;
-                
-                // Ensure that the target is weaker than the preferred pair and that the alt is strongly paired to the target
-                if ( !preferred( hits, ols[0], altHits, ols[1][1], dual ) ) continue;
-                
-                cout << hits[0][0] << "-" << max( hits[1][1], hits[0][2] ) << " & " 
-                        << altHits[0][0] << "-" << max( altHits[1][1], altHits[1][2] ) << "    ";
-                cout << path->terminus( drxn )->ends_[drxn] << endl;
-                
-                if ( !paired ) alts[k]->dropped = true;
-                else if ( preferred( altHits, ols[1], hits, ols[0][1], dual ) )
-                {
-                    for ( ClaimPair& cp : alts[k]->pairs ) if ( cp.path == pairs[j].path ) alts[k]->dropped = cp.drop = true;
-                }
-                
-                pairs[i].drop = dropped = true;
-            }
-        }
-    }
-}
-
-ClaimMap::ClaimMap( ClaimScores* cs, Nodes& bases, NodeRoll& cloned, bool drxn )
-: bases( bases ), cloned( cloned ), fork( cs->path->terminus( drxn ) ), claimed( false )
-{
-    if ( cs->claimed || !cs->dropped ) return;
-    scores[0].push_back( cs );
-    claims[!drxn].insert( cs->path );
-    for ( ClaimPair& cp : cs->pairs ) claims[drxn].insert( cp.path );
-    
-    // Search alts for identical pairing, or else nodes that will need to be cloned
-    for ( ClaimScores* alt : cs->alts ) scores[alt->claimed || !match( alt, drxn )].push_back( alt );
-    
-    assert( confirm( drxn ) );
-    for ( int d : { 0, 1 } ) for ( Claim* c : claims[d] ) claim( c, d );
-    
-    Nodes branches;
-    for ( Claim* c : claims[drxn] ) branches += get( c->terminus( !drxn ) );
-    for ( Edge& e : ( fork = get( fork ) )->edges( drxn ) )
-    {
-        bool discard = bases.find( e.node ) && !branches.find( e.node );
-        if ( e.node->cloned_ ) for ( Node* node : safe[drxn].nodes ) if ( e.node->cloned_->find( node ) ) discard = false;
-        if ( discard ) assert( claimed = fork->removeEdge( e.node, drxn, true ) );
-    }
-    
-    for ( ClaimPair& cp : cs->pairs ) disconnect( cp, drxn );
-    
-    for ( ClaimPair& cp : cs->pairs ) connect( cp, drxn );
-    
-    if ( claimed ) for ( ClaimScores* cs : scores[0] ) cs->claimed = true;
-}
-
-void ClaimMap::claim( Claim* c, bool drxn )
-{
-    Node* node[3] = { NULL, NULL, NULL };
-    for ( int i = 0; i < c->path.size(); i++ )
-    {
-        node[0] = node[1] = c->place( i, drxn );
-        node[1] = get( node[0] );
-        if ( node[2] ) node[1]->addEdge( node[0]->getEdge( node[2], !drxn, true, true ), !drxn, true );
-        if ( node[0] == node[1] ) break;
-        for ( int d : { 0, 1 } ) for ( Edge& e : node[0]->edges_[!d] ) if ( !bases.find( e.node ) ) node[1]->addEdge( e, !d, true );
-        
-        node[2] = node[1];
-    }
-    assert( node[0] == node[1] );
-    
-    if ( !node[2] ) return;
-    
-    // If any of the path was cloned, remove obsolete edge to the last cloned, or else invalid edge to different pair
-    for ( Edge e : node[0]->edges( !drxn ) )
-    {
-        // Only mistmatched edges
-        if ( !alts[0].find( e.node ) ) continue;
-        // Don't remove fork in shared path nodes
-        if ( alts[1].find( node[0] ) && alts[1].find( e.node ) ) continue;
-        
-        assert( claimed = node[0]->removeEdge( e.node, !drxn, true ) );
-    }
-}
-
-bool ClaimMap::confirm( bool drxn )
-{
-    Nodes branches[2], breaks[2];
-    bool broken = false, looped = false;
-    for ( int d : { 0, 1 } )
-    {
-        for ( Claim* c : claims[d] )
-        {
-            bool branched = false;
-            for ( int i = 0; !branched && i < c->path.size(); i++ )
-            {
-                Node* node = c->place( i, d );
-                if ( branched = !alts[0].find( node ) ) branches[d] += node;
-                if ( node->cloned_ ) assert( !node->edges_[d].empty() );
-                if ( !node->cloned_ || !node->edges_[!d].empty() ) continue;
-                if ( !branched ) broken = true;
-                else if ( !i ) breaks[d] += node;
-            }
-        }
-    }
-    
-    if ( !broken && breaks[0].empty() && breaks[1].empty() ) return true;
-    Nodes loop;
-    for ( Node* node : branches[1].nodes ) loop.fill( node, 1, false, false );
-    for ( Node* node : branches[0].nodes ) if ( loop.find( node ) ) looped = true;
-    if ( looped && broken ) assert( false );
-    if ( looped && broken ) return false;
-    if ( looped ) for ( int d : { 0, 1 } ) for ( Node* node : breaks[d].nodes ) safe[d].add( node );
-    return true;
-}
-
-void ClaimMap::connect( ClaimPair& cp, bool drxn )
-{
-    if ( safe[!drxn].find( fork ) || safe[drxn].find( cp.path->terminus( !drxn ) ) ) return;
-    cp.edge.node = get( cp.path->terminus( !drxn ) );
-    fork->addEdge( cp.edge, drxn, true );
-    for ( ClaimScores* alt : scores[1] )
-    {
-        if ( alt->claimed ) continue;
-        for ( ClaimPair& acp : alt->pairs )
-        {
-            if ( acp.path != cp.path ) continue;
-            acp.edge.node = cp.edge.node;
-            alt->path->terminus( drxn )->addEdge( acp.edge, drxn, true );
-        }
-    }
-}
-
-void ClaimMap::disconnect( ClaimPair& cp, bool drxn )
-{
-    Node* branch = cp.path->terminus( !drxn );
-    if ( branch != get( branch ) ) return;
-    Nodes forks( fork );
-    for ( ClaimScores* alt : scores[1] ) if ( alt->paired( cp.path, true ) ) forks += alt->path->terminus( drxn );
-    for ( Edge& e : branch->edges( !drxn ) )
-    {
-        bool discard = bases.find( e.node ) && !forks.find( e.node );
-        if ( e.node->cloned_ ) for ( Node* node : safe[!drxn].nodes ) if ( e.node->cloned_->find( node ) ) discard = false;
-        if ( discard ) assert( claimed = branch->removeEdge( e.node, !drxn, true ) );
-    }
-}
-
-Node* ClaimMap::get( Node* node )
-{
-    if ( !alts[0].find( node ) ) return node;
-    auto it = used.find( node );
-    if ( it != used.end() ) return it->second;
-    Node* clone = new Node( node, cloned, node->drxn_, false );
-    used.insert( make_pair( node, clone ) );
-    bases += clone;
-    claimed = true;
-    return clone;
-}
-
-bool ClaimMap::match( ClaimScores* cs, bool drxn )
-{
-    vector<Claim*> matched[2];
-    for ( ClaimPair& cp : cs->pairs ) matched[ claims[drxn].find( cp.path ) != claims[drxn].end() ].push_back( cp.path );
-    
-    for ( Claim* c : matched[0] ) unmatch( c, drxn );
-    
-    if ( cs->path->terminus( drxn ) != fork ) return false;
-    
-    if ( matched[0].empty() && matched[1].size() == claims[drxn].size() )
-    {
-        claims[!drxn].insert( cs->path );
-        return true;
-    }
-    
-    for ( Claim* c : matched[1] ) for ( Node* node : c->path ) alts[1] += node;
-    unmatch( cs->path, !drxn );
-    return false;
-}
-
-void ClaimMap::unmatch( Claim* path, bool drxn )
-{
-    int i = 0;
-    for ( Claim* c : claims[drxn] )
-    {
-        for ( int j = 0; j < min( path->path.size(), c->path.size() ); j++ )
-        {
-            if ( path->place( j, drxn ) != c->place( j, drxn ) ) break;
-            i = max( i, j+1 );
-        }
-    }
-    if ( i )
-    {
-        int x = 0;
-    }
-    assert( i < path->path.size() );
-    for ( int j = 0; j < i; j++ ) alts[0] += path->place( j, drxn );
-}
-
-ClaimFork::ClaimFork( Node* fork, NodeRoll& nodes, bool drxn )
-: fork_( fork ), orient_( drxn ), drxn_( drxn ), claimed_( false )
-{
-    if ( fork->cloned_ && fork->edges_[!drxn].empty() )
-    {
-        int x = 0;
-    }
-    
-    bool looped = fork->cloned_ && fork->edges_[!drxn].empty();
-    if ( fork->cloned_ ) for ( Node* clone : fork->cloned_->nodes ) if ( clone->edges_[!drxn].empty() ) looped = true;
-    for ( Edge& e : fork->edges_[drxn] ) add( fork, e, 0, drxn );
-    if ( looped ) for ( Node* clone : fork->cloned_->nodes ) for ( Edge& e : clone->edges_[drxn] ) add( clone, e, 0, drxn );
-    
-//    for ( Node* f : fork->getAltForks( drxn ) ) for ( Edge& e : f->edges_[!drxn] ) add( f, e, 0, false, !drxn );
-//    for ( Node* f : fork->getAltForks( drxn ) ) forks_ += f;
-//    for ( Node* f : forks_.nodes ) for ( Edge& e : f->edges_[!drxn] ) add( f, e, 0, false, !drxn );
-    for ( int d : { 0, 1 } ) if ( !complete( d ) ) return;
-    claim( nodes );
-}
-
-ClaimFork::ClaimFork( Node* fork, Node* branch, bool drxn )
-: fork_( fork ), orient_( drxn ), drxn_( drxn ), claimed_( false )
-{
-    Claim* c = new Claim( fork, 0, orient_, !drxn );
-    paths_[!drxn].push_back( c );
-    for ( Edge& e : fork->getAltEdges( drxn ) )
-    {
-        paths_[drxn].push_back( new Claim( e.node, NodeOffsets::extend( fork, e, 0, drxn, drxn ), orient_, drxn ) );
-    }
-    for ( int d : { 0, 1 } ) for ( Claim* c : paths_[d] ) added_.push_back( c );
-    
-    c->offs.fill( c->terminus( !drxn ), c->coord, 500, drxn, !drxn, false, true );
-    complete( drxn );
-    ClaimScores::create( paths_, scores_, drxn, drxn );
-    int x = 0;
-}
-
-ClaimFork::~ClaimFork()
-{
-    for ( Claim* c : added_ ) delete c;
-    for ( ClaimScores* cs : scores_ ) delete cs;
-}
-
-void ClaimFork::add( Node* fork, Edge edge, int32_t dist, bool drxn )
-{
-    if ( edge.node->isBlunt( 0, 3, drxn ) ) return;
-    for ( Claim* c : paths_[drxn] ) if ( edge.node == c->terminus( !drxn ) ) return;
-    if ( edge.node->cloned_ )
-    {
-        for ( Node* clone : edge.node->cloned_->nodes )
-        {
-            if ( clone->edges_[drxn].empty() ) continue;
-            if ( edge.node->edges_[drxn].empty() || clone->edges_[!drxn].empty() ) add( fork, Edge( clone, edge.ol, edge.isLeap ), dist, drxn );
-        }
-    }
-    
-    dist = NodeOffsets::extend( fork, edge, dist, orient_, drxn );
-    
-    if ( !edge.node->cloned_ || !edge.node->edges_[drxn].empty() )
-    {
-        paths_[drxn].push_back( new Claim( edge.node, dist, orient_, drxn ) );
-        added_.push_back( paths_[drxn].back() );
-    }
-    
-    for ( Edge& e : edge.node->edges_[!drxn] ) add( edge.node, e, dist, !drxn );
-}
-
-bool ClaimFork::claim( NodeRoll& nodes )
-{
-    if ( paths_[0].size() < 2 || paths_[1].size() < 2 ) return false;
-    
-    
-    ClaimScores::create( paths_, scores_, orient_, drxn_ );
-    if ( !confirm() ) return claim( nodes );
-    
-    if ( fork_->ends_[1] == -3822 )
-    {
-        int x = 0;
-    }
-    
-    bool claimed = false, claimable = false;
-    for ( ClaimScores* cs : scores_ ) if ( cs->dropped && fork_->isClone( cs->path->terminus( drxn_ ) ) ) claimable = true;
-    if ( claimable )
-    {
-        Nodes bases;
-        for ( int d : { 0, 1 } ) for ( Claim* c : paths_[d] ) for ( Node* node : c->path ) for ( Node* clone : node->getAltForks( !d ) ) bases += clone;
-        for ( ClaimScores* cs : scores_ ) if ( ClaimMap( cs, bases, cloned_, drxn_ ).claimed ) claimed = true;
-    }
-    if ( !claimed )
-    {
-        vector<Nodes> fwds;
-        for ( Claim* c : paths_[!drxn_] ) fwds.push_back( Nodes( c->terminus( !drxn_ ), !drxn_, false, false ) );
-        cout << "FAILED ";
-        cout << fork_->ends_[drxn_] << " ";
-        cout << "paths: " << paths_[!drxn_].size() << "-" << paths_[drxn_].size() << " scores: ";
-        int i = 0;
-        for ( ClaimScores* cs : scores_ )
-        {
-            cout << "(" << ++i << ") ";
-            for ( ClaimPair& cp : cs->pairs )
-            {
-                for ( int j = 0; j < cp.alts.size(); j++ ) cout << ( j ? "-" : "" ) << cp.alts[j];
-                cout << " ";
-            }
-        }
-        cout << endl;
-        int x = 0;
-        for ( ClaimScores* cs : scores_ ) if ( cs->dropped && fork_->isClone( cs->path->terminus( drxn_ ) ) ) return false;
-        
-        return !claimable && retry() && claim( nodes );
-    }
-    
-    for ( Node* clone : cloned_.nodes ) if ( nodes.add( clone ) ) clone->reverify();
-    
-    for ( int d : { 0, 1 } ) for ( Claim* c : paths_[d] ) for ( int i = 0; i < c->path.size(); i++ ) if ( c->place( i, !d )->setState() ) break;
-    
-    for ( int d : { 0, 1 } )
-    {
-        for ( Claim* c : paths_[d] )
-        {
-            Node* branch = c->terminus( !d );
-            if ( !branch->bad_ || branch->drxn_ != d ) continue;
-            for ( Edge& e : branch->edges_[!d] ) assert( e.node->drxn_ == !d || e.node->bad_ );
-        }
-    }
-    
-    if ( claimed ) claimed_ = true;
-    return claimed_;
-}
-
-bool ClaimFork::complete( bool drxn )
-{
-    if ( paths_[drxn].size() == 1 )
-    {
-        for ( Claim* c : paths_[drxn][0]->split( true, orient_, drxn ) )
-        {
-            paths_[drxn].push_back( c );
-            added_.push_back( c );
-        }
-    }
-    
-    if ( paths_[drxn].size() < 2 ) return false;
-    
-    Node* same = paths_[drxn][0]->terminus( drxn );
-    for ( int i = 1; same && i < paths_[drxn].size(); i++ ) if ( paths_[drxn][i]->terminus( drxn ) != same ) same = NULL;
-    if ( same ) return true;
-    
-    int32_t dist = 0;
-    for ( Claim* c : paths_[drxn] ) dist = max( dist, abs( c->coord ) );
-    for ( Claim* c : paths_[drxn] ) c->offs.fill( c->terminus( drxn ), c->coord, dist + 500, orient_, drxn, false, true );
-    dist = max( dist, params.maxPeMean + params.readLen );
-    Claim::block( paths_[drxn], drxn );
-    for ( Claim* c : paths_[drxn] )
-    {
-        Nodes keep, alts[2];
-        for ( Node* node : c->path ) keep += node;
-        for ( Claim* alt : paths_[drxn] ) for ( auto& no : alt->offs.map ) alts[ c != alt ] += no.first;
-        for ( auto& no : c->offs.map ) if ( abs( no.second[0] ) <= dist || alts[1].find( no.first ) ) keep.fillIn( no.first, alts[0], !drxn, true );
-        c->cull( keep );
-    }
-    
-    return true;
-}
-
-bool ClaimFork::confirm()
-{
-    unordered_set<Claim*> drop[2], unique[2];
-    for ( ClaimScores* cs: scores_ )
-    {
-        if ( cs->dropped ) drop[!drxn_].insert( cs->path );
-        for ( ClaimPair& cp : cs->pairs )
-        {
-            if ( cp.drop ) drop[drxn_].insert( cp.path );
-            else if ( cp.uniques < 5 ) continue;
-            unique[!drxn_].insert( cs->path );
-            unique[drxn_].insert( cp.path );
-        }
-    }
-    
-    for ( int d : { 0, 1 } )
-    {
-        for ( Claim* c : paths_[d] )
-        {
-            if ( drop[d].find( c ) != drop[d].end() || unique[d].find( c ) != unique[d].end() ) continue;
-            Node* fork = c->terminus( !d );
-            vector<Claim*> contested;
-            for ( Claim* c : drop[d] ) if ( fork == c->terminus( !d ) ) contested.push_back( c );
-            if ( contested.empty() ) continue;
-            if ( d ) assert( false );
-            contest( c, contested, d );
-            return false;
-        }
-    }
-    
-    for ( ClaimScores* cs: scores_ )
-    {
-        for ( int i = 0; i < cs->pairs.size(); i++ ) if ( cs->pairs[i].drop ) cs->pairs.erase( cs->pairs.begin() + i-- );
-    }
-    
-    return true;
-}
-
-void ClaimFork::contest( Claim* branch, vector<Claim*>& contested, bool drxn )
-{
-    int j = branch->path.size();
-    for ( int i = 0; !contested.empty() && i < branch->path.size(); i++ )
-    {
-        Node* node = branch->place( i, drxn );
-        for ( int k = 0; k < contested.size(); k++ )
-        {
-            if ( contested[k]->place( i, drxn ) == node ) continue;
-            contested.erase( contested.begin() + k-- );
-            j = min( j, i );
-        }
-        
-        if ( !contested.empty() ) continue;
-        
-        if ( i != j )
-        {
-            ClaimFork cf( node, branch->place( i-1, drxn ), !drxn );
-            if ( cf.claimed_ ) j = i;
-        }
-        
-        if ( i == j ) paths_[drxn].erase( remove( paths_[drxn].begin(), paths_[drxn].end(), branch ), paths_[drxn].end() );
-        else for ( int d : { 0, 1 } ) paths_[d].clear();
-    }
-    assert( contested.empty() );
-}
-
-bool ClaimFork::retry()
-{
-    bool split[2]{ false, false };
-    unordered_set<Claim*> splitable[2];
-    
-    for ( ClaimScores* cs : scores_ )
-    {
-        if ( !fork_->isClone( cs->path->terminus( drxn_ ) ) ) continue;
-        
-        int uniques = 0;
-        for ( ClaimPair& cp : cs->pairs )
-        {
-            if ( cp.uniques < 5 ) continue;
-            
-            if ( uniques++ ) splitable[!drxn_].insert( cs->path );
-            
-            for ( ClaimScores* alt : cs->alts ) for ( ClaimPair& acp : alt->pairs ) if ( acp.path == cp.path && acp.uniques > 4 ) splitable[drxn_].insert( cp.path );
-        }
-    }
-    
-    for ( bool d : { 0, 1 } )
-    {
-        for ( Claim* c : splitable[d] )
-        {
-            for ( Claim* s : c->split( false, orient_, d ) )
-            {
-                paths_[d].push_back( s );
-                added_.push_back( s );
-                split[d] = true;
-            }
-        }
-        
-        if ( !split[d] ) continue;
-        for ( Claim* c : paths_[d] ) c->retract();
-        complete( d );
-    }
-    
-    if ( split[0] || split[1] )
-    {
-        cout << "Split!" << endl;
-    }
-    return split[0] || split[1];
 }

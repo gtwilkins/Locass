@@ -502,6 +502,78 @@ bool Node::validate( bool drxn )
     return validLimits_[1+drxn] == ends_[drxn];
 }
 
+void Node::validate( NodeSet &seedSet, NodeSet &delSet, int32_t* validLimits, int32_t* ends, bool doDel )
+{
+    NodeList notValid[2] = { { seedSet.begin(), seedSet.end() }, { seedSet.begin(), seedSet.end() } };
+    
+    for ( bool drxn : { 0, 1 } )
+    {
+        NodeSet currSet = { notValid[drxn].begin(), notValid[drxn].end() };
+        notValid[drxn].clear();
+        while ( !currSet.empty() )
+        {
+            NodeSet nxtSet, currFwd;
+            for ( Node* curr : currSet )
+            {
+                curr->getDrxnNodes( currFwd, drxn );
+            }
+
+            for ( Node* curr : currSet )
+            {
+                if ( curr->isDeadEnd( drxn ) && doDel )
+                {
+                    curr->drxn_ = drxn;
+                    curr->dismantleNode( delSet, drxn );
+                    seedSet.erase( curr );
+                }
+                else if ( currFwd.find( curr ) != currFwd.end() )
+                {
+                    nxtSet.insert( curr );
+                }
+                else if ( curr->validate( drxn ) )
+                {
+                    curr->getNextNodes( nxtSet, drxn );
+                }
+                else
+                {
+                    notValid[drxn].push_back( curr );
+                }
+
+                validLimits[drxn] = ( drxn ? max( validLimits[1], curr->validLimits_[2] )
+                                      : min( validLimits[0], curr->validLimits_[1] ) );
+            }
+
+            currSet = nxtSet;
+        }
+    }
+    
+    if ( ends[1] - ends[0] > params.maxPeMean && doDel )
+    {
+        int cutoff = (params.maxPeMean * params.cover * 2 ) / params.readLen;
+        for ( bool drxn : { 0, 1 } )
+        {
+            for ( Node* node : notValid[drxn] )
+            {
+                int misses = node->getEndMarks( drxn ) * 5;
+                int hits = 2;
+                int32_t endCoord = node->ends_[drxn];
+                for ( Node* fwd : node->getDrxnNodes( drxn ) )
+                {
+                    endCoord = drxn ? max( endCoord, fwd->ends_[1] )
+                                    : min( endCoord, fwd->ends_[0] );
+                    misses += fwd->reads_.size();
+                    hits += fwd->getPairHitsTotal();
+                }
+                
+                if ( misses / hits > cutoff && hits < 4 )
+                {
+                    node->dismantleNode( delSet, drxn );
+                }
+            }
+        }
+    }
+}
+
 void Node::validateMerge( Node* mergeNode, bool drxn )
 {
     NodeSet qSet = { this };

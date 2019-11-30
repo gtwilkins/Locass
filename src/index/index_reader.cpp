@@ -180,6 +180,15 @@ void IndexReader::createSeeds( FILE* fp, int i, int it, int limit, CharId rank, 
     for ( int j = 0; j < 4; j++ ) createSeeds( fp, j, it+1, limit, ranks[j], edges[j], counts[j] );
 }
 
+int IndexReader::primeOverlap( uint8_t* q, CharId &rank, CharId &count )
+{
+    assert( !mers );
+    int ol = mers ? 12 : 2;
+    rank = midRanks[ q[0] ][ q[1] ];
+    count = baseCounts[ q[0] + 1 ][ q[1] ] - rank;
+    return ol;
+}
+
 void IndexReader::primeOverlap( string &seq, vector<uint8_t> &q, CharId &rank, CharId &count, int &ol, bool drxn )
 {
     ol = mers && seq.size() >= 12 ? 12 : 2;

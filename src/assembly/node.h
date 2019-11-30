@@ -67,38 +67,43 @@ public:
     Node( NodeMapRead &mapRead, bool drxn );
     Node( MapNode* mn, int i, int j, int drxn );
     Node( string seq, ReadId id, int32_t estimate, int drxn );
+    Node( string seq, ReadId id, int32_t estimate, int drxn, bool bad );
     ~Node();
 
     void edgeTest( bool drxn );
     void nodeTest();
     void readTest();
     void pairTest();
+    void addCloned( Node* clone );
     void addEdge( Node* node, bool drxn );
     void addEdge( Node* node, int overlap, bool drxn, bool doOffset=true, bool isLeap=false );
     void addEdge( Edge edge, bool drxn, bool reciprocate );
     void blankEnd( int32_t len, bool drxn );
     void clearEdges( bool drxn );
     vector<Node*> clones( bool inclSelf=true );
-    int countEdges( bool drxn, bool inclClones=false );
+//    int countEdges( bool drxn, bool inclClones=false );
     bool deleteTest( bool drxn );
     bool deleteTest( NodeList &tNodes, bool drxn );
     NodeRoll dismantle();
     vector<Edge> edges( bool drxn );
-    vector<Edge> getAltEdges( bool drxn );
-    vector<Node*> getAltForks( bool drxn );
+//    vector<Edge> getAltEdges( bool drxn );
+//    vector<Node*> getAltForks( bool drxn );
     int32_t getBiggestOffset( bool drxn );
-    int getBestOverlap( bool drxn );
+    int getBestOverlap( bool drxn, bool inclClones=false );
     NodeRoll getDependent();
-    Edge getEdge( Node* node, bool drxn, bool inclSelfClone=false, bool inclEdgeClone=false );
+    Edge getEdge( Node* node, bool drxn );
     static int32_t getFurthest( int32_t q, int32_t t, bool drxn );
     string getHeader( string header );
+    static int32_t getLen( vector<Node*>& path );
     int32_t getLength();
     int getOverlap( Node* node, bool drxn );
+    static string getSeq( vector<Node*>& path );
     string getSeqEnd( int length, bool drxn );
     NodeList getTargetNodes( bool drxn, bool inclSelf=false, bool inclClones=false );
     bool inheritEdges( bool drxn );
     bool isBeyond( int32_t bgn, int32_t nd, bool drxn );
     bool isClone( Node* node );
+    bool isClone( vector<Node*>& path, int i, bool drxn );
     bool isContinue( bool drxn );
     bool isDeadEnd( bool drxn );
     bool isEdge( Node* node, bool drxn, bool inclClone=false );
@@ -197,6 +202,7 @@ private:
 public:
     float getAdjustedReadCount( int32_t* limits );
     static float getAlleleCoverage( Node* forks[2], NodeList paths[2], bool drxn );
+    static float getCoverage( vector<Node*>& nodes );
     float getCoverageCoeff();
     float getCoverageDrxn( int32_t dist, bool drxn, bool inclSelf );
     float getMultiplicity();
@@ -235,7 +241,7 @@ public:
     void reEnd( ExtVars &ev, bool drxn );
     void rebranchNode( ExtVars &ev, bool drxn );
     Node* splitNode( int32_t splitBegin, NodeList &nodes, bool subGraph, bool drxn, bool isOriginal=true );
-    Node* splitNode( int32_t splitBegin, NodeRoll& nodes, bool drxn );
+    vector<Node*> splitNode( int32_t splitBegin, NodeRoll& nodes, bool drxn );
 private:
     void addAlts( vector<QueryNode*> &alts, NodeRoll &nodes, bool drxn, int graph );
     void addExtension( Extension &ext, ExtVars &ev, vector<MergeHit> &selfMerges, bool doesBranch, bool drxn );
@@ -268,6 +274,7 @@ private:
     bool reEnd( Querier &bwt, NodeRoll &nodes, bool drxn );
     void removeReExtensions( vector<Extension> &exts, bool drxn, bool inclSelf=false );
     void setExtVars( ExtVars &ev, bool drxn );
+    Node* splitNode2( int32_t splitBegin, NodeRoll& nodes, bool drxn );
     Node* splitNodeDual( int32_t* coords, NodeList &nodes, int subGraph );
     
 // NodeFilling
@@ -280,7 +287,7 @@ public:
     static void graphPairs( string filename, NodeList &nodes );
     void mapMates( Querier &bwt, int &count );
     static void mergeAll( NodeList* nodes, NodeSet &delSet );
-    Node* merge( bool drxn );
+//    Node* merge( bool drxn );
 //    void merge( Nodes &nodes, bool drxn );
     void mergeDrxn( NodeSet &delSet, bool drxn );
     void recoil();
@@ -288,7 +295,7 @@ public:
     static void recoordinate( NodeRoll& nodes );
     void recoordinate( Nodes& tested, bool drxn );
     static void remap( Querier& bwt, NodeRoll& nodes );
-    void remap( Querier &bwt );
+    bool remap( Querier &bwt );
     bool remap( NodeRoll& tar );
     
 // NodeFolding
@@ -379,15 +386,15 @@ private:
     bool setBlank( IslandVars &iv, NodeSet &foldable, bool drxn );
     
 // NodeLeaping
-public:
-    static bool leap( Querier& bwt, NodeRoll& nodes, NodeList& path, bool drxn );
-    bool leap( Querier& bwt, NodeRoll& nodes, bool drxn );
-private:
-    void leapExtend( Querier& bwt, Node* seed, NodeRoll& nodes, bool drxn );
-    NodeIntList leapScore( NodeScores& scores, Nodes& allowed, bool drxn );
-    bool leapSeed( Querier& bwt, NodeRoll& nodes );
-    Nodes leapTarget( bool resetGood, bool drxn );
-    void leapTarget( Nodes& tar, int extReadMax, bool resetGood, bool drxn );
+//public:
+//    static bool leap( Querier& bwt, NodeRoll& nodes, NodeList& path, bool drxn );
+//    bool leap( Querier& bwt, NodeRoll& nodes, bool drxn );
+//    bool leapSeed( Querier& bwt, NodeRoll& nodes );
+//private:
+//    void leapExtend( Querier& bwt, Node* seed, NodeRoll& nodes, bool drxn );
+//    NodeIntList leapScore( NodeScores& scores, Nodesx& allowed, bool drxn );
+//    Nodesx leapTarget( bool resetGood, bool drxn );
+//    void leapTarget( Nodesx& tar, int extReadMax, bool resetGood, bool drxn );
     
 // NodeLooping
 public:
@@ -491,60 +498,36 @@ private:
 // NodePruning
 public:
     static void prune( Querier& bwt, NodeRoll& nodes );
-//    void pruneEdges( Querier& bwt, NodeRoll& nodes, Edge& e, bool drxn );
-    Edge getFoldTarget( bool drxn );
+    bool claimBranch( Querier& bwt, NodeRoll& nodes, bool drxn );
     bool isBlunt( int readCount, int readLimit, bool drxn );
     bool isBranchComplete( int readCount, int readLimit, bool drxn );
     bool isForkComplete( int32_t dist, int readLimit, bool drxn );
-//    bool isForkPrepped( int32_t dist, bool drxn );
-    bool isForkSplayed( int32_t dist, int maxBranches, bool drxn );
+    bool pruneBranch( Querier& bwt, NodeRoll& nodes, int readsLeft, bool drxn );
     bool pruneFork( Querier& bwt, NodeRoll& nodes, bool drxn );
+    static void prunePaths( Querier& bwt, NodeRoll& nodes );
     static bool merge( NodeRoll &nodes );
 private:
-    void absorbClone( Node* clone );
-    bool absorbClone( Node* clone, bool drxn );
-    bool claimBad( Node* node, bool drxn );
-    static void claimBads( NodeRoll &nodes );
-    bool claimGood( bool drxn );
-    void discardBlunt( NodeRoll& nodes, bool drxn );
-    void getFoldable( NodeLine& fold, vector<NodeLine>& folds, bool drxn );
-    bool isBadRelevant();
-//    bool isExtendLen( int32_t dist, bool drxn );
-    bool isFoldable( Node* from, bool drxn );
+//    bool isFoldable( Node* from, bool drxn );
     bool isMergeable( Node* alt, vector<Node*> merges[2], bool drxn );
+    bool isSubstantial( int readCount, int readLimit, bool drxn );
     void merge( NodeRoll &nodes, Nodes& tested, int& merged );
     bool merge( NodeRoll& nodes, bool drxn, bool verify=false );
-    bool prepBranch( int32_t dist, int maxHits, bool drxn );
+    static void updateStates( NodeRoll& nodes );
+    void updateState( Nodes& tested, Nodes& oppose, bool drxn );
     bool prepFork( Querier &bwt, NodeRoll& nodes, int32_t dist, bool drxn );
-//    static void pruneBad( Querier& bwt, NodeRoll& nodes );
-//    void pruneBad( Querier& bwt, NodeRoll& nodes, Nodes& tested, bool drxn );
     static void pruneBlunt( Querier &bwt, NodeRoll& nodes );
-    static void pruneBlunt( NodeRoll& nodes );
-    void pruneBlunt( NodeRoll &nodes, Nodes& tested, bool drxn );
-    void pruneBlunt( NodeRoll &nodes, bool drxn );
-    static void pruneBubble( Querier& bwt, NodeRoll& nodes );
-    void pruneBubble( NodeRoll &nodes, Nodes& tested, bool drxn );
-    bool pruneClone( bool drxn );
-    static void pruneClones( Querier& bwt, NodeRoll& nodes );
-    bool pruneClones( NodeRoll& nodes, int& i, bool drxn );
-//    static void pruneEdges( Querier &bwt, NodeRoll &nodes );
-//    void pruneEdges( Querier& bwt, NodeRoll& nodes, Nodes& tested, bool drxn );
-    static void pruneLoops( Querier& bwt, NodeRoll& nodes );
-    bool pruneLoops( Querier& bwt, NodeRoll& nodes, bool drxn );
-    bool pruneLoops( Node* clone, NodeRoll& nodes, bool drxn );
-    static void pruneMismatched( NodeRoll& nodes );
-    void pruneMismatched( NodeRoll& nodes, Nodes& tested, bool drxn );
-    static void prunePaths( Querier& bwt, NodeRoll& nodes );
+    static void pruneIslands( Querier &bwt, NodeRoll& nodes );
+//    bool pruneClone( bool drxn );
+//    static void pruneClones( Querier& bwt, NodeRoll& nodes );
+//    bool pruneClones( NodeRoll& nodes, int& i, bool drxn );
     bool prunePaths( Querier& bwt, NodeRoll& nodes, Nodes& tested, bool drxn );
-    static void prunePrep( Querier& bwt, NodeRoll& nodes );
-    void prunePrep( Querier &bwt, NodeRoll &nodes, Nodes& tested, bool drxn );
-    void prunePrep( NodeRoll &nodes, Nodes& tested, bool drxn );
     void setStrong( Nodes& strong, int readCount, int readLimit, bool drxn );
-    int setStrong( int readLimit, bool drxn );
+//    int setStrong( int readLimit, bool drxn );
     
 // NodeReads
 public:
-    void add( ReadId id, int32_t i, int32_t j, bool redundant, int unaligned=0 );
+    void add( ReadId id, int32_t i, int32_t j, bool redundant, bool ignore=false, int unaligned=0 );
+    bool add( ReadId id, string& seq );
     void addMatchedReads( vector<Overlap> &reads );
     bool addRead( SeqNum readId, int32_t bgn, int32_t nd, bool isRedundant, bool notClones=false );
     void addRead( NodeMapRead &mapRead, bool drxn );
@@ -552,11 +535,13 @@ public:
     static bool findOverlap( Node* &hitNode, int32_t* coords, string &seq, NodeList &nodes, int minOl, bool drxn );
     int getEndMarks( bool drxn );
     void getMarksCount( int counts[2] );
+    Coords* getRead( ReadId id );
     bool isRedundant( int i, int j );
     bool isRedundant( Coords* coords );
     bool offsetNode( bool drxn );
     void resetMarks();
     void resetUnmarked( bool drxn );
+    bool rmvMark( ReadId id, bool drxn );
 private:
 //    void addMark( ReadId id, int i, int j );
     void addMark( SeqNum readId, Coords &coords );
@@ -577,7 +562,6 @@ private:
     void remark();
     void removeMark( SeqNum &readId );
     void removeMarks( unordered_set<SeqNum> &readIds, bool pushLimits, bool isPair, bool drxn );
-    bool rmvMark( ReadId id, bool drxn );
     void resort();
     void sortMarks( vector<ReadMark> &marks, bool drxn );
     int32_t split( Node* node, int32_t cut, bool drxn );
@@ -606,39 +590,38 @@ private:
 // NodeSeed
 public:
     static void addSeed( NodeRoll& nodes, ReadStruct& read );
-    void printSeed( Querier &bwt, NodeSet nodes[2] );
-    bool fixSeed( IslandVars &iv, bool drxn );
-    bool fixSeedGetNodes( IslandVars &iv, vector<PairPath> &paths, bool drxn );
-    void fixSeedGetPairs( Querier &bwt, vector<GoodPair> &gps, vector<BadPair> &bps, bool drxn );
-    vector<PairPath> fixSeedGraphPairs( vector<BadPair> &bps, bool drxn );
-    bool fixSeedSetEdge( IslandVars &iv, vector<GoodPair> &gp, bool drxn );
-    bool isSeed( int32_t seedLen );
-    bool plotSeed( IslandVars &iv, NodeSet &delSet, bool drxn, bool finished );
-    static void plotSeed( NodeList &ends, bool drxn );
-    static void reviewSeed( Querier &bwt, NodeRoll &nodes );
-    void seedAdd( ReadStruct &read );
-    bool seedCongruent( ReadStruct &read, int32_t &coord );
-    bool seedDiminutive();
-    static void seedGetExtend( NodeList* extendNodes, NodeSet &seedSet, NodeSet &delSet, int32_t* limits );
-    static bool seedLeap( Querier &bwt, NodeList &nodes, int minCoord, int maxCoord );
-    void seedLoop( bool drxn );
-    bool seedLoop( NodeSet &loopSet, NodeSet &usedSet, int len, int limit, bool drxn );
-    void seedSetDrxnNodes( Node* fork, NodeList &nodes, bool drxn );
-    static Node* seedSetOrigin( NodeList &forkList );
-    void seedSplit( NodeList &nodes, int32_t coord );
-    static void seedValidate( NodeSet &seedSet, NodeSet &delSet, int32_t* validLimits, int32_t* ends, bool doDel=true );
-    static void seedValidate( NodeList &base, NodeSet &delSet, bool drxn );
-    void seedValidate( NodeSet &delSet, bool drxn );
-    void setIds( int &id, bool drxn );
+//    void printSeed( Querier &bwt, NodeSet nodes[2] );
+//    bool fixSeed( IslandVars &iv, bool drxn );
+//    bool fixSeedGetNodes( IslandVars &iv, vector<PairPath> &paths, bool drxn );
+//    void fixSeedGetPairs( Querier &bwt, vector<GoodPair> &gps, vector<BadPair> &bps, bool drxn );
+//    vector<PairPath> fixSeedGraphPairs( vector<BadPair> &bps, bool drxn );
+//    bool fixSeedSetEdge( IslandVars &iv, vector<GoodPair> &gp, bool drxn );
+//    bool isSeed( int32_t seedLen );
+//    bool plotSeed( IslandVars &iv, NodeSet &delSet, bool drxn, bool finished );
+//    static void plotSeed( NodeList &ends, bool drxn );
+//    void seedAdd( ReadStruct &read );
+//    bool seedCongruent( ReadStruct &read, int32_t &coord );
+//    bool seedDiminutive();
+//    static void seedGetExtend( NodeList* extendNodes, NodeSet &seedSet, NodeSet &delSet, int32_t* limits );
+//    static bool seedLeap( Querier &bwt, NodeList &nodes, int minCoord, int maxCoord );
+//    void seedLoop( bool drxn );
+//    bool seedLoop( NodeSet &loopSet, NodeSet &usedSet, int len, int limit, bool drxn );
+//    void seedSetDrxnNodes( Node* fork, NodeList &nodes, bool drxn );
+//    static Node* seedSetOrigin( NodeList &forkList );
+//    void seedSplit( NodeList &nodes, int32_t coord );
+//    static void seedValidate( NodeList &base, NodeSet &delSet, bool drxn );
+//    void seedValidate( NodeSet &delSet, bool drxn );
+//    void setIds( int &id, bool drxn );
+    static void seedNode( Querier& bwt, NodeRoll& nodes, vector<Node*>& added, vector<Node*>& seeded, string& seq, ReadId id, int32_t coord, bool drxn );
     static void trimSeed( Querier &bwt, NodeRoll &nodes );
 private:
     bool addSeed( ReadStruct &read );
     void addSeed( ReadStruct &read, int ol );
     void addSeed( ReadStruct& read, NodeRoll& nodes, NodeIntList& ols, NodeIntIntList& splits );
-    bool seedJoin( Node* node, int32_t coord, bool drxn );
-    void seedJoinLoci( Node** nodes );
-    bool seedValidate( bool drxn );
-    bool seedValidate( NodeList &tNodes, NodeOffsetMap &fwdMap, NodeOffsetMap &revMap, bool drxn );
+//    bool seedJoin( Node* node, int32_t coord, bool drxn );
+//    void seedJoinLoci( Node** nodes );
+//    bool seedValidate( bool drxn );
+//    bool seedValidate( NodeList &tNodes, NodeOffsetMap &fwdMap, NodeOffsetMap &revMap, bool drxn );
     
 // NodeSlicing
 public:
@@ -663,6 +646,7 @@ public:
     void setValid();
     bool validate( int32_t* limits );
     bool validate( bool drxn );
+    static void validate( NodeSet &seedSet, NodeSet &delSet, int32_t* validLimits, int32_t* ends, bool doDel=true );
     void validateMerge( Node* mergeNode, bool drxn );
 private:
     bool anyValid( bool drxn );
@@ -683,9 +667,10 @@ private:
 public:
     static void reverify( NodeRoll& nodes );
     bool reverify();
+    void setAllPairs();
     bool setVerified();
     int testVerify();
-    static void verify( NodeRoll &nodes );
+    static void verify( NodeRoll& nodes );
     void verify( Nodes &tested, bool drxn );
     bool verify();
     void verifyFork( int32_t dist, bool force, bool drxn );
@@ -698,6 +683,7 @@ private:
     bool canVerify();
     void confirmVerified();
     void getVerified( Nodes& verified, bool bridge, bool drxn );
+    void setUnverified();
     void setVerifyLimits( int32_t limits[2] );
     int verify( Node* tar, vector<NodeMark> &marks, int fwdHits, bool drxn );
     int verifyClone( Node* tar, vector<NodeMark> &marks, int fwdHits, bool drxn );
@@ -728,8 +714,8 @@ public:
     int32_t validLimits_[4];
     bool verified_, unreliable_, dontExtend_, bad_, branch_;
     bool assembled_[2], misassembled_[2];
-private:
     bool validated_, reliable_, mapped_, culled_;
+private:
     NodeSet* paired_;
     Nodes* pairedNodes_;
 

@@ -21,16 +21,20 @@ class Node;
 
 struct NodePair
 {
-    NodePair( int32_t est, int32_t len ): sum( est ), maxLen( len ), count( 1 ){};
+    NodePair( ReadId id, int32_t est, bool mp );
+    void add( ReadId id, int32_t est, bool mp );
     int32_t estimate();
-    int32_t sum, maxLen;
+    int getLib( ReadId id );
+    int32_t margin();
+    vector< pair<ReadId, int32_t> > pairs[2];
+    vector<int> libs;
     int count;
 };
 
 struct NodePairs
 {
     NodePairs( Node* self ) : self( self ), count( 0 ){};
-    void add( Node* node, int32_t est, int32_t len, bool isPe, bool drxn );
+    void add( Node* node, ReadId id, int32_t est, int32_t len, bool mp, bool drxn );
     void clean();
     bool empty();
     void erase( Node* node, bool drxn );

@@ -71,18 +71,17 @@ int Lib::getPair( SeqNum &id )
     return orientation < 3 ? !( readVer & 0x1 ) : readVer & 0x1;
 }
 
-bool Lib::getPair( SeqNum &id, int32_t dist, int &pairDrxn )
+bool Lib::getPair( SeqNum &id, int &pairDrxn )
 {
     if ( id >= endCount ) return false;
     pairDrxn = getPair( id );
-    dist = size;
     return true;
 }
 
 void Lib::setMinMax()
 {
     minDist = max( ( ( size / 5 ) - 100 ), 1 );
-    maxDist = size * 1.3 + 500;
+    maxDist = ( size * 1.2 ) + 200;
 };
 
 Parameters::Parameters()
@@ -165,15 +164,9 @@ Lib* Parameters::getLib( const SeqNum &readId )
     return NULL;
 }
 
-int32_t Parameters::getLibSize( SeqNum &readId )
+int32_t Parameters::getLibSize( ReadId readId )
 {
-    for ( Lib &lib : libs )
-    {
-        if ( readId < lib.endCount )
-        {
-            return lib.size;
-        }
-    }
+    for ( Lib &lib : libs ) if ( readId < lib.endCount ) return lib.size;
     return 0;
 }
 
@@ -213,6 +206,7 @@ void Parameters::set()
     branchMinHits = 1;
     for ( Lib &lib : libs )
     {
+        lib.setMinMax();
         maxMpMean = max( maxMpMean, lib.size );
         maxMpMax = max( maxMpMax, lib.maxDist );
         if ( lib.isPe )

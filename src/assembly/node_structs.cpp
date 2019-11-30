@@ -86,7 +86,7 @@ int NodeScores::get( Node* node )
 }
 
 Coords::Coords( int32_t start, int32_t end, bool isRedundant )
-: redundant( isRedundant ), ignore( false )
+: redundant( isRedundant ), ignore( false ), unpaired( false )
 {
     coords[0] = start;
     coords[1] = end;
@@ -453,157 +453,157 @@ bool LoopVars::addLoopStart( Node* node, bool drxn )
     return true;
 }
 
-NodeBlock::NodeBlock( Node* node, int base, int ext, bool drxn )
-: node( node )
-{
-    coords[0][drxn] = coords[1][drxn] = base + ( drxn ? ext : -ext );
-    coords[0][!drxn] = coords[1][!drxn] = drxn ? coords[0][1] - node->size() : coords[0][0] + node->size();
-    coords[0][2] = coords[1][2] = 0;
-    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
-}
+//NodeBlock::NodeBlock( Node* node, int base, int ext, bool drxn )
+//: node( node )
+//{
+//    coords[0][drxn] = coords[1][drxn] = base + ( drxn ? ext : -ext );
+//    coords[0][!drxn] = coords[1][!drxn] = drxn ? coords[0][1] - node->size() : coords[0][0] + node->size();
+//    coords[0][2] = coords[1][2] = 0;
+//    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
+//}
+//
+//NodeBlock::NodeBlock( Edge& e, int ext, bool drxn )
+//: node( e.node )
+//{
+//    coords[0][!drxn] = coords[1][!drxn] = drxn ? ext - e.ol : e.ol - ext;
+//    coords[0][drxn] = coords[1][drxn] = drxn ? coords[0][0] + e.node->size() : coords[0][1] - e.node->size();
+//    coords[!drxn][2] = 0;
+//    coords[drxn][2] = coords[drxn][drxn];
+//    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
+//    assert( drxn ? coords[0][1] >= 0 : coords[1][0] <= 0 );
+//}
+//
+//NodeBlock::NodeBlock( NodeRoll& nodes, NodeBlock& l, NodeBlock& r )
+//{
+//    int ol = l.node->getOverlap( r.node, 1 );
+//    int lens[2]{ min( params.readLen, l.node->size() )-1, min( params.readLen, r.node->size() )-1 };
+//    string seq = l.node->getSeqEnd( lens[0], 1 ) + r.node->getSeqEnd( lens[1], 0 ).substr( ol );
+//    node = new Node( seq, l.node->ends_[1] - lens[0], l.node->drxn_ );
+//    coords[0][0] = coords[1][0] = l.coords[0][1] - lens[0];
+//    coords[0][1] = coords[1][1] = r.coords[0][0] + lens[1];
+//    coords[0][2] = coords[1][2] = 0;
+//    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
+//    assert( coords[0][1] - coords[0][0] == node->size() );
+//    nodes += node;
+//    l.node->removeEdge( r.node, 1 );
+//    r.node->removeEdge( l.node, 0 );
+//    node->addEdge( l.node, lens[0], 0, false );
+//    node->addEdge( r.node, lens[1], 1, false );
+//}
+//
+//void NodeBlock::transfer( vector<NodeBlock>& tar, NodeRoll& nodes, NodeRoll& added, bool drxn )
+//{
+//    int32_t limits[2]{ node->ends_[0] + ( coords[0][2] - coords[0][0] )
+//                     , node->ends_[1] - ( coords[1][1] - coords[1][2] ) };
+//    for ( auto& read : node->reads_ )
+//    {
+//        int d = read.second[1] - limits[1] > limits[0] - read.second[0];
+//        int32_t coords[3]{ read.second[0] - diffs[d], read.second[1] - diffs[d], read.second[!d] - limits[d] };
+//        for ( int i = 1; i < tar.size(); i++ )
+//        {
+//            if ( !( tar[i].coords[d][0] <= coords[0] || coords[1] <= tar[i].coords[d][1] ) ) break;
+//            if ( drxn ? tar[i].coords[0][1] < coords[1] : coords[0] < tar[i].coords[1][0] ) continue;
+//            if ( drxn ? coords[0] < tar[i].coords[0][0] : tar[i].coords[1][1] < coords[1] )
+//            {
+//                tar.insert( tar.begin() + i, NodeBlock( nodes, tar[i-drxn], tar[i-!drxn] ) );
+//                added += tar[i].node;
+//            }
+//            coords[0] += tar[i].diffs[0];
+//            coords[1] += tar[i].diffs[1];
+//            coords[2] = d ? min( 0, coords[2] ) : max( 0, coords[2] );
+//            bool redundant = read.second.redundant || tar[i].node->isRedundant( coords[0], coords[1] );
+//            tar[i].node->add( read.first, coords[0], coords[1], redundant, coords[2] );
+//            break;
+//        }
+//    }
+//}
 
-NodeBlock::NodeBlock( Edge& e, int ext, bool drxn )
-: node( e.node )
-{
-    coords[0][!drxn] = coords[1][!drxn] = drxn ? ext - e.ol : e.ol - ext;
-    coords[0][drxn] = coords[1][drxn] = drxn ? coords[0][0] + e.node->size() : coords[0][1] - e.node->size();
-    coords[!drxn][2] = 0;
-    coords[drxn][2] = coords[drxn][drxn];
-    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
-    assert( drxn ? coords[0][1] >= 0 : coords[1][0] <= 0 );
-}
-
-NodeBlock::NodeBlock( NodeRoll& nodes, NodeBlock& l, NodeBlock& r )
-{
-    int ol = l.node->getOverlap( r.node, 1 );
-    int lens[2]{ min( params.readLen, l.node->size() )-1, min( params.readLen, r.node->size() )-1 };
-    string seq = l.node->getSeqEnd( lens[0], 1 ) + r.node->getSeqEnd( lens[1], 0 ).substr( ol );
-    node = new Node( seq, l.node->ends_[1] - lens[0], l.node->drxn_ );
-    coords[0][0] = coords[1][0] = l.coords[0][1] - lens[0];
-    coords[0][1] = coords[1][1] = r.coords[0][0] + lens[1];
-    coords[0][2] = coords[1][2] = 0;
-    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
-    assert( coords[0][1] - coords[0][0] == node->size() );
-    nodes += node;
-    l.node->removeEdge( r.node, 1 );
-    r.node->removeEdge( l.node, 0 );
-    node->addEdge( l.node, lens[0], 0, false );
-    node->addEdge( r.node, lens[1], 1, false );
-}
-
-void NodeBlock::transfer( vector<NodeBlock>& tar, NodeRoll& nodes, NodeRoll& added, bool drxn )
-{
-    int32_t limits[2]{ node->ends_[0] + ( coords[0][2] - coords[0][0] )
-                     , node->ends_[1] - ( coords[1][1] - coords[1][2] ) };
-    for ( auto& read : node->reads_ )
-    {
-        int d = read.second[1] - limits[1] > limits[0] - read.second[0];
-        int32_t coords[3]{ read.second[0] - diffs[d], read.second[1] - diffs[d], read.second[!d] - limits[d] };
-        for ( int i = 1; i < tar.size(); i++ )
-        {
-            if ( !( tar[i].coords[d][0] <= coords[0] || coords[1] <= tar[i].coords[d][1] ) ) break;
-            if ( drxn ? tar[i].coords[0][1] < coords[1] : coords[0] < tar[i].coords[1][0] ) continue;
-            if ( drxn ? coords[0] < tar[i].coords[0][0] : tar[i].coords[1][1] < coords[1] )
-            {
-                tar.insert( tar.begin() + i, NodeBlock( nodes, tar[i-drxn], tar[i-!drxn] ) );
-                added += tar[i].node;
-            }
-            coords[0] += tar[i].diffs[0];
-            coords[1] += tar[i].diffs[1];
-            coords[2] = d ? min( 0, coords[2] ) : max( 0, coords[2] );
-            bool redundant = read.second.redundant || tar[i].node->isRedundant( coords[0], coords[1] );
-            tar[i].node->add( read.first, coords[0], coords[1], redundant, coords[2] );
-            break;
-        }
-    }
-}
-
-NodeLine::NodeLine( Node* node, bool drxn )
-: seq( node->seq_ )
-{
-    coords[drxn] = 0;
-    coords[!drxn] = drxn ? -node->size() : node->size();
-    tar.push_back( NodeBlock( node, 0, 0, drxn ) );
-}
-
-bool NodeLine::add( Edge& e, bool drxn )
-{
-    if ( !e.node ) return false;
-    int ext = e.node->size() - e.ol;
-    int base = tar.empty() ? 0 : tar.back().coords[!drxn][drxn];
-    seq = drxn ? seq + e.node->getSeqEnd( ext, 1 ) : e.node->getSeqEnd( ext, 0 ) + seq;
-    tar.push_back( NodeBlock( e.node, base, ext, drxn ) );
-    return true;
-}
-
-void NodeLine::edge( Node* node, NodeRoll& nodes, int32_t coord, int ol, bool drxn )
-{
-    for ( int i = 0; i < tar.size(); i++ )
-    {
-        int32_t split = tar[i].diffs[!drxn] + coord;
-        if ( !tar[i].node->getNextReadCoord( split, !drxn, drxn ) ) continue;
-        ol -= abs( split - ( tar[i].diffs[!drxn] + coord ) );
-        for ( int d : { 0, 1 } ) tar[i].coords[0][d] = tar[i].coords[1][d] = tar[i].node->ends_[d] + tar[i].diffs[d];
-        if ( tar[i].node->size() != tar[i].coords[0][1] - tar[i].coords[0][0] ) assert( false );
-        Node* s = tar[i].node->splitNode( split, nodes, drxn );
-        if ( s != tar[i].node )
-        {
-            tar[i].coords[0][drxn] = tar[i].coords[1][drxn] = tar[i].node->ends_[drxn] - tar[i].diffs[0];
-            tar.insert( tar.begin()+i+1, NodeBlock( s, tar[i].coords[0][drxn], abs( s->ends_[drxn] - tar[i].node->ends_[drxn] ), drxn ) );
-        }
-        string seqs[2]{ node->getSeqEnd( ol, drxn ), s->getSeqEnd( ol, !drxn ) };
-        node->addEdge( s, ol, drxn, false, node->getSeqEnd( ol, drxn ) != s->getSeqEnd( ol, !drxn ) );
-        return;
-    }
-}
-
-void NodeLine::fold( NodeRoll& nodes, Nodes& mapped, bool drxn )
-{
-    nodes.test();
-    bool discard = false;
-    NodeRoll added;
-    for ( NodeBlock& nb : maps )
-    {
-        assert( drxn ? nb.coords[0][1] >= 0 : nb.coords[1][0] <= 0 );
-        for ( Edge& e : nb.node->edges_[!drxn] )
-        {
-            if ( mapped.find( e.node ) ) continue;
-            edges.push_back( make_tuple( e.node, nb.coords[!drxn][!drxn], e.ol ) );
-        }
-        if ( drxn ? tar.back().coords[0][1] < nb.coords[0][1] : nb.coords[1][0] < tar.back().coords[1][0] ) discard = true;
-    }
-    
-    for ( NodeBlock& nb : maps )
-    {
-        if ( !discard ) nb.transfer( tar, nodes, added, drxn );
-        nodes.erase( nb.node );
-    }
-    for ( Node* node : added.nodes ) node->recoil();
-    for ( int i = 0; !discard && i < edges.size(); i++ ) edge( get<0>( edges[i] ), nodes, get<1>( edges[i] ), get<2>( edges[i] ), drxn );
-    for ( NodeBlock& t : tar )
-    {
-        Nodes fwd( t.node, drxn, false, false );
-        assert( !fwd.find( t.node ) );
-    }
-    nodes.test();
-}
-
-void NodeLine::map( Edge& e, Nodes& mapped, int ext, int align, bool drxn )
-{
-    if ( !mapped.add( e.node ) || e.node->stop_[drxn] == BLUNT_END ) return;
-    maps.push_back( NodeBlock( e, ext, drxn ) );
-    if ( ext == align )
-    {
-        int i = -coords[!drxn], j = -maps.back().coords[!drxn][!drxn];
-        for ( ; abs(i)+align < seq.size() && abs(j)+align < e.node->size() ; align++ )
-        {
-            if ( drxn ? seq[i+align] != e.node->seq_[j+align] : seq.end()[i-align-1] != e.node->seq_.end()[j-align-1] ) break;
-        }
-    }
-    maps.back().coords[!drxn][2] = drxn ? align : -align;
-    ext = abs( maps.back().coords[!drxn][drxn] );
-    for ( Edge& f : e.node->edges_[drxn] ) map( f, mapped, ext, align, drxn );
-}
+//NodeLine::NodeLine( Node* node, bool drxn )
+//: seq( node->seq_ )
+//{
+//    coords[drxn] = 0;
+//    coords[!drxn] = drxn ? -node->size() : node->size();
+//    tar.push_back( NodeBlock( node, 0, 0, drxn ) );
+//}
+//
+//bool NodeLine::add( Edge& e, bool drxn )
+//{
+//    if ( !e.node ) return false;
+//    int ext = e.node->size() - e.ol;
+//    int base = tar.empty() ? 0 : tar.back().coords[!drxn][drxn];
+//    seq = drxn ? seq + e.node->getSeqEnd( ext, 1 ) : e.node->getSeqEnd( ext, 0 ) + seq;
+//    tar.push_back( NodeBlock( e.node, base, ext, drxn ) );
+//    return true;
+//}
+//
+//void NodeLine::edge( Node* node, NodeRoll& nodes, int32_t coord, int ol, bool drxn )
+//{
+//    for ( int i = 0; i < tar.size(); i++ )
+//    {
+//        int32_t split = tar[i].diffs[!drxn] + coord;
+//        if ( !tar[i].node->getNextReadCoord( split, !drxn, drxn ) ) continue;
+//        ol -= abs( split - ( tar[i].diffs[!drxn] + coord ) );
+//        for ( int d : { 0, 1 } ) tar[i].coords[0][d] = tar[i].coords[1][d] = tar[i].node->ends_[d] + tar[i].diffs[d];
+//        if ( tar[i].node->size() != tar[i].coords[0][1] - tar[i].coords[0][0] ) assert( false );
+//        Node* s = tar[i].node->splitNode( split, nodes, drxn );
+//        if ( s != tar[i].node )
+//        {
+//            tar[i].coords[0][drxn] = tar[i].coords[1][drxn] = tar[i].node->ends_[drxn] - tar[i].diffs[0];
+//            tar.insert( tar.begin()+i+1, NodeBlock( s, tar[i].coords[0][drxn], abs( s->ends_[drxn] - tar[i].node->ends_[drxn] ), drxn ) );
+//        }
+//        string seqs[2]{ node->getSeqEnd( ol, drxn ), s->getSeqEnd( ol, !drxn ) };
+//        node->addEdge( s, ol, drxn, false, node->getSeqEnd( ol, drxn ) != s->getSeqEnd( ol, !drxn ) );
+//        return;
+//    }
+//}
+//
+//void NodeLine::fold( NodeRoll& nodes, Nodesx& mapped, bool drxn )
+//{
+//    nodes.test();
+//    bool discard = false;
+//    NodeRoll added;
+//    for ( NodeBlock& nb : maps )
+//    {
+//        assert( drxn ? nb.coords[0][1] >= 0 : nb.coords[1][0] <= 0 );
+//        for ( Edge& e : nb.node->edges_[!drxn] )
+//        {
+//            if ( mapped.find( e.node ) ) continue;
+//            edges.push_back( make_tuple( e.node, nb.coords[!drxn][!drxn], e.ol ) );
+//        }
+//        if ( drxn ? tar.back().coords[0][1] < nb.coords[0][1] : nb.coords[1][0] < tar.back().coords[1][0] ) discard = true;
+//    }
+//    
+//    for ( NodeBlock& nb : maps )
+//    {
+//        if ( !discard ) nb.transfer( tar, nodes, added, drxn );
+//        nodes.erase( nb.node );
+//    }
+//    for ( Node* node : added.nodes ) node->recoil();
+//    for ( int i = 0; !discard && i < edges.size(); i++ ) edge( get<0>( edges[i] ), nodes, get<1>( edges[i] ), get<2>( edges[i] ), drxn );
+//    for ( NodeBlock& t : tar )
+//    {
+//        Nodesx fwd( t.node, drxn, false, false );
+//        assert( !fwd.find( t.node ) );
+//    }
+//    nodes.test();
+//}
+//
+//void NodeLine::map( Edge& e, Nodesx& mapped, int ext, int align, bool drxn )
+//{
+//    if ( !mapped.add( e.node ) || e.node->stop_[drxn] == BLUNT_END ) return;
+//    maps.push_back( NodeBlock( e, ext, drxn ) );
+//    if ( ext == align )
+//    {
+//        int i = -coords[!drxn], j = -maps.back().coords[!drxn][!drxn];
+//        for ( ; abs(i)+align < seq.size() && abs(j)+align < e.node->size() ; align++ )
+//        {
+//            if ( drxn ? seq[i+align] != e.node->seq_[j+align] : seq.end()[i-align-1] != e.node->seq_.end()[j-align-1] ) break;
+//        }
+//    }
+//    maps.back().coords[!drxn][2] = drxn ? align : -align;
+//    ext = abs( maps.back().coords[!drxn][drxn] );
+//    for ( Edge& f : e.node->edges_[drxn] ) map( f, mapped, ext, align, drxn );
+//}
 
 MapStruct::MapStruct( string &inSeq, int32_t inMinLen, int32_t inCoord, int32_t target, bool drxn )
 : seq( inSeq ), len( inSeq.length() ), coord( inCoord )
@@ -1147,7 +1147,7 @@ bool NodeMapRead::checkDoubleHit()
             for ( Edge &e : nodes[0]->edges_[1] )
             {
                 if ( e.node == nodes[1] 
-                        && ( coords[1][1] - coords[1][0] > e.ol || e.isLeap ) )
+                        && ( coords[1][1] - coords[1][0] > e.ol || e.leap ) )
                 {
                     doUnset = false;
                 }

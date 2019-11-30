@@ -1,7 +1,21 @@
 /*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
+ * Copyright (C) 2017 Glen T. Wilkins <glen.t.wilkins@gmail.com>
+ * Written by Glen T. Wilkins
+ * 
+ * This file is part of the Locass software package <https://github.com/gtwilkins/Locass>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "node.h"
@@ -17,14 +31,16 @@ void Node::add( Node* tar, NodeMark& mark, bool drxn )
 void Node::add( Node* tar, NodeMark& mark, Coords* hit, bool drxn )
 {
     if ( hit->ignore ) return;
+    
+    ReadId id[2]{ params.getPairId( mark.id ), mark.id };
     if ( tar != this || ( drxn ? (*hit)[0] < mark[0] : mark[1] < (*hit)[1] ) )
     {
         int32_t dists[2][2]{ { mark[!drxn] - ends_[0], ends_[1] - mark[!drxn] }, { (*hit)[drxn] - tar->ends_[0], tar->ends_[1] - (*hit)[drxn] } };
         int32_t len = max( mark.dist, max( dists[0][drxn], dists[1][!drxn] ) );
         int32_t ests[2]{ dists[1][drxn] - dists[0][drxn] + len, dists[0][!drxn] - dists[1][!drxn] + len };
-        bool pe = params.isReadPe( mark.id );
-        hits_.add( tar, ests[0], mark.dist, pe, drxn );
-        tar->hits_.add( this, ests[1], mark.dist, pe, !drxn );
+        bool mp = params.isReadMp( mark.id );
+        hits_.add( tar, id[0], ests[0], mark.dist, mp, drxn );
+        tar->hits_.add( this, id[1], ests[1], mark.dist, mp, !drxn );
     }
     else hits_.count++;
     tar->rmvMark( params.getPairId( mark.id ), !drxn );
@@ -86,13 +102,13 @@ void Node::getVerified( Nodes& verified, bool bridge, bool drxn )
     for ( int d : { 0, 1 } ) if ( d == drxn || drxn_ >= 2 )
     {
         for ( Edge& e : edges_[d] ) e.node->getVerified( verified, bridge, d );
-        for ( Node* clone : getAltForks( d ) ) clone->getVerified( verified, bridge, d );
         for ( Edge& e : edges_[!d] ) if ( !verified.find( this ) ) e.node->bridgeVerified( verified, !d );
     }
 }
 
 void Node::reverify( NodeRoll& nodes )
 {
+    updateStates( nodes );
     Nodes verified;
     for ( Node* node : nodes.nodes ) if ( node->drxn_ >= 2 ) node->getVerified( verified, true, 1 );
 //    Nodes unverified[2];
@@ -144,15 +160,16 @@ bool Node::reverify()
     return verified_;
 }
 
-bool Node::setVerified()
+void Node::setAllPairs()
 {
-    assert( !bad_ );
+    if ( !verified_ ) branch_ = true;
+    
     for ( bool d : { 0, 1 } )
     {
         if ( !cloned_ )
         {
-            for ( Node* node : Nodes( this, params.maxPeMax, d, true, true ).nodes ) verify( node, pe_[d], 3, d );
-            for ( Node* node : Nodes( this, params.maxMpMax, d, true, true ).nodes ) verify( node, mp_[d], 3, d );
+            for ( Node* node : Nodes( this, params.maxPeMax, d, true ).nodes ) verify( node, pe_[d], 3, d );
+            for ( Node* node : Nodes( this, params.maxMpMax, d, true ).nodes ) verify( node, mp_[d], 3, d );
             continue;
         }
         
@@ -162,8 +179,8 @@ bool Node::setVerified()
         for ( int i = 0; i < 2; i++ )
         {
             int32_t limit = i ? params.maxMpMax : params.maxPeMax;
-            Nodes fwd( this, limit, d, true, true );
-            for ( Node* clone : cloned_->nodes ) fwd.fill( clone, limit, d, true, true );
+            Nodes fwd( this, limit, d, true );
+            for ( Node* clone : cloned_->nodes ) fwd.fill( clone, limit, d, true );
             for ( Node* f : fwd.nodes )
             {
                 clones[1] = NodeRoll::clones( f );
@@ -171,10 +188,24 @@ bool Node::setVerified()
             }
         }
     }
+}
+
+void Node::setUnverified()
+{
+    clearPaired( true );
+    verified_ = false;
+    ends_.reset( drxn_ );
+}
+
+
+bool Node::setVerified()
+{
+    assert( !bad_ );
     
     ends_.init( ends_[0], 0 );
     ends_.init( ends_[1], 1 );
     verified_ = true;
+    setAllPairs();
     
     return true;
 }
@@ -193,27 +224,6 @@ void Node::setVerifyLimits( int32_t limits[2] )
     limits[0] = ends_[0] + ( ols[0] ? : params.readLen );
     limits[1] = ends_[1] - ( ols[1] ? : params.readLen );
 }
-
-//int Node::testVerify()
-//{
-//    Nodes tar[2]{ Nodes( this, params.maxPeMax - size() + params.readLen, 0, true, true )
-//                , Nodes( this, params.maxPeMax - size() + params.readLen, 1, true, true ) };
-//    Coords* hit;
-//    int hits = 0;
-//    for ( int d : { 0, 1 } )
-//    {
-//        for ( Node* t : tar[d].nodes )
-//        {
-//            for ( NodeMark& mark : pe_[d] )
-//            {
-//                if ( !t->findRead( mark.id, hit ) ) continue;
-//                bool paired = isPaired( t );
-//                hits++;
-//            }
-//        }
-//    }
-//    return hits;
-//}
 
 int Node::verify( Node* tar, vector<NodeMark> &marks, int fwdHits, bool drxn )
 {
@@ -242,8 +252,9 @@ int Node::verify( Node* tar, vector<NodeMark> &marks, int fwdHits, bool drxn )
     return added;
 }
 
-void Node::verify( NodeRoll &nodes )
+void Node::verify( NodeRoll& nodes )
 {
+    updateStates( nodes );
     NodeRoll seed = nodes.getGraph( 2 );
     Nodes tested;
     for ( Node* node : seed.nodes ) if ( tested.add( node ) ) node->verify();
@@ -252,6 +263,7 @@ void Node::verify( NodeRoll &nodes )
         if ( node->ends_.verified( 0 ) ) for ( Edge &e : node->edges_[0] ) e.node->verify( tested, 0 );
         if ( node->ends_.verified( 1 ) ) for ( Edge &e : node->edges_[1] ) e.node->verify( tested, 1 );
     }
+    
 }
 
 void Node::verify( Nodes& tested, bool drxn )
@@ -261,6 +273,7 @@ void Node::verify( Nodes& tested, bool drxn )
     tested += this;
     
     for ( Edge &e : edges_[drxn] ) e.node->verify( tested, drxn );
+    for ( Edge &e : edges_[!drxn] ) if ( e.node->bad_ && tested.add( e.node ) ) e.node->verifyFork( params.maxPeMean*1.3+200, false, drxn );
 }
 
 bool Node::verify()
@@ -273,13 +286,12 @@ bool Node::verify()
     if ( branch_ && ( !hits_.empty() ) ) return reverify();
     branch_ = false;
     
-    NodeRoll bck( Nodes( this, params.maxPeMax, !d, false, true ) ), fwd( this );
+    NodeRoll bck( Nodes( this, params.maxPeMax, !d, false ) ), fwd( this );
     bck += this;
-    fwd += Nodes( this, params.maxPeMax, d, false, true );
+    fwd += Nodes( this, params.maxPeMax, d, false );
     int hits[2]{0};
-    for ( Node* b : bck.nodes )
+    for ( Node* b : bck.nodes ) if ( b->ends_.targetable( d ) )
     {
-        if ( !b->ends_.targetable( d ) ) continue;
         b->resort();
         for ( Node* f : fwd.nodes )
         {
@@ -297,7 +309,7 @@ bool Node::verify()
     return false;
 }
 
-int Node::verifyClone( Node* tar, vector<NodeMark> &marks, int fwdHits, bool drxn )
+int Node::verifyClone( Node* tar, vector<NodeMark>& marks, int fwdHits, bool drxn )
 {
     int added = 0;
     NodeRoll clones[2]{ NodeRoll( this ), NodeRoll( tar ) };
@@ -324,56 +336,42 @@ int Node::verifyClone( NodeRoll clones[2], vector<NodeOffsets>& offs, vector<Nod
     assert( !clones[0].empty() && !clones[1].empty() );
     Node* tar = clones[1].nodes[0];
     if ( !culled_ ) cullMarks();
-    int32_t limits[2]{ tar->ends_[0] + tar->getBestOverlap( 0 ), tar->ends_[1] - tar->getBestOverlap( 1 ) };
-    for ( Node* clone : clones[1].nodes )
+    int32_t limits[2]{ tar->ends_[0] + tar->getBestOverlap( 0, true ), tar->ends_[1] - tar->getBestOverlap( 1, true ) };
+    NodeOffset* off = NULL;
+    
+    for ( int i = 0; i < marks.size(); i++ ) if ( tar->findRead( marks[i].id, hit, true ) && !hit->ignore )
     {
-        limits[0] = max( limits[0], tar->ends_[0] + clone->getBestOverlap( 0 ) );
-        limits[1] = min( limits[1], tar->ends_[1] - clone->getBestOverlap( 1 ) );
-    }
-//    vector< pair<Node*, Node*> > repeats[2];
-//    bool repeatsSet[2]{ clones[0].size() < 2 && clones[1].size() < 2 };
-    for ( int i = 0; i < marks.size(); i++ )
-    {
-        if ( !tar->findRead( marks[i].id, hit, true ) || hit->ignore ) continue;
-//        if ( limits[0] < hit->coords[1] && hit->coords[0] < limits[1] )
-        
         // Establish estimated distance between nodes and cutoff deviation from that estimate
         int32_t dists[2]{ abs( marks[i][!drxn] - ends_[drxn] ), abs( (*hit)[drxn] - tar->ends_[drxn] ) };
-        int32_t est = dists[1] - dists[0] + max( marks[i].dist, max( dists[0], dists[1] ) );
-        int32_t cutoff = min( marks[i].dist / 2, 500 );
+        int32_t est = ( dists[1] - dists[0] + marks[i].dist ) * ( drxn ? 1 : -1 );
+        int32_t cutoffs[2]{ -marks[i].dist / ( params.isReadPe( marks[i].id ) ? 1 : 2 ), 200 + marks[i].dist / 5 };
+        int32_t best = marks[i].dist*2;
+        int32_t cutoff = 100 + marks[i].dist / 5;
         int32_t self = -1;
         
         // Record all pairs of clones that match the estimate within its cutoff
         vector<Match> matches;
-        for ( int j = 0; j < clones[0].size(); j++ )
+        for ( int j = 0; j < clones[0].size(); j++ ) for ( int k = 0; k < clones[1].size(); k++ ) if ( off = offs[j].get( clones[1][k] ) )
         {
-            for ( int k = 0; k < clones[1].size(); k++ )
-            {
-                NodeOffset* off = offs[j].get( clones[1][k] );
-                if ( !off ) continue;
-                Match match( clones[0][j], clones[1][k], off->diff( est ) );
-                if ( match.diff < cutoff ) matches.push_back( match );
-            }
+            Match match( clones[0][j], clones[1][k], off->diff( est, drxn ) );
+            best = min( best, abs( match.diff ) );
+            if ( match.node[0] == match.node[1] && abs( marks[i][drxn] - ends_[drxn] ) < abs( hit->coords[drxn] - tar->ends_[drxn] ) ) continue;
+            if ( match.node[0] == match.node[1] && ( self < 0 || abs( match.diff ) < self ) ) self = abs( match.diff );
+            if ( cutoffs[0] <= match.diff && match.diff <= cutoffs[1] ) matches.push_back( match );
         }
+        cutoff += best;
         
         if ( hit->coords[1] <= limits[0] || limits[1] <= hit->coords[0] ) matches.clear();
-        sort( matches.begin(), matches.end(), []( Match& a, Match& b ){ return a.diff < b.diff; } );
-        for ( int j = 0; j < matches.size(); j++ )
+        sort( matches.begin(), matches.end(), []( Match& a, Match& b ){ return abs( a.diff ) < abs( b.diff ); } );
+        for ( int j = 0; j < matches.size(); j++ ) for ( int k = j+1; k < matches.size(); k++ ) for ( int d = 0; d < 2; d++ )
         {
-            if ( matches[j].node[0] == matches[j].node[1] && ( self < 0 || matches[j].diff < self ) ) self = matches[j].diff;
-            for ( int k = j+1; k < matches.size(); k++ )
-            {
-                for ( int d = 0; d < 2; d++ ) 
-                {
-                    if ( matches[j].node[d] == matches[k].node[d] && matches[j].diff + 20 < matches[k].diff ) matches[k].pref[d] = false;
-                }
-            }
+            if ( matches[j].node[d] == matches[k].node[d] && abs( matches[j].diff ) + 20 < abs( matches[k].diff ) ) matches[k].pref[d] = false;
         }
         
         // Remove obviously inferior pairings
-        if ( self >= 0 ) for ( int j = 0; j < matches.size(); j++ ) if ( matches[j].node[0] != matches[j].node[1] ) assert( matches[j].diff <= self );
-        if ( self >= 0 ) for ( int j = 0; j < matches.size(); j++ ) if ( matches[j].node[0] != matches[j].node[1] && matches[j].diff <= self ) matches.erase( matches.begin() + j-- );
-        for ( int j = 1; j < matches.size(); j++ ) if ( matches[0].diff + cutoff < matches[j].diff ) matches.erase( matches.begin() + j-- );
+        if ( self >= 0 ) for ( int j = 0; j < matches.size(); j++ ) if ( matches[j].node[0] != matches[j].node[1] ) assert( abs( matches[j].diff ) <= self );
+        if ( self >= 0 ) for ( int j = 0; j < matches.size(); j++ ) if ( matches[j].node[0] != matches[j].node[1] && self < abs( matches[j].diff ) ) matches.erase( matches.begin() + j-- );
+        for ( int j = 1; j < matches.size(); j++ ) if ( cutoff < abs( matches[j].diff ) ) matches.erase( matches.begin() + j-- );
         for ( int j = 1; j < matches.size(); j++ ) if ( !matches[j].pref[0] && !matches[j].pref[1] ) matches.erase( matches.begin() + j-- );
         
         Nodes used[2];

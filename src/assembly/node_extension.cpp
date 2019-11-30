@@ -35,45 +35,64 @@ void Node::addAlts( vector<QueryNode*> &alts, NodeRoll &nodes, bool drxn, int gr
         for ( Node* node : nodes.nodes ) if ( node->checkMerge( alt, mergeFwd, drxn ) ) break;
         assert( !alt->reads.empty() );
         assert( mergeBck.node || alt->merged );
-        nodes.test();
         
         for ( QueryNode* edge : alt->edges[1] ) edge->base = alt->ext.size();
-        Node* fork = mergeBck.node ? mergeBck.node->splitNode( (*mergeBck.coords)[drxn], nodes, !drxn ) : NULL;
-        Node* node = NULL;
-        if ( fork && fork->edges_[drxn].empty() ) continue;
+        vector<Node*> forks, branches;
+        if ( mergeBck.node ) forks = mergeBck.node->splitNode( (*mergeBck.coords)[drxn], nodes, !drxn );
+        if ( mergeFwd.node ) branches = mergeFwd.node->splitNode( (*mergeFwd.coords)[!drxn], nodes, drxn );
+        
+        // Abort if merges back into a continuing fork
+        bool fail = false;
+        for ( Node* fork : forks ) if ( fork->isContinue( drxn ) ) fail = true;
+        if ( fail ) continue;
         
         // Simple edge between pre-existing nodes
-        if ( fork && !alt->merged )
+        if ( !forks.empty() && !alt->merged )
         {
-            Node* branch = mergeFwd.node->splitNode( (*mergeBck.coords)[!drxn], nodes, drxn );
-            if ( fork->isEdge( branch, drxn, true ) ) continue;
-            if ( branch->cloned_ || Nodes( fork, !drxn, true, false ).find( branch ) ) branch = new Node( branch, nodes, graph, fork->bad_ );
-            fork->addEdge( branch, mergeBck.ol, drxn, false );
+            bool branched = false;
+            for ( Node* fork : forks ) for ( Node* branch : branches ) if ( fork->isEdge( branch, drxn, true ) ) branched = true;
+            if ( !branched ) for ( Node* fork : forks ) for ( Node* branch : branches ) fork->addEdge( branch, mergeBck.ol, drxn, false );
         }
-        // Extend pre-existing node
-        else if ( fork && fork->edges_[drxn].empty() ) fork->appendNode( alt, drxn );
         // Create novel node
-        else node = new Node( alt->seq, alt, ends_[drxn], drxn, graph );
-        nodes.test();
-        
-        if ( node )
+        else
         {
-            node->bad_ = fork ? fork->bad_ : true;
-            nodes.add( node );
+            Node* node = new Node( alt->seq, alt, ends_[drxn], drxn, graph );
+            nodes += node;
+            node->bad_ = true;
             // New node joins back
-            if ( fork ) fork->addEdge( node, mergeBck.ol, drxn, false );
-            nodes.test();
+            for ( Node* fork : forks ) fork->addEdge( node, mergeBck.ol, drxn, false );
             // New node joins forward
-            if ( mergeFwd.node )
-            {
-                Node* branch = mergeFwd.node->splitNode( (*mergeFwd.coords)[!drxn], nodes, drxn );
-                node->addEdge( branch, mergeFwd.ol, drxn, false );
-            }
+            for ( Node* branch : branches ) node->addEdge( branch, mergeFwd.ol, drxn, false );
             // Continue extending
-            else node->addExtensions( alt->edges[1], nodes, drxn, graph );
-            nodes.test();
+            if ( branches.empty() ) node->addExtensions( alt->edges[1], nodes, drxn, graph );
         }
-        else if ( fork && !mergeFwd.node ) fork->addExtensions( alt->edges[1], nodes, drxn, graph );
+//        if ( fork && !alt->merged )
+//        {
+//            Node* branch = mergeFwd.node->splitNode( (*mergeBck.coords)[!drxn], nodes, drxn );
+//            if ( fork->isEdge( branch, drxn, true ) ) continue;
+//            fork->addEdge( branch, mergeBck.ol, drxn, false );
+//        }
+//        // Extend pre-existing node
+//        else if ( fork && fork->edges_[drxn].empty() ) fork->appendNode( alt, drxn );
+//        // Create novel node
+//        else node = new Node( alt->seq, alt, ends_[drxn], drxn, graph );
+//        
+//        if ( node )
+//        {
+//            node->bad_ = fork ? fork->bad_ : true;
+//            nodes.add( node );
+//            // New node joins back
+//            if ( fork ) fork->addEdge( node, mergeBck.ol, drxn, false );
+//            // New node joins forward
+//            if ( mergeFwd.node )
+//            {
+//                Node* branch = mergeFwd.node->splitNode( (*mergeFwd.coords)[!drxn], nodes, drxn );
+//                node->addEdge( branch, mergeFwd.ol, drxn, false );
+//            }
+//            // Continue extending
+//            else node->addExtensions( alt->edges[1], nodes, drxn, graph );
+//        }
+//        else if ( fork && !mergeFwd.node ) fork->addExtensions( alt->edges[1], nodes, drxn, graph );
         
     }
     for ( QueryNode* alt : alts ) alt->resetBase();
@@ -312,15 +331,12 @@ void Node::addExtensions( vector<QueryNode*> &exts, NodeRoll &nodes, bool drxn, 
         // Perform merge
         if ( merge.node )
         {
-            Node* mergeNode = merge.node->splitNode( (*merge.coords)[!drxn], nodes, drxn );
-            if ( mergeNode->cloned_ || Nodes( this, !drxn, true, false ).find( mergeNode ) ) mergeNode = new Node( mergeNode, nodes, graph, branch->bad_ );
-            branch->addEdge( mergeNode, merge.ol, drxn, mergeNode->cloned_ );
-            nodes.test();
+            vector<Node*> split = merge.node->splitNode( (*merge.coords)[!drxn], nodes, drxn );
+            for ( Node* node : split ) branch->addEdge( node, merge.ol, drxn, false );
         }
         // Continue forward branches
         else if ( !ext->edges[1].empty() ) branch->addExtensions( ext->edges[1], nodes, drxn, graph );
     }
-    nodes.test();
 }
 
 void Node::addSelfLoop( vector<MergeHit> &selfMerges, ExtVars &ev, bool drxn )
@@ -694,9 +710,7 @@ int32_t Node::getBestMergeClone( MergeHit &merge, int32_t fromEnd, bool drxn )
 vector< pair<Node*, int32_t> > Node::getExtendable( int32_t dist, bool drxn )
 {
     vector< pair<Node*, int32_t> > nodes;
-    NodeOffsets offs( this, dist, drxn, drxn, true );
-    if ( cloned_ && edges_[!drxn].empty() ) for ( Node* node : cloned_->nodes ) offs.fill( node, 0, dist, drxn, drxn, true, true, true );
-    for ( auto& no : offs.map ) if ( no.first->isContinue( drxn ) ) nodes.push_back( make_pair( no.first, no.second[0] ) );
+    for ( auto& nd : NodeDists( this, dist, drxn, drxn, true ).map ) if ( nd.first->isContinue( drxn ) ) nodes.push_back( nd );
     sort( nodes.begin(), nodes.end(), []( pair<Node*, int32_t>& a, pair<Node*, int32_t>& b ){ return a.second < b.second; } );
     return nodes;
 }
@@ -851,7 +865,7 @@ bool Node::reEnd( Querier &bwt, NodeRoll &nodes, bool drxn )
         
         int32_t coords[2];
         getSplitCoords( coords, ends[i], !drxn );
-        splitNode( coords[drxn], nodes, drxn )->stop( stop_[drxn], drxn );
+        for ( Node* node : splitNode( coords[drxn], nodes, drxn ) ) node->stop( stop_[drxn], drxn );
         addAlts( qj.alts_, nodes, drxn, drxn );
         addExtensions( qj.nodes_, nodes, drxn, drxn );
         stop( 0, drxn );
@@ -961,7 +975,7 @@ Node* Node::splitNode( int32_t splitBegin, NodeList &nodes, bool subGraph, bool 
     for ( Edge &edge : edges_[drxn] )
     {
         edge.node->removeEdge( this, !drxn );
-        node->addEdge( edge.node, edge.ol, drxn, edge.isLeap );
+        node->addEdge( edge.node, edge.ol, drxn, edge.leap );
     }
     
     // Add edge from this to split node
@@ -1012,7 +1026,29 @@ Node* Node::splitNode( int32_t splitBegin, NodeList &nodes, bool subGraph, bool 
     return node;
 }
 
-Node* Node::splitNode( int32_t cut, NodeRoll& nodes, bool drxn )
+vector<Node*> Node::splitNode( int32_t cut, NodeRoll& nodes, bool drxn )
+{
+    vector<Node*> split[2]{ clones(), vector<Node*>() };
+    
+    for ( Node* node : split[0] ) split[1].push_back( node->splitNode2( cut + ( node->ends_[!drxn] - ends_[!drxn] ), nodes, drxn ) );
+    
+    if ( split[0][0] != split[1][0] ) for ( int i = 1; i < split[1].size(); i++ )
+    {
+        split[1][0]->addCloned( split[1][i] );
+    }
+    
+    for ( int i : { 0, 1 } ) for ( Node* node : split[i] )
+    {
+        if ( node->verified_ ) node->setVerified();
+        else node->ends_.reset( node->drxn_ );
+        node->setCoverage();
+        node->readTest();
+    }
+    
+    return split[1];
+}
+
+Node* Node::splitNode2( int32_t cut, NodeRoll& nodes, bool drxn )
 {
     // No need to split if cutoff is at start of node
     if ( cut == ends_[!drxn] ) return this;
@@ -1026,6 +1062,7 @@ Node* Node::splitNode( int32_t cut, NodeRoll& nodes, bool drxn )
     node->bad_ = bad_;
     node->branch_ = branch_;
     node->drxn_ = drxn_;
+    node->mapped_ = mapped_;
     nodes += node;
     ends_[drxn] = cut;
     for ( auto it = reads_.begin(); it != reads_.end(); )
@@ -1046,63 +1083,106 @@ Node* Node::splitNode( int32_t cut, NodeRoll& nodes, bool drxn )
     ends_.recoil();
     if ( drxn_ >= 2 ) ends_.splitOrigin( node->ends_, drxn_, node->drxn_ );
     
-    // Transfer forward edges to forward split node
-    for ( Edge &edge : edges_[drxn] )
+    // Transfer forward edges to forward split node and add edge between the split
+    for ( Edge &e : edges( drxn ) )
     {
-        edge.node->removeEdge( this, !drxn );
-        node->addEdge( edge.node, edge.ol, drxn, edge.isLeap );
+        e.node->removeEdge( this, !drxn, true );
+        node->addEdge( e, drxn, true );
     }
-    
-    // Add edge from this to split node
-    int ol = abs( ends_[drxn] - cut );
-    edges_[drxn].clear();
-    addEdge( node, ol, drxn, false );
-    
-    if ( cloned_ )
-    {
-        for ( Node* clone : cloned_->nodes )
-        {
-            int32_t off = clone->ends_[!drxn] - ends_[!drxn];
-            clone->clearPaired( false );
-            assert( clone->drxn_ < 2 );
-            Node* edge = new Node( node, nodes, clone->drxn_, clone->bad_ );
-            edge->offset( off );
-            nodes += edge;
-            clone->seq_ = seq_;
-            clone->ends_[drxn] = ends_[drxn] + off;
-            for ( auto it = clone->reads_.begin(); it != clone->reads_.end(); )
-            {
-                if ( clone->ends_[0] <= it->second[0] && it->second[1] <= clone->ends_[1] ) it++;
-                else it = clone->reads_.erase( it );
-            }
-            
-            for ( Edge& e : clone->edges_[drxn] )
-            {
-                e.node->removeEdge( clone, !drxn );
-                edge->addEdge( e.node, e.ol, drxn, false, e.isLeap );
-            }
-            clone->clearEdges( drxn );
-            clone->addEdge( edge, ol, drxn, false );
-            clone->remark();
-            edge->remark();
-            clone->ends_.init( clone->ends_[!clone->drxn_] );
-            edge->ends_.init( edge->ends_[!edge->drxn_] );
-            clone->readTest();
-            edge->readTest();
-        }
-    }
-    
-    // Re-validate if valid
-    for ( Node* n : { this, node } )
-    {
-        if ( n->verified_ || n->canSetVerified() ) n->setVerified();
-        else if ( n->drxn_ < 2 ) n->ends_.init( n->ends_[!n->drxn_] );
-        n->setCoverage();
-        n->readTest();
-    }
+    addEdge( node, abs( ends_[drxn] - cut ), drxn, false );
     
     return node;
 }
+
+//Node* Node::splitNode( int32_t cut, NodeRoll& nodes, bool drxn )
+//{
+//    // No need to split if cutoff is at start of node
+//    if ( cut == ends_[!drxn] ) return this;
+//    
+//    assert( abs( ends_[drxn] - cut ) >= getBestOverlap( drxn ) );
+//    
+//    // Create split node and trim this node
+//    clearPaired( false );
+//    
+//    Node* node = new Node( getSeqEnd( abs( ends_[drxn] - cut ), drxn ), cut, stop_, drxn );
+//    node->bad_ = bad_;
+//    node->branch_ = branch_;
+//    node->drxn_ = drxn_;
+//    node->mapped_ = mapped_;
+//    nodes += node;
+//    ends_[drxn] = cut;
+//    for ( auto it = reads_.begin(); it != reads_.end(); )
+//    {
+//        if ( drxn ? cut <= it->second[0] : it->second[1] <= cut )
+//        {
+//            node->reads_.insert( *it );
+//            it = reads_.erase( it );
+//            continue;
+//        }
+//        ends_[drxn] = drxn ? max( ends_[drxn], it->second[1] ) : min( ends_[drxn], it->second[0] );
+//        it++;
+//    }
+//    remark();
+//    node->remark();
+//    seq_ = drxn ? seq_.substr( 0, ends_[1] - ends_[0] ) : seq_.substr( seq_.size() - ( ends_[1] - ends_[0] ) );
+//    node->ends_.inherit( ends_.limits );
+//    ends_.recoil();
+//    if ( drxn_ >= 2 ) ends_.splitOrigin( node->ends_, drxn_, node->drxn_ );
+//    
+//    // Transfer forward edges to forward split node
+//    for ( Edge &edge : edges_[drxn] )
+//    {
+//        edge.node->removeEdge( this, !drxn );
+//        node->addEdge( edge.node, edge.ol, drxn, edge.isLeap );
+//    }
+//    
+//    // Add edge from this to split node
+//    int ol = abs( ends_[drxn] - cut );
+//    edges_[drxn].clear();
+//    addEdge( node, ol, drxn, false );
+//    
+//    if ( cloned_ ) for ( Node* clone : cloned_->nodes )
+//    {
+//        int32_t off = clone->ends_[!drxn] - ends_[!drxn];
+//        clone->clearPaired( false );
+//        assert( clone->drxn_ < 2 );
+//        Node* edge = new Node( node, nodes, clone->drxn_, clone->bad_ );
+//        edge->offset( off );
+//        nodes += edge;
+//        clone->seq_ = seq_;
+//        clone->ends_[drxn] = ends_[drxn] + off;
+//        for ( auto it = clone->reads_.begin(); it != clone->reads_.end(); )
+//        {
+//            if ( clone->ends_[0] <= it->second[0] && it->second[1] <= clone->ends_[1] ) it++;
+//            else it = clone->reads_.erase( it );
+//        }
+//
+//        for ( Edge& e : clone->edges_[drxn] )
+//        {
+//            e.node->removeEdge( clone, !drxn );
+//            edge->addEdge( e.node, e.ol, drxn, false, e.isLeap );
+//        }
+//        clone->clearEdges( drxn );
+//        clone->addEdge( edge, ol, drxn, false );
+//        clone->remark();
+//        edge->remark();
+//        clone->ends_.init( clone->ends_[!clone->drxn_] );
+//        edge->ends_.init( edge->ends_[!edge->drxn_] );
+//        clone->readTest();
+//        edge->readTest();
+//    }
+//    
+//    // Re-validate if valid
+//    for ( Node* n : { this, node } )
+//    {
+//        if ( n->verified_ || n->canSetVerified() ) n->setVerified();
+//        else if ( n->drxn_ < 2 ) n->ends_.init( n->ends_[!n->drxn_] );
+//        n->setCoverage();
+//        n->readTest();
+//    }
+//    
+//    return node;
+//}
 
 Node* Node::splitNodeDual( int32_t* coords, NodeList &nodes, int subGraph )
 {

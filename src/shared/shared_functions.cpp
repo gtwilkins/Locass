@@ -219,6 +219,11 @@ int mapSeqOverlap( string &left, string &right, int minLen )
     return 0;
 }
 
+int mapSeqOverlap( string &q, string &t, int minLen, bool drxn )
+{
+    return mapSeqOverlap( drxn ? q : t, drxn ? t : q, minLen );
+}
+
 void revComp( string &seq )
 {
     reverse( seq.begin(), seq.end() );

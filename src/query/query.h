@@ -36,9 +36,11 @@ public:
     ~Querier();
     
 //    vector<Overlap> getOverlaps( CorrectQuery &cq, bool drxn );
+    vector<ReadId> getIds( CharId rank, CharId count, bool drxn );
     string getSequence( ReadId id );
     bool isExtendable( string& seq, bool drxn );
     ReadId isExtendable( string &seq, uint16_t minLen, bool drxn );
+    vector<QueryBranch> mapBranches( string& seq, vector<bool>* block, int minLen, bool drxn );
     CorrectionStruct mapCorrection( string seq, int len, bool drxn );
     vector<Extension> mapExtensions( bool &noMatches, string &seq, bool drxn, uint16_t minOver=1 );
     vector<Extension> mapExtensions( string &seq, bool drxn, uint16_t minOver=1 );

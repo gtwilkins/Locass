@@ -15,18 +15,13 @@ QueryJunction::QueryJunction( IndexReader* ir, QueryBinaries* qb, string &seq, R
     ir->primeOverlap( seq_, qs.q, qs.rank, qs.count, qs.ol, drxn );
     query( ir, qs, counts, ols );
     if ( failure_ = qs.failure() ) return;
-//    nodes_ = QueryNode::graph( qb, qs, "", drxn );
     vector<QueryNode*> nodes;
     for ( QueryNode* node : QueryNode::graph( qb, qs, "", drxn ) ) if ( node->confirm() ) nodes.push_back( node );
     int maxExt = 0, maxReads = 0;
     for ( QueryNode* node : nodes ) maxExt = max( maxExt, node->setExt() );
     for ( QueryNode* node : nodes ) maxReads = max( maxReads, node->setReads( maxExt - cutoff ) );
     for ( QueryNode* node : nodes ) if ( !add( node, maxExt > cutoff && maxReads >= 10, true ) ) delete node;
-    assert( !nodes_.empty() );
-//    for ( QueryNode* node : nodes ) node->setSeq( drxn );
-//    if ( maxExt > cutoff ) QueryNode::cull( nodes_, maxExt - cutoff );
-//    for ( QueryNode* node : nodes ) node->setSeq( drxn );
-//    setAlts();
+    if ( nodes_.empty() ) failure_ = alts_.empty() ? 1 : 3;
 }
 
 QueryJunction::~QueryJunction()
@@ -53,26 +48,6 @@ uint8_t QueryJunction::getChar( int ol )
     if ( ol >= seq_.size() ) return 4;
     return ( drxn_ ? charToInt[ seq_.end()[-ol-1] ] : charToIntComp[ seq_[ol] ] );
 }
-
-//void QueryJunction::setAlts()
-//{
-//    for ( int i = 0; i < nodes_.size(); i++ )
-//    {
-//        if ( nodes_[i]->len == nodes_[i]->seq.size() ) continue;
-//        alts_.push_back( nodes_[i] );
-//        nodes_.erase( nodes_.begin() + i-- );
-//    }
-//    
-//    if ( nodes_.empty() ) for ( QueryNode* alt : alts_ ) alt->setNonAlt( nodes_ );
-//    
-//    if ( nodes_.empty() && !failure_ ) failure_ = 3;
-//    
-//    for ( QueryNode* node : alts_ )
-//    {
-//        assert( !seq_.empty() );
-//        assert( !node->len );
-//    }
-//}
 
 void QueryJunction::query( IndexReader* ir, QState &qs, ReadId* counts, int* ols )
 {

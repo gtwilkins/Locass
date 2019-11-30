@@ -413,7 +413,7 @@ Node* Node::foldEndHit( ExtVars &ev, Node* hitNode, MapResult &result, bool drxn
         for ( Edge &e : hitNode->edges_[drxn] )
         {
             int overlap = result.len + e.ol - abs( hitNode->ends_[drxn] - result.coords[drxn] );
-            e.node->addEdge( this, overlap, !drxn, false, e.isLeap || result.len <= 0 );
+            e.node->addEdge( this, overlap, !drxn, false, e.leap || result.len <= 0 );
         }
     }
     
@@ -1057,7 +1057,7 @@ void Node::getMapStructTargetCheckPaths( NodeListList &targetPaths, int32_t* lim
                 {
                     if ( e.node == targetPaths[i][j-1] )
                     {
-                        doSplit = doSplit || e.isLeap;
+                        doSplit = doSplit || e.leap;
                         overlap = e.ol;
                     }
                 }

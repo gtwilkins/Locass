@@ -93,7 +93,7 @@ Locus::Locus( Querier &bwt, NodeList* nodes )
     
     Node::resetPairing( seedSet );
     for ( Node* node : nodes_[2] ) node->setValid();
-    Node::seedValidate( seedSet, dummy, validLimits_, ends_, false );
+    Node::validate( seedSet, dummy, validLimits_, ends_, false );
 }
 
 //Locus::Locus( Querier &bwt, ifstream &fh )

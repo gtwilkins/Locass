@@ -18,23 +18,23 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef SHARED_FUNCTIONS_H
-#define SHARED_FUNCTIONS_H
 
-#include "types.h"
+#ifndef LOCUS_PORT_H
+#define LOCUS_PORT_H
 
-int getEndTrim( string &q, string trim, bool drxn );
-int getHomopolymerLen( string &s, bool drxn );
-int getHomopolymerScore( string &s );
-bool isSequence( string &s );
-bool mapSeq( string &q, string &t, int* coords, int minLen );
-int mapCongruence( string &left, string &right, int len );
-bool mapSeqCongruent( string &left, string &right, int offset );
-bool mapSeqEnd( string &q, string &t, int minLen, int32_t* coords, bool drxn );
-int mapSeqOverlap( string &left, string &right, int minLen );
-int mapSeqOverlap( string &q, string &t, int minLen, bool drxn );
-void revComp( string &seq );
-string revCompNew( string &seq );
+#include "node.h"
 
-#endif /* SHARED_FUNCTIONS_H */
+struct LocusExport
+{
+    LocusExport( NodeRoll& nodes, string fn );
+};
+
+struct LocusImport
+{
+    LocusImport( NodeRoll& nodes, string fn );
+    string parse( string s, size_t& it );
+    vector<int64_t> parse( string s );
+};
+
+#endif /* LOCUS_PORT_H */
 

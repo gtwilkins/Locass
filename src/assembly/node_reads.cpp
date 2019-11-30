@@ -22,10 +22,11 @@
 #include <algorithm>
 #include <limits>
 
-void Node::add( ReadId id, int i, int j, bool redundant, int unaligned )
+void Node::add( ReadId id, int i, int j, bool redundant, bool ignore, int unaligned )
 {
     Lib* lib = params.getLib( id );
     Coords coords( i, j, redundant );
+    if ( ignore ) coords.ignore = true;
     if ( unaligned ) coords.coords[2] = unaligned;
     
     auto r = reads_.insert( make_pair( id, coords ) );
@@ -40,6 +41,16 @@ void Node::add( ReadId id, int i, int j, bool redundant, int unaligned )
     culled_ = false;
 }
 
+bool Node::add( ReadId id, string& seq )
+{
+    assert( !seq.empty() );
+    size_t it = seq_.find( seq );
+    if ( it == seq_.npos ) return false;
+    int32_t coords[2]{ int32_t( it + ends_[0] ), int32_t( it + ends_[0] + seq.size() ) };
+    add( id, coords[0], coords[1], isRedundant( coords[0], coords[1] ) );
+    return true;
+}
+
 //void Node::addMark( ReadId id, int i, int j )
 //{
 //    Lib* lib = params.getLib( id );
@@ -52,8 +63,7 @@ void Node::addMark( SeqNum readId, Coords &coords )
 {
     Lib* lib = params.getLib( readId );
     int drxn;
-    int32_t dist;
-    if ( lib && (*lib).getPair( readId, dist, drxn ) )
+    if ( lib && (*lib).getPair( readId, drxn ) )
     {
         marks_[!drxn].push_back( ReadMark( readId, coords, lib, drxn ) );
     }
@@ -62,11 +72,7 @@ void Node::addMark( SeqNum readId, Coords &coords )
 void Node::addMarks( vector<ReadId> &ids )
 {
     Coords* hit = NULL;
-    for ( ReadId &id : ids )
-    {
-        if ( !findRead( id, hit ) ) continue;
-        add( id, hit->coords[0], hit->coords[1], hit->redundant );
-    }
+    for ( ReadId &id : ids ) if ( findRead( id, hit ) ) add( id, hit->coords[0], hit->coords[1], hit->redundant );
 }
 
 void Node::addRead( Overlap &read, int32_t anchor, bool olDrxn )
@@ -293,8 +299,7 @@ vector<ReadMark> Node::getMarksBase( int drxn )
         SeqNum pairId = read.first;
         Lib* lib = params.getLib( pairId );
         int pairDrxn;
-        int32_t dist;
-        if ( lib && (*lib).getPair( pairId, dist, pairDrxn ) && pairDrxn != drxn )
+        if ( lib && (*lib).getPair( pairId, pairDrxn ) && pairDrxn != drxn )
         {
             marks.push_back( ReadMark( pairId, read.second, lib, pairDrxn ) );
         }
@@ -310,12 +315,17 @@ void Node::getMarksCount( int counts[2] )
         SeqNum pairId = read.first;
         Lib* lib = params.getLib( pairId );
         int drxn;
-        int32_t dist;
-        if ( lib && (*lib).getPair( pairId, dist, drxn ) )
+        if ( lib && (*lib).getPair( pairId, drxn ) )
         {
             counts[drxn]++;
         }
     }
+}
+
+Coords* Node::getRead( ReadId id )
+{
+    auto it = reads_.find( id );
+    return it != reads_.end() ? &it->second : NULL;
 }
 
 bool Node::getSplitCoords( int32_t coords[2], int split, bool drxn )
@@ -381,8 +391,7 @@ void Node::reAddMark( SeqNum readId, Coords &coords )
 {
     Lib* lib = params.getLib( readId );
     int drxn;
-    int32_t dist;
-    if ( lib && (*lib).getPair( readId, dist, drxn ) )
+    if ( lib && (*lib).getPair( readId, drxn ) )
     {
         if ( find_if( marks_[drxn].begin(), marks_[drxn].end(), [&readId]( const ReadMark &a ){ 
             return a.id == readId;
@@ -428,9 +437,8 @@ void Node::remark()
     pe_[1].clear();
     mp_[0].clear();
     mp_[1].clear();
-    for ( auto &read : reads_ )
+    for ( auto &read : reads_ ) if ( !read.second.ignore && !read.second.unpaired )
     {
-        if ( read.second.ignore ) continue;
         ReadId id = read.first;
         Lib* lib = params.getLib( id );
         if ( !lib ) continue;
@@ -510,9 +518,8 @@ void Node::resetUnmarked( bool drxn )
 bool Node::rmvMark( ReadId id, bool drxn )
 {
     vector<NodeMark> &marks = ( params.isReadPe( id ) ? pe_[drxn] : mp_[drxn] );
-    for ( auto it = marks.begin(); it != marks.end(); it++ )
+    for ( auto it = marks.begin(); it != marks.end(); it++ ) if ( it->id == id )
     {
-        if ( it->id != id ) continue;
         marks.erase( it );
         return true;
     }
@@ -521,7 +528,7 @@ bool Node::rmvMark( ReadId id, bool drxn )
 
 void Node::resort()
 {
-    int32_t limits[2]{ ends_[0] + getBestOverlap( 0 ), ends_[1] - getBestOverlap( 1 ) };
+    int32_t limits[2]{ ends_[0] + getBestOverlap( 0, true ), ends_[1] - getBestOverlap( 1, true ) };
     for ( vector<NodeMark>* marks : { pe_, mp_ } )
     {
         sort( marks[0].begin(), marks[0].end(), []( NodeMark &a, NodeMark &b ){ return a.coords[1] > b.coords[1]; } );

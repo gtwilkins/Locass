@@ -24,9 +24,8 @@ struct Nodes
     Nodes(){};
     Nodes( Node* node );
     Nodes( vector<Node*> base );
-    Nodes( Node* node, bool drxn, bool inclNode, bool inclClone );
+    Nodes( Node* node, bool drxn, bool inclNode );
     Nodes( Node* node, int32_t limit, bool drxn, bool inclNode );
-    Nodes( Node* node, int32_t limit, bool drxn, bool inclNode, bool inclClone );
 //    Nodes( Node* base, NodeOffsets &offs, bool drxn, bool inclBase );
 //    Nodes( Node* base, Node* avoid, NodeOffsets &offs, bool drxn, bool inclBase );
     Nodes( vector<Node*> &base, bool drxn, bool inclBase );
@@ -45,9 +44,10 @@ struct Nodes
     bool erase( Node* node );
     Nodes exclusive( Nodes& ignore );
     void fill( Node* node );
-    void fill( Node* node, bool drxn, bool inclNode, bool inclClone );
+    void fill( Node* node, bool drxn, bool inclNode );
 //    bool fill( Node* node, NodeOffsets &offs, bool drxn );
-    void fill( Node* node, int32_t limit, bool drxn, bool inclNode, bool inclClone );
+    void fill( Node* node, int32_t limit, bool drxn, bool inclNode );
+    void fillAll( Node* node );
     void fillBad( Node* node, bool bad, bool drxn );
     void fillBranch( Node* node );
     void fillIn( Node* node, Nodes &include, bool drxn, bool inclNode );
@@ -56,7 +56,7 @@ struct Nodes
     void fillNot( Node* node, Nodes &ignore, bool drxn, bool inclNode );
     void fillNot( Node* node, Nodes &ignore, int32_t limit, bool drxn, bool inclNode );
     bool find( Node* node );
-    static void forkSets( Node* fork, Node* branch, Nodes fwds[2], Nodes bcks[2], int32_t limit, bool drxn );
+    static Nodes looped( Node* node );
     static Nodes inSet( Node* node, Nodes &include, bool drxn, bool inclNode );
     static Nodes inSet( Node* node, Nodes &include, int32_t limit, bool drxn, bool inclNode );
     static Nodes isBad( Node* node, bool bad, bool drxn );
@@ -93,47 +93,69 @@ struct NodeRoll
     void print( string fn, int32_t i, int32_t j );
     void print( ofstream& ofs, Node* node, Nodes used[2], int32_t limit );
     int size();
+    void summarise();
     void test( bool loop=false );
+    void updateBad();
     vector<Node*> nodes;
 };
 
 struct NodeOffset
 {
-    NodeOffset( int dist ){ dists[0] = dists[1] = dists[2] = dist; }
-    bool add( int32_t dist, bool minOnly=false );
-    int32_t diff( int32_t est );
-    int32_t diff( NodeOffset& rhs, int32_t est, bool drxn );
-    int32_t& operator[]( int i ){ return dists[i]; }
-    int32_t dists[3];
+    NodeOffset( int32_t dist );
+//    NodeOffset( int dist ){ dists[0] = dists[1] = dists[2] = dist; }
+    bool add( int32_t dist );
+//    bool add( int32_t dist, bool minOnly=false );
+    int32_t diff( int32_t est, bool drxn );
+//    int32_t diff( NodeOffset& rhs, int32_t est, bool drxn );
+//    int32_t min( bool drxn );
+//    int32_t& operator[]( int i ){ return dists[i]; }
+    vector< pair<int32_t, int32_t> > dists;
 };
 
 struct NodeOffsets
 {
     NodeOffsets(){};
-    NodeOffsets( Node* node, bool drxn, bool inclNode, bool inclClone=true );
+//    NodeOffsets( Node* node, bool drxn, bool inclNode );
     NodeOffsets( Node* node, int32_t limit, bool orient, bool drxn, bool inclNode );
     bool add( Node* node, int32_t dist );
-    bool add( Node* fork, Edge& e, int32_t base, bool orient, bool drxn );
+//    bool add( Node* fork, Edge& e, int32_t base, bool orient, bool drxn );
     void clear();
-    bool doLoop( Node* clone, int32_t dist, bool drxn );
+    bool discontinue( int32_t dist, int32_t limit, bool drxn );
     bool empty();
     void erase( Node* node );
     static int32_t extend( Node* fork, Edge& e, int32_t dist, bool orient, bool drxn );
     bool find( Node* node );
-    void fill( Node* node, int32_t dist, int32_t limit, bool orient, bool drxn, bool inclNode, bool inclClone, bool looped=false );
-    void fillIn( Node* node, Nodes& include, int32_t dist, bool orient, bool drxn, bool inclNode, bool looped=false );
-    void fillNot( Node* node, Nodes& ignore, int32_t dist, int32_t limit, bool orient, bool drxn, bool inclNode, bool looped=false );
+    void fill( Node* node, int32_t dist, int32_t limit, bool orient, bool drxn, bool inclNode );
+    void fillIn( Node* node, Nodes& include, int32_t dist, int32_t limit, bool orient, bool drxn, bool inclNode );
+    void fillNot( Node* node, Nodes& ignore, int32_t dist, int32_t limit, bool orient, bool drxn, bool inclNode );
 //    void fillNot( Node* node, Nodes& ignore, int32_t dist, bool orient, bool drxn, bool inclNode, bool looped=false );
 //    void fill( Node* node, Nodes& nodes, bool drxn, bool inclNode, bool inclClone );
 //    void flip( int32_t dist, bool drxn );
 //    static void forkSets( Node* fork, Edge& e, NodeOffsets offs[2], Nodes fwds[2], Nodes bcks[2], int32_t limit, bool drxn );
     NodeOffset* get( Node* node );
-    void init( Node* node, int32_t base, int32_t limit, bool drxn, bool inclNode, bool rev );
+//    void init( Node* node, int32_t base, int32_t limit, bool drxn, bool inclNode, bool rev );
 //    static NodeOffsets offset( Node* node, int32_t base, int32_t limit, bool drxn, bool inclNode, bool rev );
 //    void offset( int32_t dist );
 //    void set( Node* node, int32_t dist, bool drxn, bool inclNode );
 //    bool set( Node* node, int32_t dist, int32_t limit, bool drxn, bool inclNode, bool rev );
     unordered_map<Node*, NodeOffset> map;
+};
+
+struct NodeDists
+{
+    NodeDists(){};
+    NodeDists( Node* node, bool drxn, bool inclNode );
+    NodeDists( Node* node, int32_t limit, bool orient, bool drxn, bool inclNode );
+    bool add( Node* node, int32_t dist, bool drxn );
+    bool discontinue( int32_t dist, int32_t limit, bool drxn );
+    bool empty();
+    void fill( Node* node, int32_t dist, int32_t limit, bool orient, bool drxn, bool inclNode );
+    void fillIn( Node* node, Nodes& include, int32_t dist, bool orient, bool drxn, bool inclNode );
+    void fillNot( Node* node, Nodes& ignore, int32_t dist, int32_t limit, bool orient, bool drxn, bool inclNode );
+    void fillReads( Node* node, int32_t dist, int readCount, int readLimit, bool orient, bool drxn );
+    bool find( Node* node );
+    int32_t* get( Node* node );
+    unordered_map<Node*, int32_t> map;
 };
 
 

@@ -29,15 +29,15 @@
 class Seed 
 {
 public:
-    Seed( string &header, string &seq, Querier &inBwt, int errorCount, bool bestOnly=true );
+    Seed( string &header, string &seq, Querier &bwt, int errorCount, bool bestOnly=true );
+    Seed( string fn, Querier &bwt );
     void assemble();
     void assembleGraph();
     vector<Locus*> getLoci();
     bool warning();
     virtual ~Seed();
 private:
-    bool extend( NodeRoll &exts, bool drxn );
-    bool restart( vector<SeedFork> forks[2] );
+    bool restart( SeedExtend seed[2] );
     void assembleHaploid();
     void checkDivergent( NodeList &path );
     void checkDivergentBack( NodeList &div, NodeSet &pathSet, bool drxn );

@@ -21,6 +21,12 @@
 #include "seed.h"
 #include "path_seed.h"
 #include "node_path.h"
+#include "leap.h"
+#include "locus_path.h"
+#include "path_alleles.h"
+#include "path_cross.h"
+#include "locus_port.h"
+#include "locus_gap.h"
 #include <algorithm>
 
 Seed::Seed( string &header, string &seq, Querier &bwt, int errorCount, bool bestOnly )
@@ -38,169 +44,91 @@ Seed::Seed( string &header, string &seq, Querier &bwt, int errorCount, bool best
     
     for ( ReadStruct &read : ms.reads ) Node::addSeed( seed_, read );
     Node::trimSeed( bwt, seed_ );
-        
-//    vector<bool> redundant;
-//    for ( int i = 0; i < ms.reads.size(); i++ )
-//    {
-//        bool isRedundant = false;
-//        int iLen = ms.reads[i].coords[1] - ms.reads[i].coords[0];
-//        for ( int j = 0; j < ms.reads.size(); j++ )
-//        {
-//            int jLen = ms.reads[j].coords[1] - ms.reads[j].coords[0];
-//            if ( iLen >= params.readLen || isRedundant || jLen <= iLen ) continue;
-//            isRedundant = ms.reads[j].seq.find( ms.reads[i].seq ) != ms.reads[j].seq.npos;
-//        }
-//        redundant.push_back( isRedundant );
-//    }
-//    
-//    int k = 0;
-//    for ( ReadStruct &read : ms.reads )
-//    {
-//        if ( redundant[k++] ) continue;
-//        vector<int32_t> hits, coords;
-//        NodeSet fwdSet;
-//        tether_[0] = min( tether_[0], read.tether[0] );
-//        tether_[1] = max( tether_[1], read.tether[1] );
-//        
-//        for ( int i( 0 ); i < nodes_.size(); i++ )
-//        {
-//            int32_t coord;
-//            if ( nodes_[i]->seedCongruent( read, coord ) )
-//            {
-//                hits.push_back( i );
-//                coords.push_back( coord );
-//                nodes_[i]->getDrxnNodes( fwdSet, 0 );
-//            }
-//        }
-//        
-//        for ( int i ( 0 ); i < hits.size() && hits.size() > 1; )
-//        {
-//            if ( fwdSet.find( nodes_[hits[i]] ) != fwdSet.end() )
-//            {
-//                hits.erase( hits.begin() + i );
-//                coords.erase( coords.begin() + i );
-//            }
-//            else
-//            {
-//                i++;
-//            }
-//        }
-//        
-//        if ( hits.size() > 1 || hits.size() == 1 && ( nodes_[ hits[0] ]->ends_[1] != coords[0] || !nodes_[ hits[0] ]->edges_[1].empty() ) )
-//        {
-//            Node* node = new Node( read );
-//            nodes_.push_back( node );
-//            for ( int i ( 0 ); i < hits.size(); i++ )
-//            {
-//                if ( coords[i] != nodes_[ hits[i] ]->ends_[1] )
-//                {
-//                    nodes_[ hits[i] ]->seedSplit( nodes_, coords[i] );
-//                }
-//                node->addEdge( nodes_[ hits[i] ], 0 );
-//            }
-//        }
-//        else if ( hits.size() == 1 )
-//        {
-//            nodes_[ hits[0] ]->seedAdd( read );
-//        }
-//        else
-//        {
-//            Node* node = new Node( read );
-//            nodes_.push_back( node );
-//        }
-//    }
-//    
-//    bool anyGood = false;
-//    for ( Node* node : nodes_ ) if ( node->reads_.size() > 2 ) anyGood = true;
-//    
-//    for ( int i = 0; i < nodes_.size(); )
-//    {
-//        bool doErase = anyGood 
-//                &&( nodes_[i]->seq_.length() < params.readLen || nodes_[i]->reads_.size() <= 2 )
-//                && nodes_[i]->edges_[0].empty() 
-//                && nodes_[i]->edges_[1].empty();
-////        for ( bool drxn : { 0, 1 } )
-////        {
-////            if ( !nodes_[i]->edges_[drxn].empty() || nodes_[i]->edges_[!drxn].empty() || doErase ) continue;
-////            int readCounts[2] = { (int)nodes_[i]->reads_.size(), 0 };
-////            if ( readCounts[0] > 1 ) continue;
-////            NodeSet fwdSet;
-////            for ( Node* prv : nodes_[i]->getNextNodes( !drxn ) ) prv->getDrxnNodes( fwdSet, drxn );
-////            for ( Node* fwd : fwdSet )
-////            {
-////                if ( fwd == nodes_[i] ) continue;
-////                readCounts[1] += fwd->reads_.size();
-////            }
-////            doErase = readCounts[1] > readCounts[0] * 5;
-////        }
-//        if ( doErase )
-//        {
-//            nodes_[i]->dismantleNode();
-//            delete nodes_[i];
-//            nodes_.erase( nodes_.begin() + i );
-//        }
-//        else i++;
-//    }
-//    
-//    for ( Node* node : nodes_ )
-//    {
-//        for ( int i = 0; i < redundant.size(); i++ )
-//        {
-//            if ( !redundant[i] ) continue;
-//            size_t it = node->seq_.find( ms.reads[i].seq );
-//            if ( it == node->seq_.npos ) continue;
-//            node->addRead( ms.reads[i].readId, node->ends_[0] + it, node->ends_[0] + it + ms.reads[i].seq.length(), true );
-//        }
-//        node->resetMarks();
-//        node->setCoverage();
-////        cout << string( node->ends_[0] + params.readLen, '-' ) << node->seq_ << endl;
-//        ends_[0] = min( ends_[0], node->ends_[0] );
-//        ends_[1] = max( ends_[1], node->ends_[1] );
-//        validLimits_[0] = min( validLimits_[0], node->validLimits_[1] );
-//        validLimits_[1] = max( validLimits_[1], node->validLimits_[2] );
-//    }
+}
+
+Seed::Seed( string fn, Querier &bwt )
+: bwt_( bwt )
+{
+    LocusImport( seed_, fn );
+    seed_.summarise();
+    Node::reverify( seed_ );
+    SeedExtend seed[2];
+    restart( seed );
+    assert( false );
 }
 
 void Seed::assemble()
 {
-    vector<SeedFork> forks[2];
-    for ( Node* node : seed_.nodes ) for ( int d : { 0, 1 } ) if ( node->isContinue( d ) ) forks[d].push_back( SeedFork( node, NULL ) );
-    for ( int d = 0; d < 2; d++ ) while ( SeedFork::extend( forks[d], bwt_, seed_, true, d ) );
+    SeedExtend seed[2];
+    for ( Node* node : seed_.nodes ) for ( int d : { 0, 1 } ) if ( node->isContinue( d ) ) seed[d].addFork( node );
+    for ( int d : { 0, 1 } ) while ( seed[d].extend( bwt_, seed_, true, d ) );
     
     for ( bool good = true; good; )
     {
-        for ( int d : { 0, 1 } ) while ( SeedFork::extend( forks[d], bwt_, seed_, false, d ) );
+        for ( int d : { 0, 1 } ) while ( seed[d].extend( bwt_, seed_, false, d ) );
         Node::prune( bwt_, seed_ );
-        if ( !restart( forks ) ) break;
+        if ( !restart( seed ) ) break;
     }
 }
 
-bool Seed::extend( NodeRoll &exts, bool drxn )
+bool Seed::restart( SeedExtend seed[2] )
 {
-    for ( Node* node : exts.nodes ) node->extendNode( bwt_, seed_, drxn );
-    Nodes fwdSet( exts.nodes, drxn, true );
-    exts.clear();
-    for ( Node* fwd : fwdSet.nodes ) if ( fwd->isContinue( drxn ) ) exts.add( fwd );
-    return !exts.empty() && exts.nodes.size() < 20;
-}
-
-bool Seed::restart( vector<SeedFork> forks[2] )
-{
-    forks[0].clear();
-    forks[1].clear();
-    vector< vector<NodePath> > paths = NodePath::create( seed_ );
-    for ( vector<NodePath>& path : paths )
+    for ( int d : { 0, 1 } ) seed[d].reset();
+    
+    vector<NodePath*> seeds, paths, stops[2], branches[2];
+    Node::verify( seed_ );
+    Node::prune( bwt_, seed_ );
+    for ( int again = 1; again-- > 0; )
     {
-        for ( int d = 0; d < 1; d++ )
-        {
-            SeedFork fork( NULL, NULL );
-            if ( fork.restart( bwt_, seed_, ( d ? path.back() : path[0] ).path_, d ) ) forks[d].push_back( fork );
-        }
+        NodePath::create( bwt_, seed_, seeds, paths );
+        NodePath::print( paths );
+        if ( again = PathCross::resolve( paths, seed_ ) ) Node::reverify( seed_ );
     }
     
-    seed_.test();
-    assert( !forks[0].empty() || !forks[1].empty() );
-    return !forks[0].empty() || !forks[1].empty();
+    unordered_set<NodePath*> used;
+    for ( int d : { 0, 1 } )
+    {
+        unordered_set<NodePath*> pathed;
+        for ( NodePath* np : seeds ) np->setEnds( pathed, stops[d], d );
+        used.insert( pathed.begin(), pathed.end() );
+    }
+    
+    Bud::bud( bwt_, seed_, stops[0], 0 );
+    Bud::bud( bwt_, seed_, stops[1], 1 );
+    
+    int i = 0;
+    for ( Node* node : seed_.nodes ) if ( node->ends_[0] > 1100 )
+    {
+        cout << ">" << ++i << ") Coords: " << node->ends_[0] << " - " << node->ends_[1] << ", Edges: " << node->edges_[0].size() << " - "<< node->edges_[1].size() << string( node->bad_ ? " BAD" : "" ) << string( node->isContinue( 1 ) ? " UNENDED" : "" ) << endl;
+        cout << string( node->ends_[0] - 1100, '-' ) << node->seq_ << endl;
+    }
+    assert( false );
+    
+//    vector< vector<NodesPath*> > alleles;
+//    for ( NodesPath* seed : seeds ) alleles.push_back( PathMapping::map( seed ) );
+//    
+//    for ( vector<NodesPath*>& allele : alleles )
+//    {
+//        for ( NodesPath* np : allele ) used.insert( np );
+//        stops[0].insert( allele[0] );
+//        stops[1].insert( allele.back() );
+//    }
+//    for ( int d : { 0, 1 } ) for ( NodesPath* np : used )
+//    {
+//        for ( PathEdge* pe : np->edges_[d] ) if ( used.find( pe->edge[d] ) == used.end() ) branches[d].insert( pe->edge[d] );
+//        for ( PathEdge* pe : np->breaks_[d] ) if ( used.find( pe->edge[d] ) == used.end() ) branches[d].insert( pe->edge[d] );
+//    }
+    vector<Node*> ends[2];
+    Nodes extable[2], leapable[2];
+    for ( int d : { 0, 1 } ) for ( NodePath* np : branches[d] ) np->setBranch( used, extable[d], leapable[d], d );
+    for ( int d : { 0, 1 } ) for ( NodePath* np : stops[d] ) ends[d].push_back( np->getEnd( bwt_, seed_, used, d ) );
+    for ( int d : { 0, 1 } ) for ( Node* node : leapable[d].nodes ) Leap::leapBranch( bwt_, seed_, node, d );
+    for ( int d : { 0, 1 } ) for ( Node* node : ends[d] ) if ( node ) seed[d].addFork( node );
+    for ( int d : { 0, 1 } ) for ( Node* node : extable[d].nodes ) seed[d].addAlt( node );
+    
+    for ( NodePath* np : paths ) delete np;
+    
+    return !seed[0].empty() || !seed[1].empty();
 }
 
 //void Seed::assemble()

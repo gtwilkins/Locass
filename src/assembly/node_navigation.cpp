@@ -607,6 +607,7 @@ void Node::setOffsetMap( NodeIntMap &offsets, NodeSet useSet, int32_t limit, boo
 bool Node::setBad( bool drxn )
 {
     if ( drxn != drxn_ ) return false;
+    if ( bad_ ) return true;
     bad_ = true;
     for ( Edge &e : edges_[!drxn] ) if ( !e.node->bad_ && ( e.node->drxn_ == 2 || e.node->drxn_ == drxn_ ) ) bad_ = false;
     if ( bad_ ) verified_ = branch_ = false;
@@ -617,19 +618,29 @@ bool Node::setBad( bool drxn )
 void Node::setNotBad( bool drxn )
 {
     if ( !bad_ ) return;
-    bad_ = false;
-    if ( drxn != drxn_ && drxn_ < 2 )
+    assert( drxn_ < 2 );
+    for ( Edge &e : edges_[!drxn] ) if ( !e.node->bad_ && ( e.node->drxn_ == drxn || e.node->drxn_ >= 2 ) )
     {
-        for ( Edge &e : edges_[!drxn] )
-        {
-            if ( e.node->bad_ || e.node->drxn_ == drxn_ ) continue;
-            int32_t off = drxn ? e.node->ends_[1] - e.ol - ends_[0] : e.node->ends_[0] - ends_[1] + e.ol;
-            offset( off );
-            drxn_ = drxn;
-            break;
-        }
+        bad_ = false;
         drxn_ = drxn;
+        int32_t off = drxn ? e.node->ends_[1] - e.ol - ends_[0] : e.node->ends_[0] - ends_[1] + e.ol;
+        offset( off );
+        break;
     }
+    assert( !bad_ );
+    if ( bad_ ) return;
+//    if ( drxn != drxn_ && drxn_ < 2 )
+//    {
+//        for ( Edge &e : edges_[!drxn] )
+//        {
+//            if ( e.node->bad_ || e.node->drxn_ == drxn_ ) continue;
+//            int32_t off = drxn ? e.node->ends_[1] - e.ol - ends_[0] : e.node->ends_[0] - ends_[1] + e.ol;
+//            offset( off );
+//            drxn_ = drxn;
+//            break;
+//        }
+//        drxn_ = drxn;
+//    }
     ends_.init( ends_[!drxn_] );
     clearPaired( true );
     for ( Edge &e : edges_[drxn] ) e.node->setNotBad( drxn );
@@ -638,17 +649,19 @@ void Node::setNotBad( bool drxn )
 bool Node::setState()
 {
     if ( drxn_ >= 2 ) return false;
-    bool base = bad_, updated = false;
+    bool base = bad_, updated = false, reversed = false;;
     bad_ = true;
     for ( Edge& e : edges_[!drxn_] ) if ( !e.node->bad_ && e.node->drxn_ != !drxn_ ) bad_ = false;
     if ( bad_ ) for ( Edge& e : edges_[drxn_] ) if ( !e.node->bad_ && e.node->drxn_ != drxn_ )
     {
         drxn_ = !drxn_;
         bad_ = false;
+        reversed = true;
         break;
     }
     if ( verified_ ) confirmVerified();
     if ( !bad_ && bad_ != base ) reverify();
     for ( Edge& e : edges_[drxn_] ) if ( e.node->bad_ != bad_ && e.node->setState() ) updated = true;
+    if ( reversed ) for ( Edge& e : edges_[!drxn_] ) if ( e.node->drxn_ == !drxn_ && e.node->setState() ) updated = true;
     return updated || bad_ != base;
 }

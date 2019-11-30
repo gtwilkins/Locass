@@ -158,6 +158,7 @@ Node::Node( Node* toClone, NodeRoll& nodes, int graph, bool bad )
     else toClone->cloned_ = new NodeRoll( this );
     drxn_ = graph;
     bad_ = bad;
+    mapped_ = toClone->mapped_;
     ends_[0] = toClone->ends_[0];
     ends_[1] = toClone->ends_[1];
     ends_.origin[0] = toClone->ends_.origin[0];
@@ -291,6 +292,17 @@ Node::Node( string seq, ReadId id, int32_t estimate, int drxn )
     setCoverage();
 }
 
+Node::Node( string seq, ReadId id, int32_t estimate, int drxn, bool bad )
+: Node( seq )
+{
+    drxn_ = drxn;
+    ends_[0] = estimate;
+    ends_[1] = estimate + seq.size();
+    ends_.init( ends_[!drxn] );
+    add( id, ends_[0], ends_[1], false );
+    bad_ = bad;
+}
+
 Node::~Node()
 {
     for ( int d : { 0, 1 } ) for ( Edge &e : edges_[d] ) e.node->removeEdge( this, !d );
@@ -379,6 +391,23 @@ void Node::pairTest()
     }
 }
 
+void Node::addCloned( Node* clone )
+{
+    assert( !clone->cloned_ );
+    assert( size() == clone->size() );
+    clone->cloned_ = new NodeRoll( this );
+    if ( !cloned_ ) cloned_ = new NodeRoll;
+    for ( Node* alt : cloned_->nodes )
+    {
+        *alt->cloned_ += clone;
+        *clone->cloned_ += alt;
+    }
+    *cloned_ += clone;
+    for ( Node* alt : cloned_->nodes ) assert( alt->cloned_->size() == cloned_->size() );
+    for ( auto& read : reads_ ) assert( clone->reads_.find( read.first ) != clone->reads_.end() );
+    assert( reads_.size() == clone->reads_.size() );
+}
+
 void Node::addEdge( Node* node, bool drxn )
 {
     int overlap = abs( ends_[drxn] - node->ends_[!drxn] );
@@ -424,7 +453,7 @@ void Node::addEdge( Edge edge, bool drxn, bool reciprocate )
         return;
     }
     edges_[drxn].push_back( edge );
-    if ( reciprocate ) edge.node->addEdge( Edge( this, edge.ol, edge.isLeap ), !drxn, false );
+    if ( reciprocate ) edge.node->addEdge( Edge( this, edge.ol, edge.leap ), !drxn, false );
 }
 
 void Node::blankEnd( int32_t len, bool drxn )
@@ -461,14 +490,14 @@ vector<Node*> Node::clones( bool inclSelf )
     return nodes;
 }
 
-int Node::countEdges( bool drxn, bool inclClones )
-{
-    if ( !inclClones || !cloned_ ) return edges_[drxn].size();
-    Nodes edges;
-    for ( Edge& e : edges_[drxn] ) edges += e.node;
-    for ( Node* clone : cloned_->nodes ) for ( Edge& e : clone->edges_[drxn] ) edges += e.node;
-    return edges.size();
-}
+//int Node::countEdges( bool drxn, bool inclClones )
+//{
+//    if ( !inclClones || !cloned_ ) return edges_[drxn].size();
+//    Nodesx edges;
+//    for ( Edge& e : edges_[drxn] ) edges += e.node;
+//    for ( Node* clone : cloned_->nodes ) for ( Edge& e : clone->edges_[drxn] ) edges += e.node;
+//    return edges.size();
+//}
 
 bool Node::deleteTest( bool drxn )
 {
@@ -578,41 +607,41 @@ vector<Edge> Node::edges( bool drxn )
     return edges_[drxn];
 }
 
-vector<Edge> Node::getAltEdges( bool drxn )
-{
-    vector<Edge> edges;
-    for ( Node* alt : getAltForks( drxn ) )
-    {
-        for ( Edge& e : alt->edges_[drxn] )
-        {
-            bool added = false;
-            for ( int i = 0; !added && i < edges.size(); i++ ) added = e.node == edges[i].node;
-            if ( !added ) edges.push_back( e );
-        }
-    }
-    return edges;
-}
+//vector<Edge> Node::getAltEdges( bool drxn )
+//{
+//    vector<Edge> edges;
+//    for ( Node* alt : getAltForks( drxn ) )
+//    {
+//        for ( Edge& e : alt->edges_[drxn] )
+//        {
+//            bool added = false;
+//            for ( int i = 0; !added && i < edges.size(); i++ ) added = e.node == edges[i].node;
+//            if ( !added ) edges.push_back( e );
+//        }
+//    }
+//    return edges;
+//}
 
-vector<Node*> Node::getAltForks( bool drxn )
-{
-    vector<Node*> nodes{ this };
-    if ( !cloned_ ) return nodes;
-    
-    if ( edges_[drxn].empty() )
-    {
-        for ( Node* clone : cloned_->nodes ) nodes.push_back( clone );
-    }
-    else if ( edges_[!drxn].empty() )
-    {
-        for ( Node* clone : cloned_->nodes ) if ( !clone->edges_[drxn].empty() ) nodes.push_back( clone );
-    }
-    else 
-    {
-        for ( Node* clone : cloned_->nodes ) if ( clone->edges_[!drxn].empty() ) nodes.push_back( clone );
-    }
-    
-    return nodes;
-}
+//vector<Node*> Node::getAltForks( bool drxn )
+//{
+//    vector<Node*> nodes{ this };
+//    if ( !cloned_ ) return nodes;
+//    
+//    if ( edges_[drxn].empty() )
+//    {
+//        for ( Node* clone : cloned_->nodes ) nodes.push_back( clone );
+//    }
+//    else if ( edges_[!drxn].empty() )
+//    {
+//        for ( Node* clone : cloned_->nodes ) if ( !clone->edges_[drxn].empty() ) nodes.push_back( clone );
+//    }
+//    else 
+//    {
+//        for ( Node* clone : cloned_->nodes ) if ( clone->edges_[!drxn].empty() ) nodes.push_back( clone );
+//    }
+//    
+//    return nodes;
+//}
 
 int32_t Node::getBiggestOffset( bool drxn )
 {
@@ -624,19 +653,12 @@ int32_t Node::getBiggestOffset( bool drxn )
     return biggest;
 }
 
-int Node::getBestOverlap( bool drxn )
+int Node::getBestOverlap( bool drxn, bool inclClones )
 {
-    int overlap = 0;
-    bool isSet = false;
-    for ( Edge &edge : edges_[drxn] )
-    {
-        if ( !isSet || edge.ol > overlap )
-        {
-            overlap = edge.ol;
-            isSet = true;
-        }
-    }
-    return overlap;
+    int ol = edges_[drxn].empty() ? 0 : edges_[drxn][0].ol;
+    for ( int i = 1; i < edges_[drxn].size(); i++ ) ol = max( ol, edges_[drxn][i].ol );
+    if ( inclClones && cloned_ ) for ( Node* clone : cloned_->nodes ) ol = max( ol, clone->getBestOverlap( drxn, false ) );
+    return ol;
 }
 
 NodeRoll Node::getDependent()
@@ -650,16 +672,10 @@ NodeRoll Node::getDependent()
     return nodes;
 }
 
-Edge Node::getEdge( Node* node, bool drxn, bool inclSelfClone, bool inclEdgeClone )
+Edge Node::getEdge( Node* node, bool drxn )
 {
-    Edge found( NULL, 0, false );
-    for ( Edge e : edges_[drxn] )
-    {
-        if ( inclEdgeClone && e.node->cloned_ && e.node->cloned_->find( node ) ) e.node = node;
-        if ( e.node == node ) return e;
-    }
-    if ( inclSelfClone && cloned_ ) for ( Node* clone : cloned_->nodes ) if ( !found.node ) found = clone->getEdge( node, drxn, false, inclEdgeClone );
-    return found;
+    for ( Edge e : edges_[drxn] ) if ( e.node == node ) return e;
+    return Edge( NULL, 0, false );
 }
 
 int32_t Node::getFurthest( int32_t q, int32_t t, bool drxn )
@@ -697,6 +713,18 @@ string Node::getHeader( string header )
     return header;
 }
 
+int32_t Node::getLen( vector<Node*>& path )
+{
+    int32_t len = path[0]->size();
+    for ( int i = 1; i < path.size(); i++ )
+    {
+        Edge e = path[i]->getEdge( path[i-1], 0 );
+        assert( e.node && e.ol > 0 );
+        len += path[i]->size() - e.ol;
+    }
+    return len;
+}
+
 int32_t Node::getLength()
 {
     int32_t len = ends_[1] - ends_[0];
@@ -717,6 +745,18 @@ int Node::getOverlap( Node* node, bool drxn )
         }
     }
     return overlap;
+}
+
+string Node::getSeq( vector<Node*>& path )
+{
+    string seq = path[0]->seq_;
+    for ( int i = 1; i < path.size(); i++ )
+    {
+        Edge e = path[i]->getEdge( path[i-1], 0 );
+        assert( e.node && e.ol > 0 );
+        seq += path[i]->seq_.substr( e.ol );
+    }
+    return seq;
 }
 
 string Node::getSeqEnd( int len, bool drxn )
@@ -804,6 +844,13 @@ bool Node::isBeyond( int32_t bgn, int32_t nd, bool drxn )
 bool Node::isClone( Node* node )
 {
     return node == this || ( cloned_ && cloned_->find( node ) );
+}
+
+bool Node::isClone( vector<Node*>& path, int i, bool drxn )
+{
+    if ( !isClone( drxn ? path[i] : path.end()[-i-1] ) ) return false;
+    if ( ++i < path.size() ) for ( Edge& e : edges_[drxn] ) if ( e.node->isClone( path, i, drxn ) ) return true;
+    return i >= path.size();
 }
 
 bool Node::isContinue( bool drxn )

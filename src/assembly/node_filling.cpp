@@ -409,8 +409,8 @@ void Node::mergeAll( NodeList* nodes, NodeSet &delSet )
                 NodeList eNodes;
                 for ( Edge &e : node->edges_[j] )
                 {
-                    if ( e.ol <= 0 ) e.isLeap = true;
-                    if ( e.isLeap ) continue;
+                    if ( e.ol <= 0 ) e.leap = true;
+                    if ( e.leap ) continue;
                     Node* x[2];
                     x[0] = j ? node : e.node;
                     x[1] = j ? e.node : node;
@@ -421,7 +421,7 @@ void Node::mergeAll( NodeList* nodes, NodeSet &delSet )
                         assert( false );
                         if ( !ol )
                         {
-                            e.isLeap = true;
+                            e.leap = true;
                             continue;
                         }
                         eNodes.push_back( e.node );
@@ -451,76 +451,76 @@ void Node::mergeAll( NodeList* nodes, NodeSet &delSet )
     }
 }
 
-Node* Node::merge( bool drxn )
-{
-    if ( edges_[drxn].size() != 1 ) return NULL;
-    Edge& e = edges_[drxn][0];
-    if ( e.ol <= 0 ) e.isLeap = true;
-    if ( e.isLeap || e.node->edges_[!drxn].size() != 1 ) return NULL;
-    if ( e.node->cloned_ ) return NULL;
-    if ( cloned_ ) for ( Node* c : cloned_->nodes ) if ( !c->edges_[drxn].empty() ) return NULL;
-    
-    Node* node = e.node,* l = drxn ? this : e.node, * r = drxn ? e.node : this;
-    if ( !bad_ && node->bad_ ) claimGood( drxn );
-    if ( bad_ && !node->bad_ ) node->claimGood( !drxn );
-    
-    int32_t off = drxn ? ends_[1] - e.ol - node->ends_[0] : ends_[0] - node->ends_[1] + e.ol;
-    node->offset( off );
-    if ( node->drxn_ >= 2 ) drxn_ = node->drxn_;
-    bad_ = bad_ && node->bad_;
-    mapped_ = mapped_ && node->mapped_;
-    ends_.merge( node->ends_ );
-    
-    clearPaired( false );
-    node->clearPaired( false );
-    verified_ = false;
-    string lSeq = l->seq_.substr( l->seq_.length() - e.ol );
-    string rSeq = r->seq_.substr( 0, e.ol );
-    assert( lSeq == rSeq );
-
-    string seq = l->seq_ + r->seq_.substr( e.ol, r->seq_.length() );
-    seq_ = seq;
-    stop_[drxn] = node->stop_[drxn];
-
-    clearEdges( drxn );
-    for ( Edge &edge : node->edges_[drxn] )
-    {
-        edge.node->removeEdge( node, !drxn );
-        addEdge( edge.node, edge.ol, drxn, false, edge.isLeap );
-    }
-    node->clearEdges( drxn );
-    assert( ends_[1] - ends_[0] == seq_.length() ); 
-
-    reads_.insert( node->reads_.begin(), node->reads_.end() );
-    setCoverage();
-    remark();
-    readTest();
-    
-    if ( !cloned_ ) return node;
-    
-    for ( Node* c : cloned_->nodes )
-    {
-        c->seq_ = seq_;
-        c->clearPaired( false );
-        c->verified_ = false;
-        c->ends_[drxn] = drxn ? c->ends_[0] + size() : c->ends_[1] - size();
-        c->reads_ = reads_;
-        off = c->ends_[0] - ends_[0];
-        for ( auto& read : c->reads_ ) read.second.offset( off );
-        c->setCoverage();
-        c->remark();
-        c->readTest();
-    }
-    
-    return node;
-}
+//Node* Node::merge( bool drxn )
+//{
+//    if ( edges_[drxn].size() != 1 ) return NULL;
+//    Edge& e = edges_[drxn][0];
+//    if ( e.ol <= 0 ) e.isLeap = true;
+//    if ( e.isLeap || e.node->edges_[!drxn].size() != 1 ) return NULL;
+//    if ( e.node->cloned_ ) return NULL;
+//    if ( cloned_ ) for ( Node* c : cloned_->nodes ) if ( !c->edges_[drxn].empty() ) return NULL;
+//    
+//    Node* node = e.node,* l = drxn ? this : e.node, * r = drxn ? e.node : this;
+//    if ( !bad_ && node->bad_ ) claimGood( drxn );
+//    if ( bad_ && !node->bad_ ) node->claimGood( !drxn );
+//    
+//    int32_t off = drxn ? ends_[1] - e.ol - node->ends_[0] : ends_[0] - node->ends_[1] + e.ol;
+//    node->offset( off );
+//    if ( node->drxn_ >= 2 ) drxn_ = node->drxn_;
+//    bad_ = bad_ && node->bad_;
+//    mapped_ = mapped_ && node->mapped_;
+//    ends_.merge( node->ends_ );
+//    
+//    clearPaired( false );
+//    node->clearPaired( false );
+//    verified_ = false;
+//    string lSeq = l->seq_.substr( l->seq_.length() - e.ol );
+//    string rSeq = r->seq_.substr( 0, e.ol );
+//    assert( lSeq == rSeq );
+//
+//    string seq = l->seq_ + r->seq_.substr( e.ol, r->seq_.length() );
+//    seq_ = seq;
+//    stop_[drxn] = node->stop_[drxn];
+//
+//    clearEdges( drxn );
+//    for ( Edge &edge : node->edges_[drxn] )
+//    {
+//        edge.node->removeEdge( node, !drxn );
+//        addEdge( edge.node, edge.ol, drxn, false, edge.isLeap );
+//    }
+//    node->clearEdges( drxn );
+//    assert( ends_[1] - ends_[0] == seq_.length() ); 
+//
+//    reads_.insert( node->reads_.begin(), node->reads_.end() );
+//    setCoverage();
+//    remark();
+//    readTest();
+//    
+//    if ( !cloned_ ) return node;
+//    
+//    for ( Node* c : cloned_->nodes )
+//    {
+//        c->seq_ = seq_;
+//        c->clearPaired( false );
+//        c->verified_ = false;
+//        c->ends_[drxn] = drxn ? c->ends_[0] + size() : c->ends_[1] - size();
+//        c->reads_ = reads_;
+//        off = c->ends_[0] - ends_[0];
+//        for ( auto& read : c->reads_ ) read.second.offset( off );
+//        c->setCoverage();
+//        c->remark();
+//        c->readTest();
+//    }
+//    
+//    return node;
+//}
 
 void Node::mergeDrxn( NodeSet &delSet, bool drxn )
 {
     while ( edges_[drxn].size() == 1 )
     {
-        if ( edges_[drxn][0].ol <= 0 ) edges_[drxn][0].isLeap = true;
-        if ( edges_[drxn][0].isLeap ) return;
+        if ( edges_[drxn][0].ol <= 0 ) edges_[drxn][0].leap = true;
+        if ( edges_[drxn][0].leap ) return;
         Node* node = edges_[drxn][0].node;
         if ( clones_ || node->clones_ || dontExtend_ || node->dontExtend_ ) return;
         int ol = edges_[drxn][0].ol;
@@ -555,7 +555,7 @@ void Node::mergeDrxn( NodeSet &delSet, bool drxn )
         for ( Edge &e : node->edges_[drxn] )
         {
             e.node->removeEdge( node, !drxn );
-            addEdge( e.node, e.ol, drxn, false, e.isLeap );
+            addEdge( e.node, e.ol, drxn, false, e.leap );
         }
         assert( ends_[1] - ends_[0] == seq_.length() ); 
         int32_t x[2] = { node->ends_[1], node->ends_[0] };
@@ -691,23 +691,26 @@ void Node::remap( Querier& bwt, NodeRoll& nodes )
     for ( Node* node : remapped.nodes ) node->setVerified();
 }
 
-void Node::remap( Querier &bwt )
+bool Node::remap( Querier &bwt )
 {
+    if ( mapped_ ) return false;
     vector<ReadId> ids;
     vector<int32_t> coords[2];
     bwt.mapSequence( seq_, ids, coords );
     int remapped = 0;
-    for ( int i = 0; i < ids.size(); i++ )
+    for ( int i = 0; i < ids.size(); i++ ) if ( reads_.find( ids[i] ) == reads_.end() )
     {
-        if ( reads_.find( ids[i] ) != reads_.end() ) continue;
-        add( ids[i], ends_[0] + coords[0][i], ends_[0] + coords[1][i], true );
-        if ( cloned_ ) for ( Node* clone : cloned_->nodes ) clone->add( ids[i], clone->ends_[0] + coords[0][i], clone->ends_[0] + coords[1][i], true );
+        bool redundant = isRedundant( ends_[0] + coords[0][i], ends_[0] + coords[1][i] );
+        add( ids[i], ends_[0] + coords[0][i], ends_[0] + coords[1][i], redundant );
+        if ( cloned_ ) for ( Node* clone : cloned_->nodes ) clone->add( ids[i], clone->ends_[0] + coords[0][i], clone->ends_[0] + coords[1][i], redundant );
         remapped++;
     }
+    if ( !remapped ) return false;
     setCoverage();
     mapped_ = true;
     if ( cloned_ ) for ( Node* clone : cloned_->nodes ) clone->mapped_ = true;
     cout << "Remapped " << reads_.size() << " " << remapped << endl;
+    return true;
 }
 
 bool Node::remap( NodeRoll& tar )

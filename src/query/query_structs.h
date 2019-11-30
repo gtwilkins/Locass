@@ -75,5 +75,12 @@ struct CorrectionStruct
     bool overabundant, error, fork;
 };
 
+struct QueryBranch
+{
+    QueryBranch( CharId rank, CharId count, int i, int ol ): rank( rank ), count( count ), i ( i ), ol( ol ){};
+    CharId rank, count;
+    int i, ol;
+};
+
 #endif /* QUERY_STRUCTS_H */
 

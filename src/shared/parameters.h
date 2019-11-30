@@ -27,7 +27,7 @@ struct Lib {
     Lib() : size( 0 ), minDist( 0 ), maxDist( 0 ), orientation( 0 ), isPe( false ) {};
     bool doAddMarker( bool thisRev, int &pairRev, bool drxn );
     int getPair( ReadId &readId );
-    bool getPair( ReadId &readId, int32_t dist, int &pairDrxn );
+    bool getPair( ReadId &readId, int &pairDrxn );
     void setMinMax();
     
     int32_t size, minDist, maxDist;
@@ -47,7 +47,7 @@ struct Parameters {
     int32_t getFurthestMpMean( int32_t coord, bool drxn );
     int32_t getFurthestPeMean( int32_t coord, bool drxn );
     Lib* getLib( const ReadId &readId );
-    int32_t getLibSize( ReadId &readId );
+    int32_t getLibSize( ReadId readId );
     ReadId getPairId( const ReadId readId );
     ReadId getRevId( const ReadId readId );
     void set();

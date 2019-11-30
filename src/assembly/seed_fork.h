@@ -19,11 +19,32 @@
 #include "node_structs.h"
 #include "node_path.h"
 
-struct AltFork
+struct ExtendBranch
 {
-    AltFork( Node* branch );
-    static void add( vector<AltFork>& alts, Node* node );
-    static void confirm( vector<AltFork>& alts, NodeRoll& nodes, Nodes& bck, bool drxn );
+    ExtendBranch( Node* node, Nodes& fwd, bool drxn );
+    ExtendBranch( Node* node, bool drxn );
+    Node* node;
+    Nodes branch;
+    int score;
+};
+
+struct ExtendScores
+{
+    ExtendScores( Node* node, bool drxn );
+    ExtendScores( Nodes& loop, bool drxn );
+    void add( Node* node, bool drxn );
+    vector<ExtendBranch> branch( Node* node, bool drxn );
+    vector<ExtendBranch> branch( Nodes& loop, bool drxn );
+    int get( Node* node );
+    unordered_map<Node*, int> scores;
+    Nodes added, pathed;
+};
+
+struct ExtendAlt
+{
+    ExtendAlt( Node* branch );
+    static void add( vector<ExtendAlt>& alts, Node* node );
+    static void confirm( vector<ExtendAlt>& alts, NodeRoll& nodes, Nodes& bck, bool drxn );
     bool get( Querier &bwt, NodeRoll &nodes, NodeRoll& ext, bool drxn );
     vector< pair<Node*, int> > get( Querier &bwt, NodeRoll &nodes, int32_t cutoff, bool drxn );
 //    bool prune( Querier &bwt, NodeRoll &nodes, bool drxn );
@@ -32,25 +53,39 @@ struct AltFork
     bool stopped;
 };
 
-class SeedFork
+struct ExtendFork
 {
-public:
-    SeedFork( Node* a, Node* b );
-    bool advance( bool drxn );
-    bool advance( Node*& node, Node*& alt, NodeScores &scores, bool advanced, bool drxn );
+    ExtendFork( Node* a, Node* b );
+    bool advance( vector<ExtendAlt>& alts, bool drxn );
+//    bool advance( vector<ExtendAlt>& alts, int i, ExtendScores& scores, bool advanced, bool drxn );
+//    bool advance( Node*& node, Node*& alt, vector<ExtendAlt>& alts, NodeScores &scores, bool advanced, bool drxn );
 //    bool cull( Querier &bwt, NodeRoll &nodes, Nodes& bck, bool priming, bool drxn );
-    static bool extend( vector<SeedFork> &forks, Querier &bwt, NodeRoll &nodes, bool priming, bool drxn );
+//    static bool extend( vector<ExtendFork> &forks, vector<ExtendAlt>& alts, Querier &bwt, NodeRoll &nodes, bool priming, bool drxn );
 //    bool getAlts( Querier& bwt, NodeRoll& nodes, NodeRoll &ext, Nodes& bck, bool drxn );
-    bool getAlt( Querier& bwt, NodeRoll& nodes, NodeRoll &ext, Nodes& bck, bool drxn );
+//    bool getAlt( Querier& bwt, NodeRoll& nodes, NodeRoll &ext, Nodesx& bck, bool drxn );
 //    static Nodes getBack( vector<SeedFork> &forks, bool drxn );
-    bool getExt( NodeRoll &ext, Nodes& bck, bool priming, bool drxn, bool first=true );
+    bool get( NodeRoll &ext, vector<ExtendAlt>& alts, Nodes& bck, bool priming, bool drxn, bool first=true );
+    bool getLoop( NodeRoll &ext, vector<ExtendAlt>& alts, Nodes& bck, bool drxn );
 //    bool getSide( NodeRoll &ext, Nodes& bck, bool drxn );
-    bool restart( Querier& bwt, NodeRoll& nodes, vector<Node*> path[2], bool drxn );
+    bool isLoop( bool drxn );
+//    bool restart( Querier& bwt, NodeRoll& nodes, vector<Node*> path[2], bool drxn );
 //    void test( Querier &bwt, NodeRoll &nodes, bool drxn );
-    Node* branch[2];
+    Node* branch[2],* loop[2];
 //    NodeRoll sides;
-    vector<AltFork> alts;
     int lastExt, impatience, gen;
+};
+
+class SeedExtend
+{
+    vector<ExtendFork> forks;
+    vector<ExtendAlt> alts;
+    int gen;
+public:
+    void addAlt( Node* node );
+    void addFork( Node* node );
+    bool empty();
+    bool extend( Querier& bwt, NodeRoll& nodes, bool priming, bool drxn );
+    void reset();
 };
 
 

@@ -35,15 +35,19 @@ SRCS =  \
 	transform_binary.cpp \
 	parameters.cpp \
 	shared_functions \
+	leap.cpp \
 	local_alignment.cpp \
-	locus_export.cpp \
-	locus_pathing_structs.cpp \
-	locus_fill.cpp \
 	locus.cpp \
-	locus_pathing.cpp \
-	locus_extension.cpp \
 	locus_calibration.cpp \
+	locus_export.cpp \
+	locus_extension.cpp \
+	locus_fill.cpp \
+	locus_gap.cpp \
 	locus_leaping.cpp \
+	locus_path.cpp \
+	locus_pathing.cpp \
+	locus_pathing_structs.cpp \
+	locus_port.cpp \
 	node.cpp \
 	node_bridging.cpp \
 	node_calibration.cpp \
@@ -75,11 +79,14 @@ SRCS =  \
 	node_structs.cpp \
 	node_validation.cpp \
 	node_verify.cpp \
+	path_alleles.cpp \
+	path_cross.cpp \
 	path_merge.cpp \
 	path_reassembly.cpp \
 	path_review.cpp \
 	path_seed.cpp \
 	path_sequence.cpp \
+	prune_bubble.cpp \
 	query.cpp \
 	query_binary.cpp \
 	query_extension.cpp \

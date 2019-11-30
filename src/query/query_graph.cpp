@@ -146,7 +146,7 @@ void QueryNode::addEdge( QueryNode* qn )
 
 bool QueryNode::confirm()
 {
-    if ( len ) return true;;
+    if ( len ) return true;
     for ( QueryNode* edge : edges[1] ) if ( edge->confirm() ) return true;
     if ( edges[0].empty() ) delete this;
     return false;
