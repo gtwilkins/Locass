@@ -24,10 +24,7 @@
 
 void Node::addClone( Node* node, bool isFirst )
 {
-    if ( !clones_ )
-    {
-        clones_ = new NodeList;
-    }
+    if ( !clones_ ) clones_ = new NodeList;
     if ( isFirst )
     {
         node->addClone( this, false );
@@ -59,61 +56,23 @@ bool Node::anyCloneInSet( NodeSet &nodeSet )
     return false;
 }
 
-//void Node::cloneNode( NodeList &nodes, bool drxn )
-//{
-//    Node* clone = new Node( this );
-//    nodes.push_back( clone );
-//    for ( Edge &e : edges_[!drxn] )
-//    {
-//        e.node->addEdge( clone, e.overlap, drxn, true, e.isLeap );
-//    }
-//}
+void Node::declone( Node* cull, NodeRoll& nodes )
+{
+    assert( cloned_ && cloned_->find( cull ) );
+    for ( int d : { 0, 1 } ) for ( Edge& e : cull->edges_[d] ) addEdge( e.node, e.ol, d, false, e.leap );
+    nodes.erase( cull );
+}
 
-//void Node::extendLoopNode( LoopVars &lv, ExtVars &ev, bool drxn )
-//{
-//    ev.ante.clear();
-//    getDrxnNodes( ev.ante, !drxn, true );
-//    
-//    while ( isContinue( drxn ) && extendCount_ > 0 && lv.rebranch.find( this ) == lv.rebranch.end() )
-//    {
-//        vector<Extension> exts = ev.bwt.mapExtensions( seq_, drxn );
-//        bool doesBranch = exts.size() > 1;
-//        for ( auto it = exts.begin(); it != exts.end(); )
-//        {
-//            it->fwdExts.clear();
-//            MergeHit merge;
-//            
-//            bool doAdd = true;
-//            for ( Node* clone : lv.clones )
-//            {
-//                if ( clone->checkExtensionMerge( *it, merge ) )
-//                {
-//                    it = exts.erase( it );
-//                    lv.rebranch.insert( this );
-//                    doAdd = false;
-//                    break;
-//                }
-//            }
-//            for ( Node* node : ev.island )
-//            {
-//                if ( node->checkExtensionMerge( *it, merge ) )
-//                {
-//                    it = exts.erase( it );
-//                    lv.rebranch.insert( this );
-//                    doAdd = false;
-//                    break;
-//                }
-//            }
-//            it += doAdd;
-//        }
-//        
-//        extendCount_ = max( 0, extendCount_ - (int)exts.size() );
-//        addExtensions( exts, ev, doesBranch, drxn );
-//    }
-//    
-//    lv.extended.insert( this );
-//    setCoverage();
-//}
+Node* Node::declone( NodeRoll& nodes )
+{
+    if ( !cloned_ ) return NULL;
+    vector<Edge> edges[2]{ edges_[0], edges_[1] };
+    Node* node = cloned_->size() == 1 ? cloned_->nodes[0] : NULL;
+    for ( int d : { 0, 1 } ) for ( Edge& e : edges[d] ) removeEdge( e.node, d, true );
+    for ( int d : { 0, 1 } ) for ( Edge& e : edges[d] ) for ( Node* clone : cloned_->nodes ) clone->addEdge( e, d, true );
+    nodes.erase( this );
+    return node;
+}
 
 CloneScore Node::getCloneComparison( Node* clone, bool drxn )
 {

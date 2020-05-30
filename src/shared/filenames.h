@@ -28,25 +28,30 @@ struct Filenames
 {
     Filenames( string inPrefix );
     
-    FILE* getReadPointer( string &filename, bool doEdit );
+    static bool exists( string &filename );
+    
+    FILE* getReadPointer( string &filename, bool doEdit, bool allowFail=false );
     FILE* getWritePointer( string &filename );
     ifstream getReadStream( string &filename );
     ofstream getWriteStream( string &filename );
     
     FILE* getBinary( bool doRead, bool doEdit );
+    bool isFolder( string folder );
+    void makeFolder( string folder );
     void removeFile( string &filename );
-    void setIndex( FILE* &inBin, FILE* &inBwt, FILE* &inIdx );
+    void setIndex( FILE* &inBin, FILE* &inBwt, FILE* &inIdx, FILE* &inMer );
     
     string prefix;
     string bin;
     string bwt;
     string ids;
     string idx;
+    string mer;
 };
 
 struct PreprocessFiles : public Filenames
 {
-    PreprocessFiles( string inPrefix );
+    PreprocessFiles( string inPrefix, bool overwrite=false );
     
     void clean();
     void setBinaryWrite( FILE* &outBin, FILE* &outBwt, FILE* &outEnd, FILE* (&outIns)[4], FILE* (&outIds)[4][4] );
@@ -56,6 +61,7 @@ struct PreprocessFiles : public Filenames
     void setCyclerFinalIter( FILE* &inIns, FILE* &inIds, uint8_t cycle, uint8_t i );
     void setCyclerUpdate( FILE* &outBwt,  FILE* &outEnd, FILE* (&outIns)[4], FILE* (&outIds)[4][5], uint8_t cycle );
     void setIndexWrite( FILE* &inBwt, FILE* &outIdx );
+    void setMersWrite( FILE* &outMer );
     
     string tmpBwt[2];
     string tmpEnd[2];

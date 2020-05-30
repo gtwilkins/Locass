@@ -61,6 +61,81 @@ float Node::getAlleleCoverage( Node* forks[2], NodeList paths[2], bool drxn )
     return cover;
 }
 
+int Node::getCoverage( bool drxn )
+{
+    NodeCounts ols;
+    ols.countOverlaps( this, this->size(), 0, drxn );
+    
+    int cover = 0;
+    for ( auto& nc : ols.map ) for ( auto& read : nc.first->reads_ )
+    {
+        if ( abs( read.second[!drxn]-nc.first->ends_[!drxn] ) < nc.second && nc.second <= abs( read.second[drxn]-nc.first->ends_[!drxn] ) ) cover++;
+    }
+    return cover;
+}
+
+float Node::getCoverage( vector<Node*>& nodes, int minLen )
+{
+    auto getOl = []( Node* a, Node* b, bool drxn )
+    {
+        int ol = 0;
+        for ( Edge& e : a->edges_[drxn] ) if ( b ? e.node == b : !e.leap ) ol = max( ol, e.ol );        
+        return ol ? ol : params.readLen-1;
+    };
+    
+    unordered_set<ReadId> used;
+    int32_t len = ( -getOl( nodes[0], NULL, 0 ) - getOl( nodes.back(), NULL, 1 ) ) / 2, multi = 0;
+    int edge[2]{ getOl( nodes[0], NULL, 0 ), 0 };
+    for ( int i = 0; i < nodes.size(); i++ )
+    {
+        for ( auto& read : nodes[i]->reads_ ) used.insert( read.first );
+        edge[1] = getOl( nodes[i], i+1 < nodes.size() ? nodes[i+1] : NULL, 1 );
+        len += nodes[i]->size() - ( i ? edge[0] : 0 );
+        if ( nodes[i]->cloned_ ) multi += nodes[i]->cloned_->size() * ( nodes[i]->size() - ( ( edge[0] + edge[1] ) / 2 ) );
+        edge[0] = edge[1];
+    }
+    len = max( len, minLen );
+    float coverage = float( used.size() * params.readLen ) / float( max( len + multi, 1 ) );
+    return float( used.size() * params.readLen ) / float( max( len + multi, 1 ) );
+}
+
+float Node::getCoverageMedian( vector<Node*>& nodes )
+{
+    int base = 0;
+    vector<int> counts, multis;
+    unordered_set<ReadId> used;
+    for ( int i = 0; i < nodes.size(); i++ )
+    {
+        if ( i ) for ( Edge& e : nodes[i]->edges_[0] ) if ( e.node == nodes[i-1] )
+        {
+            base -= e.ol;
+            break;
+        }
+        
+        counts.resize( base+nodes[i]->size(), 0 );
+        multis.resize( base+nodes[i]->size(), 0 );
+        
+        int multi = nodes[i]->cloned_ ? 1+ nodes[i]->cloned_->size() : 1;
+        for ( auto& read : nodes[i]->reads_ ) if ( used.insert( read.first ).second ) for ( int j = read.second[0]; j < read.second[1]; j++ )
+        {
+            int k = base + j - nodes[i]->ends_[0];
+            assert( k >= 0 && k < counts.size() );
+            counts[ base + j - nodes[i]->ends_[0] ]++;
+            multis[ base + j - nodes[i]->ends_[0] ] += multi;
+        }
+        base += nodes[i]->size();
+        assert( base == counts.size() );
+    }
+    
+    if ( counts.size() <= params.readLen * 2 ) return getCoverage( nodes );
+    
+    vector<float> cover;
+    for ( int i = params.readLen; i < counts.size()-params.readLen; i++ ) cover.push_back( (float)( counts[i]*counts[i] ) / (float)max( 1, multis[i] ) );
+    sort( cover.begin(), cover.end() );
+    if ( cover.empty() ) return 0;
+    return ( cover[ ( cover.size()-1 )/2 ] + cover[ cover.size()/2 ] ) / 2;
+}
+
 float Node::getCoverageCoeff()
 {
     if ( coverage_ < params.cover ) return (float)1;
@@ -93,8 +168,8 @@ float Node::getCoverageDrxn( int32_t dist, bool drxn, bool inclSelf )
             int currOffset = offsetMap[curr];
             for ( Edge &e : curr->edges_[drxn] )
             {
-                int offset = drxn ? curr->ends_[1] - e.overlap - e.node->ends_[0]
-                                  : e.node->ends_[1] - e.overlap - curr->ends_[0];
+                int offset = drxn ? curr->ends_[1] - e.ol - e.node->ends_[0]
+                                  : e.node->ends_[1] - e.ol - curr->ends_[0];
                 offset += currOffset;
                 if ( offsetMap.find( e.node ) == offsetMap.end()
                         && limits[0] < e.node->ends_[1] + offset 
@@ -253,56 +328,9 @@ void Node::resetReliabilityPropagate( NodeSet &propagated, bool drxn )
 void Node::setCoverage()
 {
     float len = getLengthForCoverage();
-    float readCount = reads_.size();
+    float readCount = countReads();
     coverage_ = readCount < 3 ? params.cover : ( ( readCount - 2 ) * float( params.readLen) ) / len;
 }
-
-//void Node::setCoverage( ExtVars &ev, bool subGraph, bool drxn, bool isIsland )
-//{
-//    if ( isContinue( drxn ) || ( ends_[1] - ends_[0] < params.readLen * 1.25 ) )
-//    {
-//        setCoverage();
-//        return;
-//    }
-//    
-//    vector< pair<int32_t, uint16_t> > coverMarks = getCoverageMarks( drxn );
-//    
-//    if ( coverMarks.size() < 2 || params.cover * 2 < coverMarks[0].second )
-//    {
-//        setCoverage();
-//        return;
-//    }
-//    
-//    uint16_t baseCover = max( uint16_t(params.cover * 0.9), coverMarks[0].second );
-//    
-//    int i = 1;
-//    while ( i < coverMarks.size() && coverMarks[i].second < baseCover * 1.2 )
-//    {
-//        baseCover = coverMarks[i].second < baseCover 
-//                ? max( uint16_t(params.cover * 0.9), coverMarks[i].second ) 
-//                : baseCover;
-//        i++;
-//    }
-//    
-//    if ( i != coverMarks.size() )
-//    {
-//        int32_t splitMark = findNextRead( coverMarks[i-1].first, drxn );
-//        if ( splitMark != ends_[drxn] )
-//        {
-//            if ( abs( splitMark - ends_[drxn] ) < params.readLen )
-//            {
-//                assert( false );
-//            }
-//            splitNode( splitMark, ( isIsland ? ev.island : ev.nodes ), subGraph, drxn );
-//            if ( edges_[drxn].size() == 1 )
-//            {
-//                edges_[drxn][0].node->setCoverage( ev, subGraph, drxn, isIsland );
-//            }
-//        }
-//    }
-//    
-//    setCoverage();
-//}
 
 void Node::setReliability()
 {

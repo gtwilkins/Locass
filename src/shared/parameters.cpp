@@ -52,45 +52,43 @@ bool Lib::doAddMarker( bool thisRev, int &pairRev, bool drxn )
     return false;
 }
 
-bool Lib::getPair( SeqNum &readId, int32_t dist, int &pairDrxn )
+int Lib::getPair( SeqNum &id )
 {
-    if ( readId < endCount )
+    uint8_t readVer = id & 0x3;
+    id = id - readVer;
+    // Unknown
+    if ( orientation == 0 )
     {
-        dist = size;
-        uint8_t readVer = readId & 0x3;
-        readId = readId - readVer;
-        if ( orientation == 0 ) // UK
-        {
-            readId += !readVer;
-            pairDrxn = 2;
-        }
-        else
-        {
-            pairDrxn = orientation < 3 ? !( readVer & 0x1 ) : readVer & 0x1;
-            if ( orientation == 1 ) // FF
-            {
-                readId += ( readVer > 1 ? 0 : 2 ) + ( readVer & 0x1 ? 1 : 0 ); // 0 <-> 2; 1 <-> 3
-            }
-            else // FR or RF
-            {
-                readId += ( readVer > 1 ? 0 : 2 ) + ( readVer & 0x1 ? 0 : 1 ); // 0 <-> 3; 1 <-> 2
-            }
-        }
-        return true;
+        id += !readVer;
+        return 2;
     }
-    return false;
+    
+    // FF
+    if ( orientation == 1 ) id += ( readVer > 1 ? 0 : 2 ) + ( readVer & 0x1 ? 1 : 0 ); // 0 <-> 2; 1 <-> 3
+    // FR or RF
+    else id += ( readVer > 1 ? 0 : 2 ) + ( readVer & 0x1 ? 0 : 1 ); // 0 <-> 3; 1 <-> 2
+    
+    return orientation < 3 ? !( readVer & 0x1 ) : readVer & 0x1;
+}
+
+bool Lib::getPair( SeqNum &id, int &pairDrxn )
+{
+    if ( id >= endCount ) return false;
+    pairDrxn = getPair( id );
+    return true;
 }
 
 void Lib::setMinMax()
 {
     minDist = max( ( ( size / 5 ) - 100 ), 1 );
-    maxDist = size * 1.3 + 500;
+    maxDist = ( size * 1.2 ) + 200;
 };
 
 Parameters::Parameters()
+: rna( false )
 {
-    isSet = false;
-    isCalibrated = false;
+    isSet = haploid = isCalibrated = false;
+    drxns[0] = drxns[1] = true;
 }
 
 void Parameters::checkReady()
@@ -117,11 +115,17 @@ void Parameters::checkReady()
     }
 }
 
-bool Parameters::isReadPe( SeqNum &readId )
+bool Parameters::isReadPe( ReadId id )
 {
-    Lib* lib = getLib( readId );
+    Lib* lib = getLib( id );
     return lib && lib->isPe;
 }
+
+ bool Parameters::isReadMp( ReadId id )
+ {
+    Lib* lib = getLib( id );
+    return lib && !lib->isPe;
+ }
 
 int32_t Parameters::getFurthestMpDist( int32_t coord, bool drxn )
 {
@@ -161,15 +165,9 @@ Lib* Parameters::getLib( const SeqNum &readId )
     return NULL;
 }
 
-int32_t Parameters::getLibSize( SeqNum &readId )
+int32_t Parameters::getLibSize( ReadId readId )
 {
-    for ( Lib &lib : libs )
-    {
-        if ( readId < lib.endCount )
-        {
-            return lib.size;
-        }
-    }
+    for ( Lib &lib : libs ) if ( readId < lib.endCount ) return lib.size;
     return 0;
 }
 
@@ -206,9 +204,10 @@ void Parameters::set()
 {
     CharId totalPe = 0, totalPeMean = 0;
     maxPeMax = maxPeMean = maxMpMax = maxMpMean = 0;
-    branchMinHits = 0;
+    branchMinHits = 1;
     for ( Lib &lib : libs )
     {
+        lib.setMinMax();
         maxMpMean = max( maxMpMean, lib.size );
         maxMpMax = max( maxMpMax, lib.maxDist );
         if ( lib.isPe )
@@ -218,7 +217,7 @@ void Parameters::set()
             totalPe += lib.count;
             totalPeMean += (CharId)lib.size * (CharId)lib.count;
             branchMinHits += ( (float)lib.count / (float)seqCount ) * cover
-                    * float( max( readLen, lib.size - readLen ) ) / float( readLen * 4 );
+                    * float( max( 0, lib.size - readLen - 10 ) ) / float( readLen * 6 );
         }
     }
     
@@ -240,3 +239,26 @@ void Parameters::setLimits( int32_t &limit )
     locusLimits[1] = limit;
 }
 
+int Parameters::setPair( ReadId &id )
+{
+    Lib* lib = getLib( id );
+    if ( !lib ) return 2;
+    return lib->getPair( id );
+}
+
+bool Parameters::setPairId( ReadId &id, bool pairDrxn )
+{
+    if ( !isReadPe( id ) || pairDrxn == bool(id & 0x1) ) return false;
+    id = getPairId( id );
+    return true;
+}
+
+int32_t Parameters::shortLen()
+{
+    return max( readLen, maxPeMean - readLen );
+}
+
+void Parameters::write( FILE* fp )
+{
+    
+}

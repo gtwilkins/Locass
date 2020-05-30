@@ -527,7 +527,7 @@ NodeList Node::bridgeIslandGetForks( IslandVars &iv, NodeIntMap &limitMap, NodeS
     {
         for ( int i ( 0 ); i < node->edges_[drxn].size(); i++ )
         {
-            if ( node->edges_[drxn][i].isLeap )
+            if ( node->edges_[drxn][i].leap )
             {
                 node->edges_[drxn][i].node->dismantleNode( iv.ev.del, drxn );
                 i--;
@@ -1380,7 +1380,7 @@ void Node::cloneBridge( PathVars &pv, NodeList &hitNodes )
                     nxtSet.insert( e.node );
                     nodeMap[e.node] = cloneEdge;
                 }
-                clone->addEdge( cloneEdge, e.overlap, pv.drxn, false, e.isLeap );
+                clone->addEdge( cloneEdge, e.ol, pv.drxn, false, e.leap );
             }
         }
         currSet = nxtSet;
@@ -1396,7 +1396,7 @@ void Node::cloneBridge( PathVars &pv, NodeList &hitNodes )
             else
             {
                 Node* clone = it->second;
-                clone->addEdge( prv->edges_[pv.drxn][i].node, prv->edges_[pv.drxn][i].overlap, pv.drxn, false, prv->edges_[pv.drxn][i].isLeap );
+                clone->addEdge( prv->edges_[pv.drxn][i].node, prv->edges_[pv.drxn][i].ol, pv.drxn, false, prv->edges_[pv.drxn][i].leap );
                 prv->edges_[pv.drxn][i].node->removeEdge( prv, !pv.drxn );
                 prv->edges_[pv.drxn].erase( prv->edges_[pv.drxn].begin() + i );
             }
@@ -1436,6 +1436,13 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
             else j++;
         }
         if ( hitNodes[i].empty() ) return false;
+    }
+    
+    bool didMap = mn->checkRedundantOverlaps( hitNodes[0], hitCoords[0], 0 ) ;
+    if ( mn->checkRedundantOverlaps( hitNodes[1], hitCoords[1], 1 ) || didMap )
+    {
+        mn->recoil();
+        didMap = true;
     }
     
     NodeList nodes;
@@ -1499,6 +1506,8 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
         
         for ( int i = 0; i < overlaps.size(); i++ )
         {
+            assert( nodes[i]->seq_.find( nodes[i+1]->seq_ ) == nodes[i]->seq_.npos );
+            assert( nodes[i+1]->seq_.find( nodes[i]->seq_ ) == nodes[i+1]->seq_.npos );
             nodes[i]->addEdge( nodes[i+1], overlaps[i], pv.drxn );
         }
         
@@ -1514,7 +1523,7 @@ bool Node::mapBridge( Node* target, PathVars &pv, MapNode* mn )
         pv.newSet.insert( nodes.begin(), nodes.end() );
         return true;
     }
-    return false;
+    return didMap;;
 }
 
 bool Node::originBridge( PathVars &pv, NodeList edgeNodes[2], NodeList &newNodes )
@@ -1599,47 +1608,54 @@ void Node::setBridge( PathVars &pv, NodeSet &newSet, NodeList &nodes, vector<int
     int i = 0;
     int j = 0;
     int32_t currLimits[2] = { 0, 0 }, prevLimits[2];
+    mn->setRedundant();
     while ( j < mn->ids.size() )
     {
         bool found = false;
         for ( int k = pv.drxn; k < 5; k += 3 )
         {
+            if ( mn->redundant[j] ) break;
             for ( Node* n : pv.nds[k] )
             {
                 auto it = n->reads_.find( mn->ids[j] );
-                if ( it != n->reads_.end() && !it->second.redundant )
+                if ( it == n->reads_.end() || n->isRedundant( &it->second ) ) continue;
+                if ( i != j )
                 {
-                    if ( i != j )
-                    {
-                        if ( !nodes.empty() ) overlaps.push_back( prevLimits[1] - currLimits[0] );
-                        nodes.push_back( new Node( mn, i, j - 1, drxn ) );
-                        newSet.insert( nodes.back() );
-                        prevLimits[0] = currLimits[0];
-                        prevLimits[1] = currLimits[1];
-                        currLimits[0] = mn->coords[0][j];
-                        currLimits[1] = mn->coords[1][j];
-                    }
-                    int32_t splitCoords[2] = { it->second[0], it->second[1] };
-                    while ( it != n->reads_.end() && ++j < mn->ids.size() && ( splitCoords[1] <= it->second[1] || it->second.redundant ) )
-                    {
-                        splitCoords[1] = it->second[1];
-                        currLimits[0] = min( currLimits[0], mn->coords[0][j-1] );
-                        currLimits[1] = max( currLimits[1], mn->coords[1][j-1] );
-                        it = n->reads_.find( mn->ids[j] );
-                    }
                     if ( !nodes.empty() ) overlaps.push_back( prevLimits[1] - currLimits[0] );
-                    nodes.push_back( n->splitNodeDual( splitCoords, pv.nds[k], drxn ) );
+                    nodes.push_back( new Node( mn, i, j - 1, drxn ) );
+                    newSet.insert( nodes.back() );
                     prevLimits[0] = currLimits[0];
                     prevLimits[1] = currLimits[1];
-                    if ( j < mn->ids.size() )
-                    {
-                        currLimits[0] = mn->coords[0][j];
-                        currLimits[1] = mn->coords[1][j];
-                    }
-                    i = j;
-                    found = true;
-                    break;
+                    currLimits[0] = mn->coords[0][j];
+                    currLimits[1] = mn->coords[1][j];
                 }
+                int32_t splitCoords[2] = { it->second[0], it->second[1] };
+                while ( it != n->reads_.end() && ++j < mn->ids.size() )
+                {
+                    splitCoords[1] = max( splitCoords[1], it->second[1] );
+                    currLimits[0] = min( currLimits[0], mn->coords[0][j-1] );
+                    currLimits[1] = max( currLimits[1], mn->coords[1][j-1] );
+                    it = n->reads_.find( mn->ids[j] );
+                    if ( it == n->reads_.end() && mn->coords[1][j] <= currLimits[1] )
+                    {
+                        assert( mn->redundant[j] );
+                        n->addRead( mn->ids[j], splitCoords[0] + mn->coords[0][j] - currLimits[0], splitCoords[0] + mn->coords[1][j] - currLimits[0], true );
+                        it = n->reads_.find( mn->ids[j] );
+                        assert( it != n->reads_.end() && n->ends_[0] <= it->second[0] && it->second[1] <= n->ends_[1] );
+                    }
+                }
+                if ( !nodes.empty() ) overlaps.push_back( prevLimits[1] - currLimits[0] );
+                nodes.push_back( n->splitNodeDual( splitCoords, pv.nds[k], drxn ) );
+                prevLimits[0] = currLimits[0];
+                prevLimits[1] = currLimits[1];
+                if ( j < mn->ids.size() )
+                {
+                    currLimits[0] = mn->coords[0][j];
+                    currLimits[1] = mn->coords[1][j];
+                }
+                i = j;
+                found = true;
+                break;
             }
             if ( found ) break;
         }

@@ -32,29 +32,36 @@ public:
     ~IndexReader();
     
     void countRange( uint8_t i, CharId rank, CharId count, CharCount &ranks, CharCount &counts );
+    void countRange( uint8_t i, CharId rank, CharId edge, CharId count, CharCount &ranks, CharCount &edges, CharCount &counts );
+    void createSeeds( string &fn, int mer );
+    int primeOverlap( uint8_t* q, CharId &rank, CharId &count );
+    void primeOverlap( string &seq, vector<uint8_t> &q, CharId &rank, CharId &count, int &ol, bool drxn );
+    int setBaseAll( vector<uint8_t> &q, CharId &rank, CharId &count );
     void setBaseAll( uint8_t i, uint8_t j, CharId &rank, CharId &count );
-    void setBaseMap( uint8_t i, uint8_t j, CharId &rank, CharId &count );
+    void setBaseAll( uint8_t i, uint8_t j, CharId &rank, CharId &edge, CharId &count );
+    ReadId setBaseMap( uint8_t i, uint8_t j, CharId &rank, CharId &count );
     void setBaseOverlap( uint8_t i, uint8_t j, CharId &rank, CharId &count );
     
 private:
     void advance( CharCount &ranks, CharId &bwtIndex, CharId &toCount );
+    void createSeeds( FILE* fp, int i, int it, int limit, CharId rank, CharId edge, CharId count );
     void setRank( uint8_t i, CharId rank, CharCount &ranks );
     CharId setRankIndex( CharId rankIndex, CharCount &ranks );
     
     
-    FILE* bwt,* idx;
-    uint8_t* buff;
+    FILE* bwt;
+    uint8_t* buff,* mers;
     
+    CharId bwtSize, indexSize, markSize;
+    ReadId bwtPerIndex, indexPerMark;
+    int kmerLen;
     uint8_t beginBwt, beginIdx;
     uint8_t sizePerIndex;
-    ReadId bwtPerIndex, indexPerMark;
-    CharId bwtSize, indexSize, markSize;
     
     // Index data
     uint8_t* index_;
     ReadId* marks_;
     CharId charRanks[4], charCounts[5];
-    
     CharId baseCounts[5][4], midRanks[4][4];
     
     bool isBaseRun[256];

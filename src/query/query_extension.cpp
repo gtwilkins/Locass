@@ -20,14 +20,139 @@
 
 #include "query_extension.h"
 #include <algorithm>
+#include <cassert>
 
 extern Parameters params;
+
+Ext::Ext( string& seq, ReadId id, int ol, bool drxn )
+: seq_( seq ), ext_( drxn ? seq.substr( ol ) : seq.substr( 0, seq.size()-ol ) ), reads_{ ExtRead( id, seq.size()-ol, ol ) }, ol_( ol )
+{}
+
+Ext::Ext( Ext* base, int skim, bool drxn )
+: seq_( base->seq_ ), ext_( base->ext_ ), exts_( base->exts_ ), reads_( base->reads_.begin()+skim, base->reads_.end() ), ol_( 0 )
+{
+    int ext = base->reads_[skim-1].ext_;
+    base->reads_.erase( base->reads_.begin()+skim, base->reads_.end() );
+    base->exts_.clear();
+    base->ext_ = drxn ? base->ext_.substr( 0, ext ) : base->ext_.substr( base->ext_.size()-ext );
+    shift( ext, drxn );
+}
+
+Ext::~Ext()
+{
+    for ( Ext* e : exts_ ) delete e;
+}
+
+
+bool Ext::add( ReadId id, int ext, int ol, int ins )
+{
+    reads_.insert( reads_.begin()+ins, ExtRead( id, ext, ol ) );
+    ol_ = max( ol_, ol );
+    return true;
+}
+
+void Ext::shift( int ext, bool drxn )
+{
+    ext_ = drxn ? ext_.substr( ext ) : ext_.substr( 0, ext_.size()-ext );
+    ol_ = 0;
+    for ( ExtRead& er : reads_ )
+    {
+        er.ext_ -= ext;
+        er.ol_ += ext;
+        ol_ = max( ol_, er.ol_ );
+    }
+}
+
+Exts::~Exts()
+{
+    for ( Ext* e : exts_ ) assert( false );
+    for ( Ext* e : exts_ ) delete e;
+    assert( false );
+}
+
+bool Exts::add( vector<Ext*>& exts, string seq, ReadId id, int ol, bool drxn )
+{
+    int ext = seq.size()-ol;
+    vector<Ext*> hits;
+    for ( Ext* e : exts )
+    {
+        int i = 0, j = 0, limit = min( (int)e->ext_.size(), ext );
+        while ( i < limit && ( drxn ? seq[i+ol] == e->ext_[i] : seq.end()[-i-ol-1] == e->ext_.end()[-i-1] ) ) i++;
+        
+        if ( i == e->ext_.size() )
+        {
+            assert( hits.empty() );
+            // Continue to pre-existing branch
+            if ( !e->exts_.empty() ) return add( e->exts_, seq, id, i+ol, drxn );
+            
+            // append unbranched extend
+            e->ext_ = drxn ? seq.substr( ol ) : seq.substr( 0, seq.size()-ol );
+            return e->add( id, ext, ol, e->reads_.size() );
+        }
+        
+        while ( j < e->reads_.size() && e->reads_[j].ext_ <= i ) j++;
+        
+        if ( j )
+        {
+            assert( hits.empty() );
+            // Add read between others
+            if ( i+ol == seq.size() ) e->add( id, ext, ol, j );
+            
+            // Fork after read
+            Ext* alt = new Ext( e, j, drxn );
+            e->exts_ = { alt, new Ext( seq, id, ol, drxn ) };
+            e->exts_.back()->shift( e->ext_.size(), drxn );
+            assert( false );
+            return true;
+        }
+        
+        hits.push_back( e );
+    }
+    
+    // Add read to single branch
+    if ( hits.size() == 1 ) return hits[0]->add( id, ext, ol, 0 );
+    
+    // Fork multiple branches
+    for ( Ext* e : hits )
+    {
+        e->shift( ext, drxn );
+        exts.erase( remove( exts.begin(), exts.end(), e ), exts.end() );
+    }
+    
+    // Create new branch
+    exts.push_back( new Ext( seq, id, ol, drxn ) );
+    exts.back()->exts_ = hits;
+    
+    return true;
+}
 
 void Overlap::offset( int offset, bool drxn )
 {
     seq = ( drxn ? seq.substr( offset ) : seq.substr( 0, seq.length() - offset ) );
     overLen += offset;
     extLen -= offset;
+}
+
+void Overlap::sortByExt( vector<Overlap> &ols )
+{
+    sort( ols.begin(), ols.end(), []( const Overlap &a, const Overlap &b ) { 
+        return a.extLen == b.extLen ? a.overLen > b.overLen : a.extLen > b.extLen; 
+    });
+    
+    for ( int i = 0; i < ols.size(); )
+    {
+        bool doErase = false;
+        for ( int j = i + 1; j < ols.size(); j++ )
+        {
+            if ( ols[i].readId == ols[j].readId )
+            {
+                doErase = true;
+                break;
+            }
+        }
+        if ( doErase ) ols.erase( ols.begin() + i );
+        else i++;
+    }
 }
 
 void Overlap::truncate( bool drxn )
@@ -44,18 +169,25 @@ Extension::Extension( Overlap &overlap, int readCount, bool drxn )
     maxExtLen = seq.size();
 }
 
-Extension::Extension( Overlap &overlap, int readCount, bool drxn, vector<Extension> &inFwdExts, bool doAdd )
+Extension::Extension( Overlap &overlap, int readCount, bool drxn, vector<Extension> &inFwdExts )
 : Extension( overlap, readCount, drxn )
 {
-    doAdd = doAdd && inFwdExts.size() <= 5;
     for ( const Extension &ext : inFwdExts )
     {
         maxExtLen = max( maxExtLen, ext.maxExtLen );
-        if ( doAdd )
-        {
-            fwdExts.push_back( ext );
-        }
+        fwdExts.push_back( ext );
     }
+}
+
+void Extension::test()
+{
+    for ( Extension &ext : fwdExts ) ext.test();
+    bool good = false;
+    for ( Overlap &ol : overlaps )
+    {
+        if ( ol.overLen == maxOverLen ) good = true;
+    }
+    assert( good );
 }
 
 void Extension::addOverlap( Overlap &overlap )
@@ -100,24 +232,81 @@ bool Extension::checkLoop( Overlap &overlap )
     return false;
 }
 
-bool Extension::getExtendSum() const
+void Extension::cullFwd( int cutoff )
 {
-    int sum = 0;
-    for ( const Overlap &overlap : overlaps )
+    if ( maxExtLen - seq.length() < cutoff || fwdExts.size() > 4 ) fwdExts.clear();
+    for ( Extension &ext : fwdExts )
     {
-        sum += overlap.extLen;
+        if ( ext.readCount > 4 ) continue;
+        fwdExts.clear();
+        return;
     }
-    return sum;
+    for ( Extension &ext : fwdExts )
+    {
+        ext.cullFwd( cutoff );
+    }
+    
 }
 
-bool Extension::getOverlapSum() const
+void Extension::getExtendLens( vector<int> &lens )
 {
-    int sum = 0;
-    for ( const Overlap &overlap : overlaps )
+    for ( Overlap &ol : overlaps ) lens.push_back( ol.extLen );
+    for ( Extension &ext : fwdExts ) ext.getExtendLens( lens );
+}
+
+//bool Extension::getExtendSum() const
+//{
+//    int sum = 0;
+//    for ( const Overlap &overlap : overlaps )
+//    {
+//        sum += overlap.extLen;
+//    }
+//    return sum;
+//}
+
+int Extension::getExtendVolume( int minExt )
+{
+    int vol = 0;
+    for ( int i = fwdExts.empty() && !valid; i < overlaps.size(); i++ )
     {
-        sum += overlap.overLen;
+        if ( overlaps[i].extLen < minExt ) break;
+        if ( overlaps[i].redundant ) continue;
+        vol += overlaps[i].extLen - minExt;
     }
-    return sum;
+    
+    for ( Extension &ext : fwdExts ) vol += ext.getExtendVolume( minExt );
+    
+    return vol;
+}
+
+//bool Extension::getOverlapSum() const
+//{
+//    int sum = 0;
+//    for ( const Overlap &overlap : overlaps )
+//    {
+//        sum += overlap.overLen;
+//    }
+//    return sum;
+//}
+
+int Extension::getReadCount()
+{
+    int maxCounted = 0;
+    for ( Extension& ext : fwdExts ) maxCounted = max( maxCounted, ext.getReadCount() );
+    return maxCounted + overlaps.size();
+}
+
+string Extension::getSeq( int extCount )
+{
+    vector<int> lens;
+    getExtendLens( lens );
+    sort( lens.rbegin(), lens.rend() );
+    
+    int len = seq.length();
+    if ( lens.size() > extCount ) len = min( len, lens[extCount] );
+    else len = min( len, 1 );
+    
+    return seq.substr( 0, len );
 }
 
 bool Extension::isCongruent( Overlap &overlap )
@@ -129,7 +318,7 @@ bool Extension::isCongruent( Overlap &overlap )
 
 bool Extension::isRepeat( string &inSeq )
 {
-    uint16_t maxLen = min( params.readLen, (uint16_t)seq.length() + maxOverLen );
+    uint16_t maxLen = min( params.readLen, (int)min( inSeq.length(), seq.length() + maxOverLen ) );
     uint16_t maxShift = maxLen - maxOverLen;
     uint16_t bgnCoord = drxn ? inSeq.length() - maxLen : seq.length() - maxShift;
     fullSeq = drxn ? inSeq.substr( inSeq.length() - maxOverLen ) + seq 
@@ -152,25 +341,47 @@ bool Extension::isRepeat( string &inSeq )
     return false;
 }
 
-bool Extension::isSuperior( Extension &ext, uint16_t cutoff )
+bool Extension::isSuperior( Extension &ext, int minLen, float expectedPer, int cutoff )
 {
-    if ( readCount >= 4 )
+    if ( !cutoff )
     {
-        cutoff *= ext.readCount >= 3 ? 1 : float(ext.readCount + 2) / (float)6 ;
-        
-        // Lack of unique overlaps
-        if ( ext.overlaps.size() <= 1 && ext.fwdExts.empty() && ext.maxOverLen < maxOverLen * min( (float)2, (float)readCount / (float)4 ) )
-        {
-            return true;
-        }
-        
-        // Much better extension and much better overlap
-        if ( maxOverLen > ext.maxOverLen + cutoff && maxExtLen > ext.maxExtLen - cutoff )
-        {
-            return true;
-        }
+        return readCount >= ext.readCount * 5;
     }
-    return false;
+    
+    int len = max( maxExtLen, ext.maxExtLen ) - minLen;
+    if ( len < cutoff ) return false;
+    
+    int expected = ( len * len * expectedPer / 8 ) - len;
+    int extVolumes[2] = { min( expected, getExtendVolume( minLen ) )
+                        , min( expected, ext.getExtendVolume( minLen ) ) };
+    if ( readCount <= 1 ) extVolumes[0] = min( extVolumes[0], maxExtLen - minLen );
+    if ( ext.readCount <= 1 ) extVolumes[1] = min( extVolumes[1], ext.maxExtLen - minLen );
+    
+    // Not enough evidence
+    if ( extVolumes[0] < cutoff * expectedPer ) return false;
+    
+    // Probably sequencing error
+    if ( extVolumes[0] > extVolumes[1] * 4 ) return true;
+    
+    return maxOverLen > ext.maxOverLen + cutoff * 2;
+    
+//    if ( readCount >= 4 )
+//    {
+//        cutoff *= ext.readCount >= 3 ? 1 : float(ext.readCount + 2) / (float)6 ;
+//        
+//        // Lack of unique overlaps
+//        if ( ext.overlaps.size() <= 1 && ext.fwdExts.empty() && ext.maxOverLen < maxOverLen * min( (float)2, (float)readCount / (float)4 ) )
+//        {
+//            return true;
+//        }
+//        
+//        // Much better extension and much better overlap
+//        if ( maxOverLen > ext.maxOverLen + cutoff && maxExtLen > ext.maxExtLen - cutoff )
+//        {
+//            return true;
+//        }
+//    }
+//    return false;
 }
 
 bool Extension::isValid()
@@ -181,7 +392,7 @@ bool Extension::isValid()
         {
             for ( int i( 1 ); i < overlaps.size(); i++ )
             {
-                if ( overlaps[i].extLen != overlaps[0].extLen )
+                if ( overlaps[i].extLen != overlaps[0].extLen && overlaps[i].overLen > overlaps[0].overLen )
                 {
                     seq = drxn ? seq.substr( 0, overlaps[i].extLen ) : seq.substr( seq.length() - overlaps[i].extLen );
                     overlaps.erase( overlaps.begin(), overlaps.begin() + i );
@@ -228,19 +439,19 @@ void Extension::offsetFwdExts( int offset )
     
 }
 
-bool Extension::operator <(const Extension &rhs) const
-{
-    if ( maxOverLen == rhs.maxOverLen ){
-        int lSum = getOverlapSum();
-        int rSum = rhs.getOverlapSum();
-        if ( lSum == rSum )
-        {
-            return getExtendSum() > rhs.getExtendSum();
-        }
-        return lSum > rSum;
-    }
-    return maxOverLen > rhs.maxOverLen;
-}
+//bool Extension::operator <(const Extension &rhs) const
+//{
+//    if ( maxOverLen == rhs.maxOverLen ){
+//        int lSum = getOverlapSum();
+//        int rSum = rhs.getOverlapSum();
+//        if ( lSum == rSum )
+//        {
+//            return getExtendSum() > rhs.getExtendSum();
+//        }
+//        return lSum > rSum;
+//    }
+//    return maxOverLen > rhs.maxOverLen;
+//}
 
 void Extension::resetMaxOverLen()
 {
@@ -261,40 +472,18 @@ void Extension::setFullSeq( string &inSeq )
     }
 }
 
-void Extension::setScores( int minOver, int overCount )
-{
-    score = 0;
-    vector<uint16_t> lens;
-    for ( Overlap &over : overlaps )
-    {
-        if ( over.overLen >= minOver )
-        {
-            lens.push_back( over.overLen - minOver );
-        }
-    }
-    sort( lens.begin(), lens.end(), []( uint16_t a, uint16_t b ) { return a > b; } );
-    int counts = min( overCount, int( lens.size() ) );
-    for ( int i( 0 ); i < counts; i++ )
-    {
-        score += lens[i];
-    }
-    if ( overCount > lens.size() && readCount > lens.size() )
-    {
-        score = ( score * min( readCount, overCount ) ) / lens.size();
-    }
-}
-
 void Extension::trimToExtLen( uint16_t extCutoff )
 {
     if ( overlaps[0].extLen > extCutoff && overlaps[0].extLen != overlaps.back().extLen )
     {
         fwdExts.clear();
         auto it = overlaps.begin();
-        while ( (*it).extLen > extCutoff && (*it).extLen > overlaps.back().extLen )
+        while ( (*it).redundant || ( (*it).extLen > extCutoff && (*it).extLen > overlaps.back().extLen ) )
         {
             it++;
+            if ( it == overlaps.end() ) return;
         }
-        overlaps.erase( overlaps.begin(), it );
+        if ( it != overlaps.end() ) overlaps.erase( overlaps.begin(), it );
     }
     else
     {

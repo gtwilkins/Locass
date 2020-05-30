@@ -29,11 +29,12 @@
 class IndexWriter
 {
 public:
-    IndexWriter( PreprocessFiles* fns );
+    IndexWriter( PreprocessFiles* fns, ReadId indexChunk, ReadId markChunk );
     virtual ~IndexWriter();
     
 private:
-    void write();
+    void writeIndex();
+    void writeMers( PreprocessFiles* fns );
     
     FILE* bwt,* idx;
     CharId id;
@@ -45,9 +46,8 @@ private:
     uint8_t contFlag, contMask;
     uint8_t bwtBegin;
     
-    ReadId bwtPerIndex;
-    
-    ReadId basePos[4], countsPerMark, markSizes[5];
+    ReadId bwtPerIndex, countsPerMark;
+    ReadId basePos[4], markSizes[5];
     CharId indexSize, markSize;
     CharId currByte;
     CharId bwtSize;

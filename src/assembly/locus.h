@@ -41,7 +41,7 @@ public:
 //    Locus( Querier &bwt, ifstream &fh );
     virtual ~Locus();
     
-//    void locusTest();
+    void locusTest();
     void addNode( Node* node, int drxn );
     void deleteNodes( NodeSet &delSet );
     void deleteNodes( NodeSet &delSet, bool drxn );
@@ -178,7 +178,6 @@ private:
     NodeList originEnds_[2], toExtend_[2], endNodes_[2], sideNodes_[2], forkNodes_[2];
     NodeList nodes_[5];
     IslandVars* ivs_[2];
-    DrxnVars* dvs_[2];
     unordered_set<SeqNum> leptReads_[2], remappedReads_[2];
     vector<Path> paths_[2];
     int32_t limits_[2], validLimits_[2], reliable_[2], forkLimits_[2];

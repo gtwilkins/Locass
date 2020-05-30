@@ -177,8 +177,8 @@ NodeOffsetMap Node::getDrxnNodesOffset( bool drxn, int32_t limitDist, bool inclS
             for ( Edge &e : curr->edges_[drxn] )
             {
                 if ( fwdSet.find( e.node ) == fwdSet.end() ) continue;
-                int32_t offset = drxn ? e.node->ends_[0] + e.overlap - curr->ends_[1]
-                                      : e.node->ends_[1] - e.overlap - curr->ends_[0];
+                int32_t offset = drxn ? e.node->ends_[0] + e.ol - curr->ends_[1]
+                                      : e.node->ends_[1] - e.ol - curr->ends_[0];
                 int32_t eOff[2] = { currOff[0] + offset, currOff[1] + offset };
                 auto r = nodes.insert( make_pair( e.node, make_pair( eOff[0], eOff[1] ) ) );
                 if ( !r.second )
@@ -213,8 +213,8 @@ void Node::getDrxnNodesOffset( NodeOffsetMap &nodes, bool drxn, int32_t &limit )
         for ( Edge &e : edges_[drxn] )
         {
             int32_t offset = drxn 
-                    ? e.node->ends_[0] + e.overlap - ends_[1]
-                    : e.node->ends_[1] - e.overlap - ends_[0];
+                    ? e.node->ends_[0] + e.ol - ends_[1]
+                    : e.node->ends_[1] - e.ol - ends_[0];
             int32_t offsets[2] = { offset + thisOffsets[0], offset + thisOffsets[1] };
             auto result = nodes.insert( make_pair( e.node, make_pair( offsets[0], offsets[1] ) ) );
             if ( !result.second )
@@ -244,7 +244,7 @@ NodeSet Node::getEndNodes( bool drxn, bool inclStopped )
     getDrxnNodes( fwdSet, drxn );
     for ( Node* fwd : fwdSet )
     {
-        if ( fwd->isContinue( drxn ) || ( inclStopped && fwd->edges_.empty() ) )
+        if ( fwd->isContinue( drxn ) || ( inclStopped && fwd->edges_[drxn].empty() ) )
         {
             ends.insert( fwd );
         }
@@ -360,8 +360,8 @@ NodeIntList Node::getOffsetEdges( bool drxn )
     for ( Edge &e : edges_[drxn] )
     {
         // Offset is of the node from its edge node
-        int32_t offset = drxn ? ends_[1] - e.overlap - e.node->ends_[0]
-                              : ends_[0] + e.overlap - e.node->ends_[1];
+        int32_t offset = drxn ? ends_[1] - e.ol - e.node->ends_[0]
+                              : ends_[0] + e.ol - e.node->ends_[1];
         if ( abs( offset ) > 200 )
         {
             offsets.push_back( make_pair( e.node, offset ) );
@@ -370,12 +370,19 @@ NodeIntList Node::getOffsetEdges( bool drxn )
     return offsets;
 }
 
+int32_t Node::getOffset( Node* node, bool drxn )
+{
+    for ( Edge &e : edges_[drxn] ) if ( e.node == node ) return e.node->ends_[!drxn] - ends_[drxn] + ( drxn ? e.ol : -e.ol );
+    assert( false );
+    return 0;
+}
+
 void Node::getRedundantNodes( NodeSet &nodes, int32_t* coords, bool drxn )
 {
     for ( Edge &e : edges_[drxn] )
     {
-        int32_t offset = drxn ? ends_[1] - e.overlap - e.node->ends_[0]
-                              : ends_[0] + e.overlap - e.node->ends_[1];
+        int32_t offset = drxn ? ends_[1] - e.ol - e.node->ends_[0]
+                              : ends_[0] + e.ol - e.node->ends_[1];
         int32_t offCoords[2] = { coords[0] + offset, coords[1] + offset };
         if ( e.node->ends_[0] <= coords[0] && coords[1] <= e.node->ends_[1] )
         {
@@ -389,12 +396,12 @@ bool Node::isOffset( bool drxn )
 {
     for ( int i( 0 ); i + 1 < edges_[drxn].size(); i++ )
     {
-        int32_t off = drxn ? edges_[drxn][i].node->ends_[0] + edges_[drxn][i].overlap 
-                           : edges_[drxn][i].node->ends_[1] - edges_[drxn][i].overlap;
+        int32_t off = drxn ? edges_[drxn][i].node->ends_[0] + edges_[drxn][i].ol 
+                           : edges_[drxn][i].node->ends_[1] - edges_[drxn][i].ol;
         for ( int j( i + 1 ); j < edges_[drxn].size(); j++ )
         {
-            int32_t off2 = drxn ? edges_[drxn][j].node->ends_[0] + edges_[drxn][j].overlap 
-                                : edges_[drxn][j].node->ends_[1] - edges_[drxn][j].overlap;
+            int32_t off2 = drxn ? edges_[drxn][j].node->ends_[0] + edges_[drxn][j].ol 
+                                : edges_[drxn][j].node->ends_[1] - edges_[drxn][j].ol;
             if ( abs( off - off2 ) > 100 )
             {
                 return true;
@@ -406,38 +413,39 @@ bool Node::isOffset( bool drxn )
 
 bool Node::offset( int32_t off )
 {
-    if ( off != 0 )
+    if ( !off ) return false;
+    
+    assert( drxn_ != 2 );
+    for ( auto &np : pairs_ ) np.first->resetFurthest( this );
+
+    ends_.offset( off );
+    for ( int i( 0 ); i < 4; i++ )
     {
-        assert( drxn_ != 2 );
-        for ( auto &np : pairs_ )
+        if ( validLimits_[i] != numeric_limits<int32_t>::min() && validLimits_[i] != numeric_limits<int32_t>::max() )
         {
-            np.first->resetFurthest( this );
+            validLimits_[i] += off;
         }
-        
-        ends_[0] += off;
-        ends_[1] += off;
-        for ( int i( 0 ); i < 4; i++ )
-        {
-            if ( validLimits_[i] != numeric_limits<int32_t>::min() && validLimits_[i] != numeric_limits<int32_t>::max() )
-            {
-                validLimits_[i] += off;
-            }
-        }
-        for ( auto &read : reads_ )
-        {
-            read.second.offset( off );
-        }
-        for ( ReadMark &mark : marks_[0] )
-        {
-            mark.offset( off );
-        }
-        for ( ReadMark &mark : marks_[1] )
-        {
-            mark.offset( off );
-        }
-        return true;
     }
+    for ( auto &read : reads_ ) read.second.offset( off );
+    for ( NodeMark &mark : pe_[0] ) mark.offset( off );
+    for ( NodeMark &mark : pe_[1] ) mark.offset( off );
+    for ( NodeMark &mark : mp_[0] ) mark.offset( off );
+    for ( NodeMark &mark : mp_[1] ) mark.offset( off );
+    for ( ReadMark &mark : marks_[0] ) mark.offset( off );
+    for ( ReadMark &mark : marks_[1] ) mark.offset( off );
+    return true;
+}
+
+bool Node::offset( Node* prv, bool drxn )
+{
+    for ( Edge &e : edges_[!drxn] ) if ( !prv || e.node == prv ) return offset( e.node->ends_[drxn] - ends_[!drxn] + ( drxn ? -e.ol : e.ol ) );
     return false;
+}
+
+void Node::offsetEdge( Edge &e, bool drxn )
+{
+    int32_t off = ends_[drxn] - e.node->ends_[!drxn] + ( drxn ? -e.ol : e.ol );
+    e.node->offset( off );
 }
 
 void Node::offsetForward( bool drxn, bool sameGraph, bool notSelf )
@@ -494,16 +502,12 @@ void Node::offsetForward( NodeSet &currSet, NodeSet &alreadySet, NodeSet &fwdSet
                 bool first = true;
                 for ( Edge &e : curr->edges_[!drxn] )
                 {
-                    if ( fwdSet.find( e.node ) != fwdSet.end() )
-                    {
-                        valid = valid && alreadySet.find( e.node ) != alreadySet.end();
-                        if ( valid )
-                        {
-                            int32_t edgeOffset = e.node->ends_[drxn] - curr->ends_[!drxn] + ( drxn ? -e.overlap : e.overlap );
-                            off = first ? edgeOffset : ( drxn ? max( off, edgeOffset ) : min( off, edgeOffset ) );
-                            first = false;
-                        }
-                    }
+                    if ( fwdSet.find( e.node ) == fwdSet.end() ) continue;
+                    valid = valid && alreadySet.find( e.node ) != alreadySet.end();
+                    if ( !valid ) continue;
+                    int32_t edgeOffset = e.node->ends_[drxn] - curr->ends_[!drxn] + ( drxn ? -e.ol : e.ol );
+                    off = first ? edgeOffset : ( drxn ? max( off, edgeOffset ) : min( off, edgeOffset ) );
+                    first = false;
                 }
 
                 if ( valid )
@@ -529,6 +533,8 @@ void Node::offsetForward( NodeSet &currSet, NodeSet &alreadySet, NodeSet &fwdSet
                 nxtSet.insert( curr );
             }
         }
+        
+        if ( !didAdvance ) break;
         assert( didAdvance );
         currSet = nxtSet;
     }
@@ -586,8 +592,8 @@ void Node::setOffsetMap( NodeIntMap &offsets, NodeSet useSet, int32_t limit, boo
             {
                 if ( useSet.find( e.node ) == useSet.end() ) continue;
                 if ( offsets.find( e.node ) != offsets.end() ) continue;
-                int32_t offset = drxn ? e.node->ends_[0] - curr->ends_[1] + e.overlap
-                                      : e.node->ends_[1] - curr->ends_[0] - e.overlap;
+                int32_t offset = drxn ? e.node->ends_[0] - curr->ends_[1] + e.ol
+                                      : e.node->ends_[1] - curr->ends_[0] - e.ol;
                 offsets[e.node] = offset + currOffset;
                 
                 int32_t thisEnd = e.node->ends_[drxn] - offset - currOffset;
@@ -596,4 +602,66 @@ void Node::setOffsetMap( NodeIntMap &offsets, NodeSet useSet, int32_t limit, boo
         }
         currSet = nxtSet;
     }
+}
+
+bool Node::setBad( bool drxn )
+{
+    if ( drxn != drxn_ ) return false;
+    if ( bad_ ) return true;
+    bad_ = true;
+    for ( Edge &e : edges_[!drxn] ) if ( !e.node->bad_ && ( e.node->drxn_ == 2 || e.node->drxn_ == drxn_ ) ) bad_ = false;
+    if ( bad_ ) verified_ = branch_ = false;
+    if ( bad_ ) for ( Edge &e : edges_[drxn] ) e.node->setBad( drxn );
+    return bad_;
+}
+
+void Node::setNotBad( bool drxn )
+{
+    if ( !bad_ ) return;
+    assert( drxn_ < 2 );
+    for ( Edge &e : edges_[!drxn] ) if ( !e.node->bad_ && ( e.node->drxn_ == drxn || e.node->drxn_ >= 2 ) )
+    {
+        bad_ = false;
+        drxn_ = drxn;
+        int32_t off = drxn ? e.node->ends_[1] - e.ol - ends_[0] : e.node->ends_[0] - ends_[1] + e.ol;
+        offset( off );
+        break;
+    }
+    assert( !bad_ );
+    if ( bad_ ) return;
+//    if ( drxn != drxn_ && drxn_ < 2 )
+//    {
+//        for ( Edge &e : edges_[!drxn] )
+//        {
+//            if ( e.node->bad_ || e.node->drxn_ == drxn_ ) continue;
+//            int32_t off = drxn ? e.node->ends_[1] - e.ol - ends_[0] : e.node->ends_[0] - ends_[1] + e.ol;
+//            offset( off );
+//            drxn_ = drxn;
+//            break;
+//        }
+//        drxn_ = drxn;
+//    }
+    ends_.init( ends_[!drxn_] );
+    clearPaired( true );
+    for ( Edge &e : edges_[drxn] ) e.node->setNotBad( drxn );
+}
+
+bool Node::setState()
+{
+    if ( drxn_ >= 2 ) return false;
+    bool base = bad_, updated = false, reversed = false;;
+    bad_ = true;
+    for ( Edge& e : edges_[!drxn_] ) if ( !e.node->bad_ && e.node->drxn_ != !drxn_ ) bad_ = false;
+    if ( bad_ ) for ( Edge& e : edges_[drxn_] ) if ( !e.node->bad_ && e.node->drxn_ != drxn_ )
+    {
+        drxn_ = !drxn_;
+        bad_ = false;
+        reversed = true;
+        break;
+    }
+    if ( verified_ ) confirmVerified();
+    if ( !bad_ && bad_ != base ) reverify();
+    for ( Edge& e : edges_[drxn_] ) if ( e.node->bad_ != bad_ && e.node->setState() ) updated = true;
+    if ( reversed ) for ( Edge& e : edges_[!drxn_] ) if ( e.node->drxn_ == !drxn_ && e.node->setState() ) updated = true;
+    return updated || bad_ != base;
 }

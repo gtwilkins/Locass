@@ -144,7 +144,7 @@ void ExportState::exportLocus(Locus* locus)
             for ( int i = 0; i < node->edges_[0].size(); i++ )
             {
                 if ( i > 0 )outFile_ << ",";
-                outFile_ << node->edges_[0][i].node->id_ << "_" << node->edges_[0][i].overlap;
+                outFile_ << node->edges_[0][i].node->id_ << "_" << node->edges_[0][i].ol;
             }
             outFile_ << "\n";
 
@@ -152,7 +152,7 @@ void ExportState::exportLocus(Locus* locus)
             for ( int i = 0; i < node->edges_[1].size(); i++ )
             {
                 if ( i > 0 ) outFile_ << ",";
-                outFile_ << node->edges_[1][i].node->id_ << "_" << node->edges_[1][i].overlap;
+                outFile_ << node->edges_[1][i].node->id_ << "_" << node->edges_[1][i].ol;
             }
             outFile_ << "\n";
 

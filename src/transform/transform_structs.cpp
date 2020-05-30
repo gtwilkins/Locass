@@ -22,7 +22,8 @@
 #include <cassert>
 #include <iostream>
 
-ReadFile::ReadFile( string filename )
+ReadFile::ReadFile( string filename, int baseReadLen, int minScore )
+: readLen( baseReadLen ), minPhred( minScore )
 {
     fh.open( filename );
     
@@ -62,15 +63,18 @@ bool ReadFile::getNext( string &seq )
 {
     if ( getline( fh, seq ) )
     {
-        trimSeq( seq );
-        if ( fileType )
+        if ( fileType ) getline( fh, line );
+        if ( fileType == 3 )
         {
-            string line;
-            for ( int i( 0 ); i < fileType; i++ )
+            getline( fh, line );
+            for ( int i( 0 ); i < line.size(); i++ )
             {
-                getline( fh, line );
+                if ( line[i] < minPhred ) seq[i] = 'N';
             }
+            getline( fh, line );
         }
+        
+        trimSeq( seq );
         
         return true;
     }
@@ -80,24 +84,35 @@ bool ReadFile::getNext( string &seq )
 
 void ReadFile::setReadLen()
 {
-    readLen = 0;
     string seq;
     size_t curr = fh.tellg();
-    if ( getline( fh, seq ) )
+    fh.seekg( 0 );
+    int i = 0, j = 0;
+    while ( getline( fh, seq ) && !seq.empty() && i < 1000 )
     {
-        readLen = seq.length();
-        if ( seq.length() < 80 )
+        if ( !fileType || j == 1 )
         {
-            cerr << "Error: Read length of " << seq.length() << " detected. Minimum length of 80 is supported." << endl;
-            exit( EXIT_FAILURE );
+            if ( seq.length() > 255 )
+            {
+                cerr << "Error: Read length of " << seq.length() << " detected. Maximum length of 255 is supported." << endl;
+                exit( EXIT_FAILURE );
+            }
+            readLen = max( readLen, (uint8_t)seq.length() );
         }
-        if ( seq.length() > 250 )
+        if ( j++ == fileType )
         {
-            cerr << "Error: Read length of " << seq.length() << " detected. Maximum length of 250 is supported." << endl;
-            exit( EXIT_FAILURE );
+            j = 0;
+            i++;
         }
     }
+    
+    if ( readLen < 80 )
+    {
+        cerr << "Error: Read length of " << seq.length() << " detected. Minimum length of 80 is supported." << endl;
+        exit( EXIT_FAILURE );
+    }
     fh.seekg( curr );
+    fh.clear();
 }
 
 void ReadFile::trimSeq( string &seq )

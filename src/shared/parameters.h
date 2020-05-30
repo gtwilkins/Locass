@@ -26,7 +26,8 @@
 struct Lib {
     Lib() : size( 0 ), minDist( 0 ), maxDist( 0 ), orientation( 0 ), isPe( false ) {};
     bool doAddMarker( bool thisRev, int &pairRev, bool drxn );
-    bool getPair( ReadId &readId, int32_t dist, int &pairDrxn );
+    int getPair( ReadId &readId );
+    bool getPair( ReadId &readId, int &pairDrxn );
     void setMinMax();
     
     int32_t size, minDist, maxDist;
@@ -39,17 +40,22 @@ struct Parameters {
     Parameters();
     
     void checkReady();
-    bool isReadPe( ReadId &readId );
+    bool isReadPe( ReadId id );
+    bool isReadMp( ReadId id );
     int32_t getFurthestMpDist( int32_t coord, bool drxn );
     int32_t getFurthestPeDist( int32_t coord, bool drxn );
     int32_t getFurthestMpMean( int32_t coord, bool drxn );
     int32_t getFurthestPeMean( int32_t coord, bool drxn );
     Lib* getLib( const ReadId &readId );
-    int32_t getLibSize( ReadId &readId );
+    int32_t getLibSize( ReadId readId );
     ReadId getPairId( const ReadId readId );
     ReadId getRevId( const ReadId readId );
     void set();
     void setLimits( int32_t &limit );
+    int setPair( ReadId &id );
+    bool setPairId( ReadId &id, bool pairDrxn );
+    int32_t shortLen();
+    void write( FILE* fp );
     
     int readLen, queryMpCutoff;
     int32_t locusLimits[2];
@@ -58,7 +64,7 @@ struct Parameters {
     float cover, readSpacing, branchMinHits, peCover, peRatio;
     SeqNum seqCount;
     uint8_t outMode;  // 0 = unitig, 1 = alleles
-    bool isSet, isCalibrated;
+    bool isSet, isCalibrated, haploid, drxns[2], rna;
     
 };
 

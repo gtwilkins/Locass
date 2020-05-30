@@ -20,458 +20,343 @@
 
 #include "node.h"
 #include <algorithm>
+#include "shared_functions.h"
 
-bool Node::isSeed( int32_t seedLen )
+void Node::addSeed( NodeRoll& nodes, ReadStruct& read )
 {
-    return validLimits_[0] < ends_[1] && 0 < ends_[1] && ends_[0] < validLimits_[3] && ends_[0] < seedLen;
+    // Redundant read, no need to append
+    bool added = false;
+    for ( Node* node : nodes.nodes ) if ( node->addSeed( read ) ) added = true;
+    if ( added ) return;
+    
+    // Check posssible overlaps and splits
+    NodeIntList ols;
+    NodeIntIntList splits;
+    int nodeCount = nodes.size();
+    for ( int i = 0; i < nodeCount; i++ ) nodes[i]->addSeed( read, nodes, ols, splits );
+    
+    // Remove unfavourable overlaps and splits
+    NodeSet fwdSet;
+    for ( int i = 0; i < ols.size(); i++ ) ols[i].first->getDrxnNodes( 0 );
+    for ( int i = 0; i < splits.size(); i++ ) get<0>( splits[i] )->getDrxnNodes( 0 );
+    for ( int i = 0; i < ols.size(); i++ ) if ( fwdSet.find( ols[i].first ) != fwdSet.end() ) ols.erase( ols.begin() + i-- );
+    for ( int i = 0; i < splits.size(); i++ ) if ( fwdSet.find( get<0>( splits[i] ) ) != fwdSet.end() ) splits.erase( splits.begin() + i-- );
+    
+    int32_t maxOl = 0;
+    for ( int i = 0; i < ols.size(); i++ ) maxOl = max( maxOl, ols[i].second );
+    for ( int i = 0; i < splits.size(); i++ ) maxOl = max( maxOl, get<1>( splits[i] ) );
+    for ( int i = 0; i < ols.size(); i++ ) if ( ols[i].second < min( maxOl, ols[i].first->getBestOverlap( 1 ) ) ) ols.erase( ols.begin() + i-- );
+    
+    // Do splits
+    for ( int i = 0; i < splits.size(); i++ )
+    {
+        if ( get<1>( splits[i] ) < maxOl ) continue;
+        get<0>( splits[i] )->splitNode( get<2>( splits[i] ), nodes, 1 );
+        ols.push_back( make_pair( get<0>( splits[i] ), get<1>( splits[i] ) ) );
+    }
+    
+    if ( ols.size() == 1 && ols[0].first->edges_[1].empty() )
+    {
+        ols[0].first->addSeed( read, ols[0].second );
+        return;
+    }
+    
+    Node* node = new Node( read );
+    nodes += node;
+    
+    for ( int i = 0; i < ols.size(); i++ ) node->addEdge( ols[i].first, ols[i].second, 0 );
 }
 
-void Node::seedAdd( ReadStruct &read )
+bool Node::addSeed( ReadStruct &read )
 {
-    int32_t diff = read.coords[1] - ends_[1];
-    if ( diff >= 0 )
+    size_t it = seq_.find( read.seq );
+    if ( it == string::npos ) return false;
+    
+    int coords[2]{ int( ends_[0]+it ), int( ends_[0]+it+read.seq.size() ) };
+    add( read.id, coords[0], coords[1], isRedundant( coords[0], coords[1] ) );
+    readTest();
+    ends_.init( read.tether[0], 0 );
+    ends_.init( read.tether[1], 1 );
+    
+    return true;
+}
+
+void Node::addSeed( ReadStruct &read, int ol )
+{
+    int coords[2]{ ends_[1] - ol, int( ends_[1] - ol + read.seq.size() ) };
+    string seq = read.seq.substr( ol );
+    appendSeq( seq, 1 );
+    add( read.id, coords[0], coords[1], false );
+    readTest();
+    ends_.init( read.tether[0], 0 );
+    ends_.init( read.tether[1], 1 );
+    setOrigin();
+}
+
+void Node::addSeed( ReadStruct& read, NodeRoll& nodes, NodeIntList& ols, NodeIntIntList& splits )
+{
+    if ( int ol = mapSeqOverlap( seq_, read.seq, params.readLen / 2 ) )
     {
-        validLimits_[2] = validLimits_[3] = read.tether[1];
-        seq_ += read.seq.substr( read.seq.length() - diff );
-        ends_[1] += diff;
+        ols.push_back( make_pair( this, ol ) );
+        return;
     }
-    else
+    
+    int32_t coords[2], splitCoords[2];
+    if ( !mapSeqEnd( read.seq, seq_, params.readLen / 2, coords, 0 ) ) return;
+    coords[0] += ends_[0];
+    coords[1] += ends_[0];
+    if ( !getSplitCoords( splitCoords, coords[1], 0 ) ) return;
+    coords[1] = splitCoords[0];
+    
+    if ( coords[1] - coords[0] > splitCoords[0] - splitCoords[1] )
     {
+        for ( Node* node : splitNode( splitCoords[1], nodes, 1 ) ) node->drxn_ = 2;
+        ols.push_back( make_pair( this, coords[1] - coords[0] ) );
         assert( false );
+        return;
     }
-    reads_.insert( make_pair( read.readId, Coords( read.coords[0], read.coords[1], diff < 0 ) ) );
+    
+    splits.push_back( make_tuple( this, coords[1] - coords[0], splitCoords[1] ) );
 }
 
-bool Node::seedCongruent( ReadStruct &read, int32_t &coord )
+void Node::seedNode( Querier& bwt, NodeRoll& nodes, vector<Node*>& added, vector<Node*>& seeded, string& seq, ReadId id, int32_t coord, bool drxn )
 {
-    bool congruent = read.tether[0] == read.coords[0] && validLimits_[0] <= read.tether[0] && read.tether[0] < validLimits_[3];
-    bool maybe = read.tether[0] <= validLimits_[0];
-    coord = min( read.tether[1], validLimits_[3] );
+    for ( Node* node : nodes.nodes ) if ( node->add( id, seq ) ) added.push_back( node );
+    if ( !added.empty() ) return;
     
-    if ( !congruent && maybe )
+    Node* seed = new Node( seq, id, coord, drxn, true );
+    nodes += seed;
+    
+    for ( Node* node : nodes.nodes ) for ( auto& read : node->reads_ ) if ( read.second.redundant ) assert( read.second[1] - read.second[0] < params.readLen );
+    bool redundant = false, good = false;
+    for ( int d : { 0, 1 } )
     {
-        congruent = true;
-        int32_t diff = read.coords[0] - ends_[0];
-        int32_t len = max( read.tether[0], validLimits_[0] ) - read.coords[0];
-        for ( int i( 0 ); i < len; i++ )
+        QueryJunction qj = bwt.mapJunction( seq, d );
+        seed->stop( qj.failure_, d );
+        if ( qj.failure_ ) continue;
+        seed->addAlts( qj.alts_, nodes, d, drxn );
+        for ( QueryNode* qn : qj.alts_) if ( qn->seq.find( seq ) != string::npos ) redundant = true;
+        if ( redundant )
         {
-            congruent = congruent && seq_[i+diff] == read.seq[i];
+            assert( !d || ( seed->edges_[0].empty() && seed->reads_.size() == 1 ) );
+            nodes.erase( seed );
+            for ( Node* node : nodes.nodes ) if ( node->add( id, seq ) ) seeded.push_back( node );
+            for ( Node* node : seeded ) node->extendNode( bwt, nodes, d );
+            for ( Node* node : seeded ) node->extendNode( bwt, nodes, !d );
+            assert( !seeded.empty() );
+            return;
         }
+        seed->addExtensions( qj.nodes_, nodes, d, drxn );
+        seed->extendNode( bwt, nodes, d );
+        good = true;
     }
     
-    while( congruent && coord != ends_[1] && seq_[coord - ends_[0]] == read.seq[coord - read.coords[0]] )
-    {
-        coord++;
-    }
-    
-    if ( congruent && coord != ends_[1] )
-    {
-        congruent = false;
-        for ( auto &read : reads_ )
-        {
-            congruent = congruent || read.second[1] <= coord;
-        }
-    }
-    
-    return congruent;
+    if ( !good ) nodes.erase( seed );
+    else seeded.push_back( seed );
+    for ( Node* node : nodes.nodes ) for ( auto& read : node->reads_ ) if ( read.second.redundant ) assert( read.second[1] - read.second[0] < params.readLen );
+    for ( Node* node : seeded ) node->remap( bwt );
+    for ( Node* node : nodes.nodes ) for ( auto& read : node->reads_ ) if ( read.second.redundant ) assert( read.second[1] - read.second[0] < params.readLen );
 }
 
-void Node::seedGetExtend( NodeList* extendNodes, NodeSet &seedSet, NodeSet &delSet, int32_t* limits )
+//void Node::seedNode( Querier& bwt, NodeRoll& nodes, ReadId id, int32_t coord, int drxn )
+//{
+//    string seq = bwt.getSequence( id );
+//    
+//    vector<Node*> seeded;
+//    for ( Node* node : nodes.nodes ) if ( node->add( id, seq ) ) seeded.push_back( node );
+//    assert( seeded.empty() );
+//    
+//    Node* seed = new Node( seq, id, coord, drxn, true );
+//    nodes += seed;
+//    for ( int d : { 0, 1 } ) seed->extendNode( bwt, nodes, d );
+//    seed->extendFork( bwt, nodes, 300, 8, 0 );
+//}
+
+vector<Node*> Node::seedNode( Querier& bwt, NodeRoll& nodes, string s, int lOl, int rOl, int drxn, int32_t coord )
 {
-    for ( int drxn : { 0, 1 } )
+    MapNode mn;
+    mn.seq = s;
+    bwt.mapSequence( mn.seq, mn.ids, mn.coords );
+//    mn.recoil();
+    mn.setRedundant();
+    
+    int len = 0, mark = 0;
+    bool good = false;
+    struct Exts
     {
-        NodeSet currSet = seedSet;
-        NodeIntMap edgeMap;
-        
-        while( !currSet.empty() )
+        Exts( Node* node, Coords* coords, int i, int j )
+        : node( node ), created( !coords ), ended( !coords )
         {
-            NodeSet nxtSet;
-            NodeSet currFwd;
-            for ( Node* curr : currSet )
+            mapped[0][0] = i;
+            mapped[0][1] = j;
+            mapped[1][0] = coords ? coords->coords[0] : node->ends_[0];
+            mapped[1][1] = coords ? coords->coords[1] : node->ends_[1];
+        };
+        Node* node;
+        vector<Node*> edges[2];
+        int32_t mapped[2][2];
+        bool created, ended;
+    };
+    vector<Exts> exts;
+    Coords* coords;
+    for ( int i = 0; i <= mn.ids.size(); i++ ) if ( i == mn.ids.size() || len < mn.coords[1][i] )
+    {
+        vector<Exts> exted;
+        bool bad = i == mn.ids.size();
+        if ( !bad ) len = mn.coords[1][i];
+        if ( !bad ) for ( Node* node : nodes.nodes ) if ( coords = node->getRead( mn.ids[i] ) )
+        {
+            bool added = false;
+            for ( Exts& ext : exts ) if ( !ext.ended && node->isClone( ext.node ) && ( added = true ) )
             {
-                curr->getDrxnNodes( currFwd, drxn );
+                ext.mapped[0][1] = mn.coords[1][i];
+                ext.mapped[1][1] = coords->coords[1];
             }
-            
-            for ( Node* curr : currSet )
-            {
-                if ( currFwd.find( curr ) != currFwd.end() )
-                {
-                    nxtSet.insert( curr );
-                }
-                else
-                {
-                    int edgeCount = 8 + curr->edges_[!drxn].size();
-
-                    for ( Node* bck : curr->getNextNodes( !drxn ) )
-                    {
-                        auto it = edgeMap.find( bck );
-                        edgeCount = it != edgeMap.end() ? min( edgeCount, it->second ) : edgeCount;
-                    }
-                    
-                    edgeCount = seedSet.find( curr ) != seedSet.end() ? curr->edges_[!drxn].size() : edgeCount;
-                    edgeCount += curr->edges_[drxn].size() - curr->edges_[!drxn].size();
-                    
-                    if ( edgeCount < 8 && ( drxn ? curr->ends_[1] < limits[1] : limits[0] < curr->ends_[0] ) )
-                    {
-                        if ( curr->isContinue( drxn ) && !curr->clones_ )
-                        {
-                            extendNodes[drxn].push_back( curr );
-                        }
-                        curr->getNextNodes( nxtSet, drxn );
-                    }
-
-                    edgeMap[curr] = edgeCount;
-                }
-            }
-            currSet = nxtSet;
+            if ( !added ) exted.push_back( Exts( node, coords, mn.coords[0][i], mn.coords[1][i] ) );
+            bad = true;
         }
+        for ( Exts& ext : exts ) if ( ext.mapped[0][1] != len ) ext.ended = true;
+        if ( good && bad )
+        {
+            Node* seed = new Node( mn.seq, coord, drxn );
+            for ( int j = mark; j < i; j++ ) seed->add( mn.ids[j], mn.coords[0][j], mn.coords[1][j], mn.redundant[j] );
+            seed->recoil();
+            nodes += seed;
+            exts.push_back( Exts( seed, NULL, mn.coords[0][mark], mn.coords[0][mark]+seed->size() ) );
+        }
+        if ( good == bad ) mark = i;
+        good = !bad;
+        exts.insert( exts.end(), exted.begin(), exted.end() );
     }
-}
-
-bool Node::seedJoin( Node* node, int32_t coord, bool drxn )
-{
-//    for ( bool d : { 0, 1 } )
+    
+    lOl -= mn.coords[0][0];
+    rOl -= mn.seq.size() - len;
+    
+    for ( Exts& ext : exts ) if ( !ext.created ) for ( int d : { 0, 1 } ) if ( ext.mapped[1][!d] != ext.node->ends_[!d] ) ext.node->splitNode( ext.mapped[1][!d], nodes, d )[0];;
+    for ( int i = 0; i < exts.size(); i++ ) for ( int j = i+1; j < exts.size(); j++ ) for ( int d : { 0, 1 } ) assert( exts[i].mapped[0][d] < exts[j].mapped[0][d] );
 //    {
-//        bool anyOrigin = false;
-//        NodeSet bckSet = ( d == drxn ? this : node )->getDrxnNodes( !d, false, true );
-//        for ( Node* bck : bckSet )
+//        for ( int j = i+1; j < exts.size(); j++ ) if ( exts[i].node->isClone( exts[j].node ) ) exts.erase( exts.begin() + j-- );
+//        for ( int j = i+1; j < exts.size(); j++ ) for ( int d : { 0, 1 } ) assert( exts[i].mapped[0][d] < exts[j].mapped[0][d] );
+//        for ( int d : { 0, 1 } ) if ( exts[i].mapped[1][!d] != exts[i].node->ends_[!d] ) exts[i].node = exts[i].node->splitNode( exts[i].mapped[1][!d], nodes, d )[0];
+//        bool clone = !exts[i].node->bad_ && ( lOl > 0 || i ) && ( rOl > 0 || i+1 != exts.size() );
+//        if ( clone ) exts[i].node = new Node( exts[i].node, nodes, drxn, false );
+//    }
+    for ( int i = 1; i < exts.size(); i++ ) exts[i-1].node->addEdge( exts[i].node, exts[i-1].mapped[0][1] - exts[i].mapped[0][0], 1, false );
+    
+    if ( !exts.empty() ) for ( int d : { 0, 1 } ) if ( ( d ? rOl : lOl ) > 0 )
+    {
+        int32_t coords[2];
+        Node* base = ( d ? exts.back() : exts[0] ).node,* edge;
+        Nodes block;
+        for ( Node* clone : base->clones() ) for ( Edge& e : clone->edges_[d] ) block += e.node;
+        for ( int i = 0; i < nodes.size(); i++ ) if ( ( edge = nodes[i] ) && !base->isClone( edge ) && mapSeqEnd( base->seq_, edge->seq_, d ? rOl : lOl, coords, d ) )
+        {
+            if ( !block.add( edge ) ) continue;
+            int32_t cut = coords[!d] + nodes[i]->ends_[0];
+            if ( !edge->getNextReadCoord( cut, !d, d ) ) continue;
+            if ( d ? edge->ends_[0] < cut : cut < edge->ends_[1] ) edge = edge->splitNode( cut, nodes, d )[0];
+            base->addEdge( edge, coords[1] - coords[0], d, false );
+            block += edge;
+        }
+    }
+    
+    for ( int i = 0; i < exts.size(); i++ ) ( drxn ? exts[i] : exts.end()[-i-1] ).node->offset( NULL, drxn );
+    if ( drxn == 2 ) for ( int i = 0; i < exts.size(); i++ ) exts[i].node->setOrigin();
+    
+    vector<Node*> path;
+    for ( Exts& ext : exts )
+    {
+        for ( int d : { 0 , 1 } ) ext.node->extendNode( bwt, nodes, d );
+        if ( !ext.node->bad_ ) ext.node->setVerified();
+        path.push_back( ext.node );
+    }
+    
+    return path;
+    
+//    bool seeded = false;
+//    Nodes seeds;
+//    for ( int i = 0; i < mn.ids.size(); i++ ) if ( !mn.redundant[i] ) for ( Node* node : nodes.nodes ) if ( node->getRead( mn.ids[i] ) ) seeds += node;
+//    if ( !seeds.empty() )
+//    {
+//        for ( Node* node : seeds.nodes ) for ( int d : { 0, 1 } ) if ( node->edges_[d].empty() )
 //        {
-//            anyOrigin = anyOrigin || bck->drxn_ == 2;
+//            node->stop( 0, d );
+//            node->extendNode( bwt, nodes, d );
+//            if ( !node->edges_[d].empty() ) seeded = true;
 //        }
-//        if ( !anyOrigin )
+//        if ( seeded ) for ( Node* node : seeds.nodes ) if ( !node->bad_ ) node->setVerified();
+//        if ( seeded ) return;
+//    }
+//    
+//    Node* seed = new Node( mn.seq );
+//    nodes += seed;
+//    seed->drxn_ = drxn;
+//    seed->ends_[0] = 0;
+//    seed->ends_[1] = seed->seq_.size();
+//    if ( drxn == 2 ) seed->setOrigin();
+//    for ( int i = 0; i < mn.ids.size(); i++ ) seed->add( mn.ids[i], mn.coords[0][i], mn.coords[1][i], mn.redundant[i] );
+//    for ( int d : { 0, 1 } ) seed->extendNode( bwt, nodes, d );
+//    if ( !seed->bad_ ) seed->setVerified();
+}
+
+void Node::trimSeed( Querier &bwt, NodeRoll &nodes )
+{
+    NodeList tests[2];
+    int goods[2]{0};
+    Nodes good[2];
+    for ( Node* node : nodes.nodes )
+    {
+        int readCount = node->countReads( true );
+        for ( int d : { 0, 1 } )
+        {
+            if ( readCount > 2 ) good[d].fill( node, !d, true );
+            else if ( node->edges_[d].empty() )
+            {
+                int minOl = max( 1 + params.readLen / 2, 10 + (int)node->seq_.size() - node->getBestOverlap( !d ) );
+                if ( bwt.isExtendable( node->seq_, minOl, d ) ) good[d].fill( node, !d, true );
+            }
+            else for ( Edge& e : node->edges_[!d] )
+            {
+                if ( readCount + e.node->countReads( true ) ) good[d].fill( e.node, !d, true );
+                else for ( Edge& fe : e.node->edges_[!d] ) good[d].fill( fe.node, !d, true );
+            }
+        }
+    }
+    
+    assert( !good[0].empty() && !good[1].empty() );
+    
+    for ( int i = nodes.size(); i-- > 0; ) if ( !good[0].find( nodes[i] ) || !good[1].find( nodes[i] ) ) nodes.erase( nodes[i] );
+    
+//    for ( Node* node : nodes.nodes )
+//    {
+//        int readCount = node->countReads( true );
+//        for ( int i = 0; i < 2; i++ )
 //        {
-//            int x = 0;
-//            for ( Node* bck : bckSet )
-//            {
-//                bck->drxn_ = !d;
-//            }
-//            assert( false );
-//            return;
+//            if ( !node->edges_[i].empty() ) continue;
+//            if ( readCount > 2 ) goods[i]++;
+//            else tests[i].push_back( node );
+//        }
+//        if ( node->edges_[0].empty() || node->edges_[1].empty() || readCount > 1 ) continue;
+//        
+//        // NYI: remove a weak and redundant node
+//        NodeSet selfSet = { node }, lSet, rSet;
+//        for ( Edge &e : node->edges_[0] ) e.node->getDrxnNodesNotInSet( lSet, selfSet, 1 );
+//        for ( Edge &e : node->edges_[1] ) if ( lSet.find( e.node ) != lSet.end() ) assert( false );
+//    }
+//    
+//    for ( int i = 0; i < 2; i++ )
+//    {
+//        for ( Node* node : tests[i] ) if ( !nodes.find( node ) && node->edges_[i].empty() )
+//        {
+//            bwt.isExtendable()
+//            bool noMatches = false;
+//            int minOl = max( 1 + params.readLen / 2, 10 + (int)node->seq_.size() - node->getBestOverlap( !i ) );
+//            bwt.mapExtensions( noMatches, node->seq_, i, minOl );
+//            if ( noMatches ) nodes.erase( node );
+//            else assert( false );
 //        }
 //    }
     
-    NodeSet bckSet = node->getDrxnNodes( !drxn );
-    for ( Node* bck : getDrxnNodes( !drxn ) )
-    {
-        assert( bckSet.find( bck ) == bckSet.end() );
-    }
-    
-    if ( drxn ? ends_[1] <= coord + 100 : coord - 100 <= ends_[0] )
-    {
-        Node* fwdNode = ( drxn ? node : this );
-        
-        NodeSet fwdSet = fwdNode->getDrxnNodes( 1, false, true );
-        NodeSet revSet;
-
-        for ( Node* fwd : fwdSet )
-        {
-            fwd->drxn_ = 1;
-        }
-
-        for ( Node* connected : fwdNode->getConnectedNodes( false ) )
-        {
-            if ( connected->drxn_ == 2 )
-            {
-                revSet.insert( connected );
-                connected->getDrxnNodes( revSet, 0 );
-            }
-        }
-
-        for ( Node* fwd : fwdNode->getDrxnNodes( 1, false, true ) )
-        {
-            fwdSet.insert( fwd );
-            fwd->getDrxnNodesNotInSet( fwdSet, revSet, 0 );
-        }
-
-        for ( Node* fwd : fwdSet )
-        {
-            fwd->drxn_ = 1;
-        }
-        
-        return true;
-    }
-    
-    return false;
-}
-
-void Node::seedJoinLoci( Node** nodes )
-{
-    NodeSet fwdSets[2];
-    NodeSet revSets[2];
-    for ( bool drxn : { 0, 1 } )
-    {
-        fwdSets[drxn] = nodes[drxn]->getDrxnNodes( drxn, false, true );
-    }
-    
-    for ( bool drxn : { 0, 1 } )
-    {
-        for ( Node* node : fwdSets[drxn] )
-        {
-            for ( Node* prv : node->getNextNodes( !drxn ) )
-            {
-                if ( fwdSets[drxn].find( prv ) == fwdSets[drxn].end()
-                        && revSets[drxn].find( prv ) == revSets[drxn].end() )
-                {
-                    revSets[drxn].insert( prv );
-                    prv->getDrxnNodesNotInSet( revSets[drxn], fwdSets[!drxn], !drxn );
-                }
-            }
-        }
-    }
-    
-    assert( false );
-}
-
-void Node::seedSetDrxnNodes( Node* fork, NodeList &nodes, bool drxn )
-{
-    for ( Node* fwd : fork->getDrxnNodes( drxn ) )
-    {
-        fwd->drxn_ = drxn;
-        fwd->validLimits_[0] = fwd->validLimits_[1];
-        fwd->validLimits_[3] = fwd->validLimits_[2];
-        if ( find ( nodes.begin(), nodes.end(), fwd ) == nodes.end() )
-        {
-            nodes.push_back( fwd );
-        }
-    }
-    vector<Edge> edges;
-    for ( Edge &e : fork->edges_[drxn] )
-    {
-        edges.push_back( e );
-        e.node->removeEdge( fork, !drxn );
-    }
-    fork->edges_[drxn].clear();
-    
-    for ( Edge &e : edges )
-    {
-        addEdge( e.node, e.overlap, drxn );
-    }
-}
-
-Node* Node::seedSetOrigin( NodeList &forkList )
-{
-    Node* node = new Node();
-    node->drxn_ = 2;
-    node->ends_[0] = forkList[0]->ends_[0];
-    node->ends_[1] = forkList[0]->ends_[1];
-    node->seq_ = forkList[0]->seq_;
-    node->validLimits_[0] = forkList[0]->validLimits_[1];
-    node->validLimits_[1] = forkList[0]->validLimits_[1];
-    node->validLimits_[2] = forkList[0]->validLimits_[2];
-    node->validLimits_[3] = forkList[0]->validLimits_[2];
-    
-    int readCount[forkList.size()];
-    readCount[0] = forkList[0]->reads_.size();
-    
-    for ( auto &read : forkList[0]->reads_ )
-    {
-        node->reads_.insert( read );
-    }
-    
-    int32_t offset = 0;
-    for ( int i( 1 ); i < forkList.size(); i++ )
-    {
-        int32_t overlap = forkList[i-1]->getOverlap( forkList[i], 1 );
-        offset += forkList[i]->ends_[0] - forkList[i-1]->ends_[1] + overlap;
-        node->seq_ += forkList[i]->seq_.substr( overlap );
-        for ( auto read : forkList[i]->reads_ )
-        {
-            read.second.offset( -offset );
-            node->reads_.insert( read );
-        }
-        node->ends_[1] = forkList[i]->ends_[1] - offset;
-        node->validLimits_[0] = min( node->validLimits_[0], forkList[i]->validLimits_[1] - offset );
-        node->validLimits_[1] = min( node->validLimits_[1], forkList[i]->validLimits_[1] - offset );
-        node->validLimits_[2] = max( node->validLimits_[2], forkList[i]->validLimits_[2] - offset );
-        node->validLimits_[3] = max( node->validLimits_[3], forkList[i]->validLimits_[2] - offset );
-        readCount[i] = forkList[i]->reads_.size();
-    }
-    
-    int seqLen = node->seq_.length();
-    assert( node->ends_[1] - node->ends_[0] == node->seq_.length() );
-    node->setCoverage();
-    int x = 0;
-    
-    return node;
-}
-
-void Node::seedSplit( NodeList &nodes, int32_t coord )
-{
-    Node* node = new Node();
-    node->ends_[1] = node->ends_[0] = ends_[1];
-    ends_[1] = ends_[0];
-    for ( auto it = reads_.begin(); it != reads_.end(); )
-    {
-        if ( it->second[1] <= coord )
-        {
-            ends_[1] = max( ends_[1], it->second[1] );
-            it++;
-        }
-        else
-        {
-            node->ends_[0] = min( node->ends_[0], it->second[0] );
-            node->reads_.insert( *it );
-            it = reads_.erase( it );
-        }
-    }
-    
-    node->validLimits_[2] = node->validLimits_[3] = max( validLimits_[3], node->ends_[0] );
-    node->validLimits_[0] = node->validLimits_[1] = max( validLimits_[0], node->ends_[0] );
-    validLimits_[2] = validLimits_[3] = min( validLimits_[3], ends_[1] );
-    
-    node->seq_ = seq_.substr( seq_.length() - ( node->ends_[1] - node->ends_[0] ) );
-    seq_.erase( seq_.begin() + ( ends_[1] - ends_[0] ), seq_.end() );
-    for ( Edge &e : edges_[1] )
-    {
-        node->addEdge( e.node, e.overlap, 1, false );
-        e.node->removeEdge( this, 0 );
-    }
-    edges_[1].clear();
-    node->addEdge( this, 0 );
-    nodes.push_back( node );
-}
-
-void Node::seedValidate( NodeSet &seedSet, NodeSet &delSet, int32_t* validLimits, int32_t* ends, bool doDel )
-{
-    NodeList notValid[2] = { { seedSet.begin(), seedSet.end() }, { seedSet.begin(), seedSet.end() } };
-    
-    for ( bool drxn : { 0, 1 } )
-    {
-        NodeSet currSet = { notValid[drxn].begin(), notValid[drxn].end() };
-        notValid[drxn].clear();
-        while ( !currSet.empty() )
-        {
-            NodeSet nxtSet, currFwd;
-            for ( Node* curr : currSet )
-            {
-                curr->getDrxnNodes( currFwd, drxn );
-            }
-
-            for ( Node* curr : currSet )
-            {
-                if ( curr->isDeadEnd( drxn ) && doDel )
-                {
-                    curr->dismantleNode( delSet, drxn );
-                    seedSet.erase( curr );
-                }
-                else if ( currFwd.find( curr ) != currFwd.end() )
-                {
-                    nxtSet.insert( curr );
-                }
-                else if ( curr->validate( drxn ) )
-                {
-                    curr->getNextNodes( nxtSet, drxn );
-                }
-                else
-                {
-                    notValid[drxn].push_back( curr );
-                }
-
-                validLimits[drxn] = ( drxn ? max( validLimits[1], curr->validLimits_[2] )
-                                      : min( validLimits[0], curr->validLimits_[1] ) );
-            }
-
-            currSet = nxtSet;
-        }
-    }
-    
-    if ( ends[1] - ends[0] > params.maxPeMean && doDel )
-    {
-        int cutoff = (params.maxPeMean * params.cover * 2 ) / params.readLen;
-        for ( bool drxn : { 0, 1 } )
-        {
-            for ( Node* node : notValid[drxn] )
-            {
-                int misses = node->getEndMarks( drxn ) * 5;
-                int hits = 2;
-                int32_t endCoord = node->ends_[drxn];
-                for ( Node* fwd : node->getDrxnNodes( drxn ) )
-                {
-                    endCoord = drxn ? max( endCoord, fwd->ends_[1] )
-                                    : min( endCoord, fwd->ends_[0] );
-                    misses += fwd->reads_.size();
-                    hits += fwd->getPairHitsTotal();
-                }
-                
-                if ( misses / hits > cutoff && hits < 4 )
-                {
-                    node->dismantleNode( delSet, drxn );
-                }
-            }
-        }
-    }
-}
-
-bool Node::seedValidate( bool drxn )
-{
-    if ( validated_ )
-    {
-        return true;
-    }
-    
-    NodeList tNodes = this->getTargetNodes( drxn, true );
-    NodeOffsetMap fwdMap = getDrxnNodesOffset( drxn, 0, true );
-    NodeOffsetMap revMap = getDrxnNodesOffset( !drxn, 0, true );
-    
-    while ( seedValidate( tNodes, fwdMap, revMap, drxn ) );
-    for ( Node* fwd : getDrxnNodes( drxn ) )
-    {
-        fwd->seedValidate( tNodes, fwdMap, revMap, drxn );
-    }
-    
-    validated_ = validated_ || ( !isContinue( 0 ) && !isContinue( 1 ) && validLimits_[1] == ends_[0] && validLimits_[2] == ends_[1] );
-    
-    return ( drxn ? validLimits_[2] == ends_[1] : validLimits_[1] == ends_[0] );
-}
-
-bool Node::seedValidate( NodeList &tNodes, NodeOffsetMap &fwdMap, NodeOffsetMap &revMap, bool drxn )
-{
-    bool didPair = false;
-    unordered_set<SeqNum> usedIds;
-    NodeSet tSet = getDrxnNodes( !drxn ), hitSet;
-    int x = 0;
-
-    for ( ReadMark &mark : marks_[drxn] )
-    {
-        if ( drxn ? validLimits_[1] < mark.mark
-                  : mark.mark < validLimits_[2] )
-        {
-            for ( Node* t : tNodes )
-            {
-                auto it = t->reads_.find( mark.id );
-                if ( it != t->reads_.end()
-                        && ( drxn ? it->second[1] <= t->validLimits_[2] : validLimits_[1] <= it->second[0] ) )
-                {
-                    didPair = true;
-                    hitSet.insert( t );
-                    usedIds.insert( mark.id );
-                    pushValidLimits( mark.mark, drxn );
-                    t->pushValidLimits( it->second[!drxn], !drxn );
-                    NodeSet midSet = t->getDrxnNodesInSet( tSet, drxn );
-                    auto r = pairs_.insert( make_pair( t, 1 ) );
-                    if ( !r.second ) r.first->second++;
-                    if ( this != t )
-                    {
-                        r = t->pairs_.insert( make_pair( this, 1 ) );
-                        if ( !r.second ) r.first->second++;
-                        pushValidLimits( ends_[!drxn], !drxn );
-                        t->pushValidLimits( t->ends_[drxn], drxn );
-                        for ( Node* node : midSet )
-                        {
-                            node->pushValidLimits( node->ends_[0], 0 );
-                            node->pushValidLimits( node->ends_[1], 1 );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    for ( Node* node : hitSet )
-    {
-        node->removeMarks( usedIds, false, true, !drxn );
-    }
-    removeMarks( usedIds, false, false, drxn );
-    
-    return didPair;
+    Node::merge( nodes );
+    for ( Node* node : nodes.nodes ) node->setOrigin();
 }

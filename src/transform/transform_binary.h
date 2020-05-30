@@ -45,7 +45,9 @@ struct BinaryReader
     uint8_t endBitArray[8];
     
     uint8_t seqsBegin, lineLen, cycle, readLen;
-    CharId buffSize, fileSize, seqCount, readCount;
+    CharId buffSize, fileSize;
+    CharId endCount, prevEndCount;
+    ReadId seqCount;
     bool anyEnds;
 };
 
@@ -63,8 +65,6 @@ struct BinaryWriter
     void writeEnd();
     void writeIds();
     void writeIns();
-//    void writePos();
-//    void writeSap();
     
     // File pointers
     PreprocessFiles* fns;

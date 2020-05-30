@@ -20,6 +20,8 @@
 
 #include "query.h"
 #include "parameters.h"
+#include "shared_functions.h"
+#include "timer.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -29,17 +31,26 @@
 extern struct Parameters params;
 
 Querier::Querier( IndexReader* ir, QueryBinaries* qb )
-: reader_( ir ), bin_( qb )
+: ir_( ir ), qb_( qb )
 {
-    minOver_ = params.readLen * 0.45;
+    minOver_ = min( 50, int( params.readLen * 0.45 ) );
     maxSeqs_ = max( 300, int( params.cover * 20 ) );
-    constCutoff_ = ( 5 + ( 7 * ( params.readLen / params.cover ) ) ) * ( params.readLen / 100 );
+    constCutoff_ = ( 5 + ( 700 / params.cover ) );
+    expectedPer_ = params.cover / params.readLen;
+    
+    float cover = params.isCalibrated ? params.cover : params.readLen / 2;
+    olLimits_[0] = (float)params.readLen * max( (float)1, min( (float)2, cover * 2 / 100 ) ) / 4;
+    olLimits_[1] = params.readLen * 8 / 10;
+    for ( int i = 0; i < params.readLen; i++ ) countLimits_[i] = cover * i / ( 2 * params.readLen );
+    for ( int i = 0; i < params.readLen/2; i++ ) countLimits_[i+params.readLen/2] += cover * i * 3 / params.readLen;
+    for ( int i = 0; i < params.readLen; i++ ) countLimits_[i] += 2000;
+    countLimits_[ olLimits_[1] ] = 10 * cover;
 }
 
 Querier::~Querier()
 {
-    delete reader_;
-    delete bin_;
+    delete ir_;
+    delete qb_;
 }
 
 vector<Extension> Querier::compileExtensions( vector<Overlap> &overlaps, bool drxn, bool doTrim )
@@ -53,15 +64,7 @@ vector<Extension> Querier::compileExtensions( vector<Overlap> &overlaps, bool dr
         int readCount = 1;
         bool isRedundant = false;
         
-        for ( int i ( 0 ); i < exts.size(); )
-        {
-            if ( exts[i].checkLoop( ol ) )
-            {
-                exts.erase( exts.begin() + i );
-                continue;
-            }
-            i++;
-        }
+        for ( int i ( 0 ); i < exts.size(); i++ ) if ( exts[i].checkLoop( ol ) ) exts.erase( exts.begin() + i-- );
         
         // Try adding to existing extensions
         for ( int i = 0; i < exts.size(); i++)
@@ -69,14 +72,8 @@ vector<Extension> Querier::compileExtensions( vector<Overlap> &overlaps, bool dr
             if ( exts[i].canAdd( ol ) )
             {
                 bool thisRedundant = ol.overLen < exts[i].maxOverLen;
-                if ( isRedundant && !thisRedundant )
-                {
-                    continue;
-                }
-                else if ( thisRedundant && !isRedundant )
-                {
-                    found.clear();
-                }
+                if ( isRedundant && !thisRedundant ) continue;
+                else if ( thisRedundant && !isRedundant ) found.clear();
                 isRedundant = isRedundant ? : thisRedundant;
                 found.push_back( i );
             }
@@ -92,21 +89,19 @@ vector<Extension> Querier::compileExtensions( vector<Overlap> &overlaps, bool dr
                 (*whichPile).push_back( exts[i] );
             }
             
-            bool anyInvalid = false;
             for ( auto it1 = fwdExts.begin(); it1 != fwdExts.end(); )
             {
                 readCount += (*it1).readCount;
                 bool rmv = false;
                 for ( auto it2 = fwdExts.begin(); doTrim && it2 != fwdExts.end() && !rmv; it2++ )
                 {
-                    rmv = it1 != it2 && (*it2).isSuperior( *it1, constCutoff_ );
+                    rmv = it1 != it2 && (*it2).isSuperior( *it1, ol.extLen, expectedPer_, constCutoff_ );
                 }
                 if ( rmv )
                 {
                     it1 = fwdExts.erase( it1 );
                     continue;
                 }
-                anyInvalid = anyInvalid || !(*it1).isValid() || !(*it1).anyPe;
                 it1++;
             }
             
@@ -117,10 +112,11 @@ vector<Extension> Querier::compileExtensions( vector<Overlap> &overlaps, bool dr
             }
             else
             {
-                tmpExts.push_back( Extension( ol, readCount, drxn, fwdExts, !anyInvalid ) );
+                tmpExts.push_back( Extension( ol, readCount, drxn, fwdExts ) );
             }
             
             exts = tmpExts;
+            for ( Extension &ext : exts ) ext.test();
         }
         else
         {
@@ -135,55 +131,295 @@ vector<Extension> Querier::compileExtensions( vector<Overlap> &overlaps, bool dr
         {
             exts.push_back( Extension( ol, readCount, drxn ) );
         }
+        for ( Extension &ext : exts ) ext.test();
     }
+    
+    for ( Extension &ext : exts ) ext.test();
+    
     return exts;
 }
 
-int Querier::countKmer( string seq )
+vector<QueryBranch> Querier::mapBranches( string& seq, vector<bool>* block, int minLen, bool drxn )
 {
-    int seqLen = min( params.readLen, (int)seq.length() );
-    uint8_t query[seqLen];
-    setQuery( seq, query, seqLen, 0 );
-    QueryState q( query, seqLen, seqLen );
-    CharId rank, count;
-    reader_->setBaseAll( query[0], query[1], rank, count );
-    int it = 1;
-    while ( it < seqLen - 1 && count )
+    vector<QueryBranch> branches;
+    
+    uint8_t q[seq.size()];
+    setQuery( seq, q, seq.size(), drxn );
+    int len[2]{ minLen, minLen }, cutoff = min( 500, max( 100, (int)params.cover ) );
+    
+    for ( int i = seq.size()+1 - minLen; i-- > 0; )
     {
-        CharCount ranks;
-        CharCount counts;
-        uint8_t i = q.q[it];
-        uint8_t j = q.q[++it];
-
-        reader_->countRange( i, rank, count, ranks, counts );
-        rank = ranks[j];
-        count = counts[j];
+        if ( block && ( drxn ? block->end()[ -i-len[0] ] : (*block)[ i+len[0]-1 ] ) ) continue;
+        
+//        for ( int rep = 1; rep < 3; rep++ ) for ( int j = i+len[0]-1-rep; q[j] == q[j+rep] && j-- > 0; ) if ( j < 10 )
+//        {
+//            assert( false );
+//        }
+        
+        CharId rank, count;
+        CharCount ranks, counts;
+        for ( int ol = ir_->primeOverlap( &q[i], rank, count ); ol && ol <= len[0] && q[i+ol] < 4; ol++ )
+        {
+            bool excess = count > ( i ? cutoff : cutoff * 3 );
+            ir_->countRange( q[i+ol-1], rank, count, ranks, counts );
+            if ( ol >= minLen )
+            {
+                bool blocked = block && ( drxn ? block->end()[ -i-ol ] : (*block)[ i+ol-1 ] );
+                len[1] = excess && !blocked ? ol+1 : min( len[1], ol );
+                if ( counts.endCounts && !excess && !blocked ) branches.push_back( QueryBranch( ranks.endCounts, counts.endCounts, drxn ? seq.size()-i-ol: i, ol ) );
+            }
+            if ( ol == len[0] || !counts[ q[i+ol] ] ) break;
+            rank = ranks[ q[i+ol] ];
+            count = counts[ q[i+ol] ];
+        }
+        len[0] = len[1];
     }
     
-    return count;
+    return branches;
 }
 
-void Querier::estimateCoverage( ofstream &fh, int kmerLen, int sampleSize )
+CorrectionStruct Querier::mapCorrection( string seq, int len, bool drxn )
 {
-    srand( time(NULL) );
-    int maxKmer = 200;
-    int counts[maxKmer]{0};
-    int i = 0;
-    while ( i < sampleSize )
+    CorrectionStruct c;
+    if ( len < 16 ) return c;
+    uint8_t query[seq.length()];
+    setQuery( seq, query, seq.length(), drxn );
+    QueryCorrectState q( query, len, seq.length(), min( 32, len ) );
+    CharId rank, count;
+    ir_->setBaseOverlap( q.q[0], q.q[1], rank, count );
+    if ( !mapCorrection( q, 1, q.q[1], rank, count ) )
     {
-        ReadId id = ( ( rand() & 65535 ) << 16 | ( rand() & 65535 ) ) % params.seqCount;
-        string seq = getSequence( id );
-        if ( seq.size() < kmerLen ) continue;
-        int count = countKmer( seq.substr( 0, kmerLen ) );
-        if ( count > 200 ) continue;
-        counts[count]++;
-        i++;
+        c.overabundant = true;
+        return c;
+    }
+    if ( q.endCutoff < q.minOver )
+    {
+        c.error = true;
+        return c;
+    }
+    if ( q.altCutoff >= q.endCutoff )
+    {
+        ( q.endCutoff < 40 ? c.error : c.fork ) = true;
+        if ( q.endCutoff < 64 ) return c;
     }
     
-    for ( int j = 0; j < maxKmer; j++ )
+    auto it = q.ends.begin();
+    for ( int i ( 0 ); i < q.endOverlaps.size(); i++ )
     {
-        fh << to_string( j ) << "," << to_string( counts[j] ) << endl;
+        if ( c.reads.size() + q.endCounts[i] > 300 )
+        {
+            if ( q.endOverlaps[i] > 60 ) c.clear();
+            break;
+        }
+        int readCount = c.reads.size();
+        qb_->getReads( c.reads, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], len, drxn );
+        if ( q.endOverlaps[i] <= len ) continue;
+        if ( it == q.ends.end() || *it != i ) c.addReads( readCount, !drxn );
+        else
+        {
+            c.exts[!drxn].push_back( CorrectionExt( c.reads.back()[!drxn], c.reads, readCount, drxn ) );
+            it++;
+        }
     }
+    
+    c.setExts( drxn );
+    
+    return c;
+}
+
+bool Querier::mapCorrection( QueryCorrectState &q, int it, uint8_t i, CharId rank, CharId count )
+{
+    CharCount ranks;
+    CharCount counts;
+    
+    ir_->countRange( i, rank, count, ranks, counts );
+    it++;
+    
+    bool fresh = false;
+    for ( int j = 0; j < 4; j++ )
+    {
+        if ( !counts[j] || ( it < q.corrLen && j != q.q[it] ) ) continue;
+        if ( it == q.corrLen && counts[j] > ( it + 10 ) * 10 ) return false;
+        ( fresh ? q.fresh : fresh ) = true;
+        if ( !mapCorrection( q, it, j, ranks[j], counts[j] ) ) return false;
+    }
+    
+    if ( it < q.minOver ) return true;
+    
+    if ( counts.endCounts )
+    {
+        if ( q.fresh ) q.ends.push_back( q.endOverlaps.size() );
+        if ( q.endCount < 2 && q.endCount + counts.endCounts > 1 ) q.endCutoff = it;
+        q.fresh = false;
+        q.endOverlaps.push_back( it );
+        q.endRanks.push_back( ranks.endCounts );
+        q.endCounts.push_back( counts.endCounts );
+        q.endCount += counts.endCounts;
+    }
+    
+    if ( it >= q.corrLen ) return true;
+    
+    for ( int j = 0; j < 4; j++ )
+    {
+        if ( !counts[j] || j == q.q[it] ) continue;
+        if ( !q.altCutoff && ( !q.alts.empty() || counts[j] > 1 ) ) q.altCutoff = it;
+        q.alts.push_back( j );
+        q.altIts.push_back( it );
+        q.altRanks.push_back( ranks[j] );
+        q.altCounts.push_back( counts[j] );
+    }
+    
+    return true;
+}
+
+pair<string, ReadId> Querier::getCoverage( string& seq, uint16_t minOl, bool drxn )
+{
+    string best;
+    ReadId maxReads = 0, readCount;
+    
+    bool aborted = false;
+    vector<Overlap> overlaps = getOverlaps( seq, minOl, aborted, drxn );
+    if ( aborted ) return make_pair( best, maxReads );
+    
+    vector<Extension> exts = compileExtensions( overlaps, drxn, false );
+    for ( Extension& ext : exts ) if ( ( readCount = ext.getReadCount() ) > maxReads )
+    {
+        maxReads = readCount;
+        best = ext.seq;
+    }
+    
+    return make_pair( best, maxReads );
+}
+
+ReadId Querier::getExtendable( string& seq, uint16_t minOl, bool drxn )
+{
+    bool aborted = false;
+    vector<Overlap> overlaps = getOverlaps( seq, minOl, aborted, drxn );
+    if ( aborted ) return max( 100, (int)params.cover ) * 10;
+    vector<Extension> exts = compileExtensions( overlaps, drxn, false );
+    ReadId maxReads = 0;
+    for ( Extension& ext : exts ) maxReads = max( maxReads, (ReadId)ext.getReadCount() );
+    return maxReads;
+}
+
+string Querier::getConsensusExtend( QueryState &q, bool drxn )
+{
+    vector<Overlap> overlaps;
+    for ( int i ( 0 ); i < q.endOverlaps.size() && overlaps.size() < 100; i++ )
+    {
+        if ( q.endCounts[i] > 300 ) break;
+        qb_->getOverlaps( overlaps, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], 1 );
+    }
+    Overlap::sortByExt( overlaps );
+    
+    vector<string> seqs;
+    vector< vector<int> > lens;
+    int cutoff = 5;
+    
+    for ( Overlap &ol : overlaps )
+    {
+        vector<int> hits;
+        int maxReadCount = 0;
+        for ( int i = 0; i < seqs.size(); i++ )
+        {
+            bool isCongruent = true;
+            for ( int j = 0; j < ol.seq.length() && j < seqs[i].length(); j++ )
+            {
+                if ( ol.seq[j] != seqs[i][j] ) isCongruent = false;
+            }
+            if ( isCongruent )
+            {
+                hits.push_back( i );
+                maxReadCount = max( maxReadCount, (int)lens[i].size() );
+            }
+        }
+        
+        if ( hits.size() > 1 && maxReadCount > 9 )
+        {
+            int erased = 0;
+            for ( int i = 0; i < hits.size(); )
+            {
+                hits[i] -= erased;
+                if ( lens[ hits[i] ].size() == 1 )
+                {
+                    seqs.erase( seqs.begin() + hits[i] );
+                    lens.erase( lens.begin() + hits[i] );
+                    hits.erase( hits.begin() + i );
+                    erased++;
+                }
+                else i++;
+            }
+        }
+        
+        if ( hits.empty() )
+        {
+            seqs.push_back( ol.seq );
+            lens.push_back( vector<int>( { (int)ol.seq.length() } ) );
+        }
+        else if ( hits.size() == 1 )
+        {
+            lens[ hits[0] ].push_back( ol.seq.length() );
+        }
+        else
+        {
+            for ( auto it = hits.rbegin(); it < hits.rend() - 1; it++ )
+            {
+                for ( int i = 0; i < seqs[*it].length() && i < seqs[ hits[0] ].length(); i++ )
+                {
+                    if ( seqs[ hits[0] ][i] != seqs[*it][i] )
+                    {
+                        seqs[ hits[0] ] = seqs[ hits[0] ].substr( 0, i );
+                    }
+                }
+                lens[ hits[0] ].insert( lens[ hits[0] ].end(), lens[*it].begin(), lens[*it].end() );
+                seqs.erase( seqs.begin() + *it );
+                lens.erase( lens.begin() + *it );
+            }
+        }
+    }
+    
+    string seq;
+    vector<int> seqLens;
+    for ( int i = 0; i < seqs.size(); i++ )
+    {
+        if ( lens[i].size() > 1 )
+        {
+            if ( seqLens.empty() )
+            {
+                seq = seqs[i];
+                seqLens.insert( seqLens.end(), lens[i].begin(), lens[i].end() );
+            }
+            else
+            {
+                for ( int j = 0; j < seq.length() && j < seqs[i].length(); j++ )
+                {
+                    if ( seq[j] != seqs[i][j] ) seq = seq.substr( 0, j );
+                }
+            }
+        }
+        else cutoff++;
+    }
+    
+    sort( seqLens.rbegin(), seqLens.rend() );
+    int cut = 0;
+    if ( seqLens.size() > cutoff ) cut = min( seqLens[cutoff], (int)seq.length() );
+    
+    seq = seq.substr( 0, cut );
+    if ( !seq.empty() && !drxn ) revComp( seq );
+    
+    return seq;
+}
+
+vector<ReadId> Querier::getIds( CharId rank, CharId count, bool drxn )
+{
+    vector<ReadId> ids = qb_->getIds( rank, count );
+    for ( ReadId& id : ids )
+    {
+        bool idRev = id & 0x1;
+        bool isRev = idRev == drxn;
+        id = id - idRev + isRev;
+    }
+    return ids;
 }
 
 vector<Overlap> Querier::getOverlaps( string &seq, uint16_t minOver, bool drxn )
@@ -194,21 +430,47 @@ vector<Overlap> Querier::getOverlaps( string &seq, uint16_t minOver, bool drxn )
     setQuery( seq, query, seqLen, drxn );
     QueryState q( query, seqLen, max( minOver, minOver_ ) );
     CharId rank, count;
-    reader_->setBaseOverlap( query[0], query[1], rank, count );
+    ir_->setBaseOverlap( query[0], query[1], rank, count );
     mapReads( q, 1, rank, count );
     
     // Compile overlaps
-    vector<Overlap> overlaps;
-    for ( int i ( 0 ); i < q.endOverlaps.size() && overlaps.size() < maxSeqs_; i++ )
+    vector<Overlap> ols;
+    for ( int i ( 0 ); i < q.endOverlaps.size() && ols.size() < maxSeqs_; i++ )
     {
         if ( q.endCounts[i] > 300 ) break;
-        bin_->getOverlaps( overlaps, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], drxn );
+        qb_->getOverlaps( ols, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], drxn );
     }
-    sort( overlaps.begin(), overlaps.end(), []( const Overlap &a, const Overlap &b ) { 
-        return a.extLen > b.extLen; 
-    });
+    Overlap::sortByExt( ols );
     
-    return overlaps;
+    return ols;
+}
+
+vector<Overlap> Querier::getOverlaps( string &seq, uint16_t minOver, bool& aborted, bool drxn )
+{
+    // Query index
+    int seqLen = min( params.readLen, (int)seq.length() );
+    uint8_t query[seqLen];
+    setQuery( seq, query, seqLen, drxn );
+    QueryState q( query, seqLen, max( minOver, minOver_ ) );
+    CharId rank, count;
+    ir_->setBaseOverlap( query[0], query[1], rank, count );
+    mapReads( q, 1, rank, count );
+    
+    // Compile overlaps
+    vector<Overlap> ols;
+    for ( int i ( 0 ); i < q.endOverlaps.size() && ols.size() < maxSeqs_; i++ )
+    {
+        if ( q.endCounts[i] > 300 )
+        {
+            aborted = true;
+            break;
+        }
+        qb_->getOverlaps( ols, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], drxn );
+    }
+    Overlap::sortByExt( ols );
+    
+    return ols;
+    
 }
 
 vector<Overlap> Querier::getOverlaps( string &seq, uint16_t minOver, uint8_t &maxConsidered, bool drxn )
@@ -219,51 +481,61 @@ vector<Overlap> Querier::getOverlaps( string &seq, uint16_t minOver, uint8_t &ma
     setQuery( seq, query, seqLen, drxn );
     QueryState q( query, seqLen, max( minOver, minOver_ ) );
     CharId rank, count;
-    reader_->setBaseOverlap( query[0], query[1], rank, count );
+    ir_->setBaseOverlap( query[0], query[1], rank, count );
     mapReads( q, 1, rank, count );
     
     // Compile overlaps
-    vector<Overlap> overlaps;
+    vector<Overlap> ols;
     int iLast = 0;
-    for ( int i ( 0 ); i < q.endOverlaps.size() && overlaps.size() < maxSeqs_; i++ )
+    for ( int i ( 0 ); i < q.endOverlaps.size() && ols.size() < maxSeqs_; i++ )
     {
         if ( q.endCounts[i] > 300 ) break;
-        bin_->getOverlaps( overlaps, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], drxn );
+        qb_->getOverlaps( ols, q.endRanks[i], q.endCounts[i], q.endOverlaps[i], drxn );
         iLast = i;
     }
-    sort( overlaps.begin(), overlaps.end(), []( const Overlap &a, const Overlap &b ) { 
-        return a.extLen > b.extLen; 
-    });
+    Overlap::sortByExt( ols );
     
     maxConsidered = iLast + 1 < q.endOverlaps.size() ? q.endOverlaps[iLast] : minOver;
     
-    return overlaps;
+    return ols;
 }
 
 string Querier::getSequence( ReadId id )
 {
-    return bin_->getSequence( id );
+    return qb_->getSequence( id );
 }
 
 bool Querier::isVector( Extension &ext )
 {
-    if ( ext.readCount < params.queryMpCutoff )
+    return false;
+    if ( ext.readCount < params.queryMpCutoff ) return false;
+    vector<Overlap> overlaps = getOverlaps( ext.fullSeq, minOver_, ext.drxn );
+    if ( overlaps.size() < params.queryMpCutoff ) return false;
+    for ( Overlap &ol : overlaps )
     {
-        vector<Overlap> overlaps = getOverlaps( ext.fullSeq, minOver_, ext.drxn );
-        vector<Extension> fwdExts = compileExtensions( overlaps, ext.drxn, true );
-        bool anyPe = false;
-        for ( const Extension &fwdExt : fwdExts )
-        {
-            anyPe = anyPe || fwdExt.anyPe;
-            ext.readCount += fwdExt.readCount;
-        }
-        if ( anyPe )
-        {
-            ext.anyPe = true;
-            return true;
-        }
+        if ( params.isReadPe( ol.readId ) ) return false;
     }
     
+    return true;
+}
+
+bool Querier::isExtendable( string& seq, bool drxn )
+{
+    CharId rank, count;
+    CharCount ranks, counts;
+    vector<uint8_t> q;
+    int ol;
+    ir_->primeOverlap( seq, q, rank, count, ol, drxn );
+    while ( count )
+    {
+        if ( ++ol > seq.size() ) return true;
+        ir_->countRange( q.back(), rank, count, ranks, counts );
+        if ( ol > olLimits_[0] && counts.endCounts ) return true;
+        
+        q.push_back( drxn ? charToInt[ seq.end()[-ol] ] : charToIntComp[ seq[ol-1] ] );
+        rank = ranks[q.back()];
+        count = counts[q.back()];
+    }
     return false;
 }
 
@@ -274,7 +546,7 @@ ReadId Querier::isExtendable( string &seq, uint16_t minLen, bool drxn )
     setQuery( seq, query, seqLen, drxn );
     QueryState q( query, seqLen, max( minLen, minOver_ ) );
     CharId rank, count;
-    reader_->setBaseOverlap( query[0], query[1], rank, count );
+    ir_->setBaseOverlap( query[0], query[1], rank, count );
     mapReads( q, 1, rank, count );
     
     ReadId extCount = 0;
@@ -291,7 +563,7 @@ vector<Extension> Querier::mapExtensions( bool &noMatches, string &seq, bool drx
     vector<Overlap> overlaps = getOverlaps( seq, minOver, drxn );
     noMatches = overlaps.empty();
     vector<Extension> exts = compileExtensions( overlaps, drxn, true );
-    mapExtensionsCull( seq, exts );
+    mapExtensionsCull( seq, exts, 0 );
     mapExtensionsTrim( exts, overlaps );
     
     return exts;
@@ -301,7 +573,7 @@ vector<Extension> Querier::mapExtensions( string &seq, bool drxn, uint16_t minOv
 {
     vector<Overlap> overlaps = getOverlaps( seq, minOver, drxn );
     vector<Extension> exts = compileExtensions( overlaps, drxn, true );
-    mapExtensionsCull( seq, exts );
+    mapExtensionsCull( seq, exts, 0 );
     mapExtensionsTrim( exts, overlaps );
     
     return exts;
@@ -317,7 +589,7 @@ vector<Extension> Querier::mapExtensions( string &seq, bool drxn, unordered_set<
     return exts;
 }
 
-void Querier::mapExtensionsCull( string &seq, vector<Extension> &exts )
+void Querier::mapExtensionsCull( string &seq, vector<Extension> &exts, int base )
 {
     // Remove extensions with a repeated frame
     for ( auto it = exts.begin(); it != exts.end(); )
@@ -350,14 +622,10 @@ void Querier::mapExtensionsCull( string &seq, vector<Extension> &exts )
         bool doErase = eraseDefault && !(*it1).isValid();
         for ( auto it2 = exts.begin(); !doErase && it2 != exts.end(); it2++ )
         {
-            doErase = it1 != it2 && (*it2).isSuperior( *it1, constCutoff_ );
+            doErase = it1 != it2 && (*it2).isSuperior( *it1, base, expectedPer_, constCutoff_ );
         }
-        if ( doErase )
-        {
-            it1 = exts.erase( it1 );
-            continue;
-        }
-        it1++;
+        if ( doErase ) it1 = exts.erase( it1 );
+        else it1++;
     }
     
     // Give up
@@ -366,10 +634,7 @@ void Querier::mapExtensionsCull( string &seq, vector<Extension> &exts )
         exts.clear();
     }
     
-    for ( Extension &ext : exts )
-    {
-        mapExtensionsCull( ext.fullSeq, ext.fwdExts );
-    }
+    for ( Extension &ext : exts ) ext.cullFwd( constCutoff_ );
 }
 
 void Querier::mapExtensionsCull( string &seq, vector<Extension> &exts, vector<Overlap> &overlaps, unordered_set<SeqNum> &seeds )
@@ -406,12 +671,14 @@ void Querier::mapExtensionsCull( string &seq, vector<Extension> &exts, vector<Ov
 
 void Querier::mapExtensionsTrim( vector<Extension> &exts, vector<Overlap> &overlaps )
 {
+    for ( Extension &ext : exts ) ext.test();
     uint16_t extCutoff = ( !overlaps.empty() ? overlaps[0].extLen * 0.9 : params.readLen );
     for ( Extension &ext : exts )
     {
         ext.trimToExtLen( extCutoff );
         ext.offsetFwdExts( 0 );
     }
+    for ( Extension &ext : exts ) ext.test();
 }
 
 void Querier::mapReads( QueryState &q, uint8_t it, CharId rank, CharId count )
@@ -421,8 +688,8 @@ void Querier::mapReads( QueryState &q, uint8_t it, CharId rank, CharId count )
     uint8_t i = q.q[it];
     uint8_t j = q.q[++it];
     
-    reader_->countRange( i, rank, count, ranks, counts );
-    if ( counts[j] && it < q.seqLen )
+    ir_->countRange( i, rank, count, ranks, counts );
+    if ( j < 4 && counts[j] && it < q.seqLen )
     {
         mapReads( q, it, ranks[j], counts[j] );
     }
@@ -463,11 +730,14 @@ vector<Overlap> Querier::mapJoin( string seq1, string seq2, uint8_t overLen )
     }
     
     
-    sort( overlaps.begin(), overlaps.end(), []( const Overlap &a, const Overlap &b ) { 
-        return a.overLen > b.overLen; 
-    });
+    Overlap::sortByExt( overlaps );
     
     return overlaps;
+}
+
+QueryJunction Querier::mapJunction( string &seq, bool drxn )
+{
+    return QueryJunction( ir_, qb_, seq, countLimits_, olLimits_, constCutoff_, drxn );
 }
 
 MappedSeqs Querier::mapSeed( string &seq, int errorRate, bool bestMatch )
@@ -483,14 +753,14 @@ MappedSeqs Querier::mapSeed( string &seq, int errorRate, bool bestMatch )
     for ( int i ( 0 ); i < qs.leftCount; i++ )
     {
         qs.setup( i, 0 );
-        reader_->setBaseAll( query[0][qs.i-1], query[0][qs.i], qs.rank, qs.count );
+        ir_->setBaseAll( query[0][qs.i-1], query[0][qs.i], qs.rank, qs.count );
         mapSeed( qs, 0, 0 );
     }
     
     for ( int i ( 0 ); i < qs.rightCount; i++ )
     {
         qs.setup( i, 1 );
-        reader_->setBaseAll( query[1][qs.i-1], query[1][qs.i], qs.rank, qs.count );
+        ir_->setBaseAll( query[1][qs.i-1], query[1][qs.i], qs.rank, qs.count );
         mapSeed( qs, 0, 1 );
     }
     
@@ -508,7 +778,7 @@ bool Querier::mapSeed( QuerySeedState &qs, int errors, bool drxn )
 {
     int i = qs.i;
     CharCount ranks, counts;
-    reader_->countRange( qs.j, qs.rank, qs.count, ranks, counts );
+    ir_->countRange( qs.j, qs.rank, qs.count, ranks, counts );
     
     bool didAppend = false;
     for ( int k ( 0 ); k < 4; k++ )
@@ -525,7 +795,7 @@ bool Querier::mapSeed( QuerySeedState &qs, int errors, bool drxn )
     if ( i > qs.iAdd && counts.endCounts && ( didAppend || qs.doAdd( errors, drxn ) ) )
     {
         qs.i = i + 1;
-        for ( ReadStruct &read : bin_->getReads( ranks.endCounts, counts.endCounts, drxn ) )
+        for ( ReadStruct &read : qb_->getReads( ranks.endCounts, counts.endCounts, drxn ) )
         {
             qs.add( read, drxn );
         }
@@ -543,14 +813,16 @@ void Querier::mapSequence( string &seq, vector<ReadId> &ids, vector<int32_t>* co
     setQuery( seq, query, seqLen, 0 );
     CharId rank, count;
     
-    for ( int i = 0; i + params.readLen <= seqLen; i++ )
+    for ( int i = 0; i + 50 <= seqLen; i++ )
     {
-        QueryState q( &query[i], params.readLen, minOver_ );
-        reader_->setBaseMap( query[i], query[i+1], rank, count );
+        while ( query[i] > 3 || query[i+1] > 3 && i < seqLen ) i++;
+        if ( i + 50 >= seqLen ) break;
+        QueryState q( &query[i], min( params.readLen, seqLen - i ), minOver_ );
+        ir_->setBaseMap( query[i], query[i+1], rank, count );
         mapReads( q, 1, rank, count );
         for ( int j = 0; j < q.endOverlaps.size(); j++ )
         {
-            for ( ReadId &id : bin_->getIds( q.endRanks[j], q.endCounts[j] ) )
+            for ( ReadId &id : qb_->getIds( q.endRanks[j], q.endCounts[j] ) )
             {
                 ids.push_back( ( id & 0x1 ? id - 1: id + 1 ) );
                 coords[0].push_back( i );

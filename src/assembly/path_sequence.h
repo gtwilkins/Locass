@@ -38,7 +38,7 @@ struct ReadEndMap
     ReadId id;
     int32_t coords[3], off;
     int ol, edgeOl;
-    bool drxn, edged, doMap;
+    bool drxn, edged, doMap, redundant;
 };
 
 struct SeqPath

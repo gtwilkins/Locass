@@ -24,6 +24,10 @@
 Calibrate::Calibrate( int argc, char** argv )
 {
     Filenames* fns = NULL;
+    bool covered = false, forced = false;
+    float cover;
+    vector<int> libs, dists;
+    vector<uint8_t> orients;
     for ( int i ( 2 ); i < argc; i++ )
     {
         if ( !strcmp( argv[i], "-h" ) )
@@ -39,7 +43,31 @@ Calibrate::Calibrate( int argc, char** argv )
                 exit( EXIT_FAILURE );
             }
             fns = new Filenames( argv[i+1] );
-            i += 2;
+            i++;
+        }
+        else if ( isdigit( argv[i][1] ) )
+        {
+            if ( i+3 > argc )
+            {
+                cerr << "Error: not enough support information given for paired library update." << endl;
+                exit( EXIT_FAILURE );
+            }
+            
+            libs.push_back( atoi( &argv[i++][1] ) );
+            orients.push_back( !strcmp( argv[i], "FR" ) ? 2 : ( !strcmp( argv[i], "RF" ) ? 3 : 0 ) );
+            dists.push_back( atoi( argv[++i] ) );
+            forced = true;
+            
+            if ( !orients.back() )
+            {
+                cerr << "Error: did not recognise user-defined library type. Expecting FR or RF, received: " << argv[i+1] << endl;
+                exit( EXIT_FAILURE );
+            }
+        }
+        else if ( !strcmp( argv[i], "-c" ) )
+        {
+            covered = forced = true;
+            cover = atoi( argv[++i] );
         }
         else
         {
@@ -64,19 +92,29 @@ Calibrate::Calibrate( int argc, char** argv )
     
     IndexReader* ir = new IndexReader( fns );
     QueryBinaries* qb = new QueryBinaries( fns );
+    params.cover = 0;
     Querier bwt( ir, qb );
+    
+    if ( forced )
+    {
+        if ( covered ) forceCoverage( cover );
+        for ( int i = 0; i < libs.size(); i++ ) forcePaired( libs[i], dists[i], orients[i] );
+        write( fns );
+        exit( EXIT_SUCCESS );
+    }
+    
     cout << "Calibrating parameters for dataset with:" << endl << endl;
-    cout << "\t" << to_string( params.seqCount / 2 ) << " reads" << endl;
-    cout << "\t" << to_string( params.libs.size() ) << " paired libraries" << endl << endl;
+    cout << "    " << to_string( params.seqCount / 2 ) << " reads" << endl;
+    cout << "    " << to_string( params.libs.size() ) << " paired libraries" << endl << endl;
     CalibrateWriter cal ( bwt );
     
-    cout << "Calibrating read coverage... " << flush;
+    cout << "Calibrating read coverage... " << endl;
     cal.coverage();
-    cout << "complete!" << endl;
+    cout << "Calibrating read coverage... complete!" << endl;
     
-    cout << "Calibrating library specs... " << flush;
+    cout << "Calibrating library specs... " << endl;
     cal.pairing();
-    cout << "complete!" << endl;
+    cout << "Calibrating library specs... complete!" << endl;
     
     cout << "Calibration complete!" << endl << endl;
     cal.write( fns );
@@ -96,3 +134,55 @@ void Calibrate::printUsage()
     cout << "\t-p\tPrefix for sequence data files (as output from the transform command)." << endl;
 }
 
+void Calibrate::forceCoverage( float cover )
+{
+    params.cover = cover;
+}
+
+void Calibrate::forcePaired( int i, int dist, uint8_t orient )
+{
+    if ( params.libs.size() < i )
+    {
+        cerr << "Error: specified library number \"" << i << "\" is not a positive integer." << endl;
+        exit( EXIT_FAILURE );
+    }
+    if ( params.libs.size() < i )
+    {
+        cerr << "Error: specified library number \"" << i << "\" is greater thatn the number of libraries in this dataset (" << params.libs.size() << " paired libraries)." << endl;
+        exit( EXIT_FAILURE );
+    }
+    
+    params.libs[i-1].size = dist;
+    params.libs[i-1].orientation = orient;
+    params.libs[i-1].setMinMax();
+    params.libs[i-1].isPe = orient == 2;
+}
+
+void Calibrate::write( Filenames* fns )
+{
+    if ( !params.isCalibrated && params.cover && ( params.isCalibrated = true ) )
+    {
+        for ( Lib& lib : params.libs ) if ( !lib.size ) params.isCalibrated = false;
+    }
+    
+    uint32_t coverage = params.cover * 100000;
+    FILE* fp = fns->getBinary( true, true );
+    fseek( fp, 11, SEEK_SET );
+    fwrite( &params.isCalibrated, 1, 1, fp );
+    fwrite( &coverage, 4, 1, fp );
+    for ( int i ( 0 ); i < params.libs.size(); i++ )
+    {
+        uint16_t libMed = params.libs[i].size;
+        uint16_t libMin = libMed ? params.libs[i].minDist : 0;
+        uint16_t libMax = libMed ? params.libs[i].maxDist : 0;
+        fseek( fp, 25 + ( i * 12 ), SEEK_SET );
+        fwrite( &libMed, 2, 1, fp );
+        fwrite( &libMin, 2, 1, fp );
+        fwrite( &libMax, 2, 1, fp );
+        fwrite( &params.libs[i].orientation, 1, 1, fp );
+        fwrite( &params.libs[i].isPe, 2, 1, fp );
+    }
+    
+    fclose( fp );
+}
+    

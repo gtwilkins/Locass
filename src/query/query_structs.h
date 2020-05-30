@@ -27,18 +27,60 @@ struct ReadStruct
 {
     string seq;
     int32_t tether[2], coords[2];
-    SeqNum readId;
+    ReadId id;
 };
 
 struct MappedSeqs
 {
     MappedSeqs(){};
+    void cull( vector<MappedSeqs>& alts );
     void setBest( string &seq );
     void sort();
     void updateTethers( string &seq );
     vector<int32_t> chunks;
     vector<ReadStruct> reads;
-    unordered_set<SeqNum> usedIds;
+    unordered_set<ReadId> usedIds;
+};
+
+struct CorrectionRead
+{
+    CorrectionRead( ReadId id ) : id( id ){};
+    string operator[]( int i ){ return i ? seq.substr( seq.length() - exts[1] ) : seq.substr( 0, exts[0] ); };
+    bool congruent( string &ext, bool drxn );
+    string seq;
+    ReadId id;
+    int exts[2], ol;
+};
+
+struct CorrectionExt
+{
+    CorrectionExt( string seq, CorrectionRead &read, bool drxn );
+    CorrectionExt( string seq, vector<CorrectionRead> &reads, int i, bool drxn );
+    bool addRead( CorrectionRead &read, bool drxn );
+    static string getCongruent( vector<CorrectionExt> &exts, bool drxn );
+    
+    string seq;
+    vector<ReadId> ids;
+    int lens[2];
+};
+
+struct CorrectionStruct
+{
+    CorrectionStruct():overabundant( false ), error( false ), fork( false ){};
+    void addReads( int i, bool drxn );
+    void clear();
+    void setExts( bool drxn );
+    int validate( int len, int kmerLen, bool drxn );
+    vector<CorrectionRead> reads;
+    vector<CorrectionExt> exts[2];
+    bool overabundant, error, fork;
+};
+
+struct QueryBranch
+{
+    QueryBranch( CharId rank, CharId count, int i, int ol ): rank( rank ), count( count ), i ( i ), ol( ol ){};
+    CharId rank, count;
+    int i, ol;
 };
 
 #endif /* QUERY_STRUCTS_H */

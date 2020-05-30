@@ -24,14 +24,63 @@
 #include "types.h"
 #include "parameters.h"
 #include "query_structs.h"
+#include "index_structs.h"
+
+struct QueryEnd
+{
+    QueryEnd( CharId rank, CharId count, int ol ): rank( rank ), count( count ), ol( ol ){};
+    CharId rank, count;
+    int ol;
+};
+
+struct QState
+{
+    QState(): gen( 0 ), perfect( true ){};
+    QState( uint8_t i, CharId rank, CharId count, int ol, int gen, bool perfect );
+    bool advance( uint8_t i );
+    void branch( int i, CharId minCount );
+    int failure();
+    bool record();
+    vector<uint8_t> q;
+    vector<QState> edges;
+    vector<QueryEnd> ols;
+    CharCount ranks, counts;
+    CharId rank, count;
+    int ol, gen;
+    bool perfect;
+};
 
 struct QueryState
 {
     QueryState( uint8_t* query, int seqLength, int minOverlap ) : q( query ), seqLen( seqLength ), minOver( minOverlap ){};
+    int setFirst();
+    void updateSeq( string &seq, int off, bool drxn );
     uint8_t* q;
     int seqLen, minOver;
     vector<uint8_t> endOverlaps;
     vector<CharId> endRanks, endCounts;
+};
+
+struct QueryCorrectState
+{
+    QueryCorrectState( uint8_t* query, int corrLength, int seqLength, int minOverlap );
+    uint8_t* q;
+    vector<uint8_t> endOverlaps, alts, altIts;
+    vector<uint32_t> ends;
+    vector<CharId> endRanks, endCounts, altRanks, altCounts;
+    int corrLen, seqLen, minOver;
+    uint32_t endCount;
+    uint8_t endCutoff, altCutoff;
+    bool fresh;
+};
+
+struct QueryKmerState
+{
+    QueryKmerState( uint8_t* query ) : q( query ) { errors = cleans = 0; };
+    
+    uint8_t* q;
+    int errors, cleans;
+    CharId rank, edge, count;
 };
 
 struct QuerySeedState
@@ -52,6 +101,8 @@ struct QuerySeedState
     CharId rank, count;
     vector<int32_t> chunks[2];
 };
+
+
 
 #endif /* QUERY_STATE_H */
 

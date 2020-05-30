@@ -24,18 +24,33 @@
 #include "node.h"
 #include "locus.h"
 #include "query.h"
+#include "seed_fork.h"
 
 class Seed 
 {
 public:
-    Seed( string &header, string &seq, Querier &inBwt, int errorCount );
-    void assemble();
+    Seed( string &header, string &seq, Querier &bwt, int errorCount, bool bestOnly=true );
+    Seed( string fn, Querier &bwt );
+    void assemble( bool seeded );
+    void assembleRNA( bool seeded );
+    void assembleGraph();
     vector<Locus*> getLoci();
     bool warning();
     virtual ~Seed();
 private:
+    void cull( MappedSeqs& ms );
+    void printExts( vector<string> exts[2], ofstream* ofs );
+    void printSeeds( vector<string>& seqs, int errors, ofstream* ofs );
+    void print( string header, string seq, int blanks, ofstream* ofs );
+    void print( MappedSeqs& ms, ofstream* ofs );
+    bool restart( SeedExtend seed[2] );
+    void fill();
+    bool flip();
+    void seed();
+    void assembleHaploid();
     void checkDivergent( NodeList &path );
     void checkDivergentBack( NodeList &div, NodeSet &pathSet, bool drxn );
+    void deleteNodes( NodeSet &delSet );
     NodeList getLociGetPath( bool doForce );
     void getLociGetPath( Node* curr, NodeList &path, int &score, bool drxn );
     int getLociGetPathCurrScore( Node* curr, NodeList &path, bool drxn );
@@ -43,6 +58,8 @@ private:
     void getLociResolveDivergent( NodeIntMap &scores, NodeList &path, Node** forks );
     bool getLociSetConvergent( NodeList &path, Node** forks );
     bool getLociSetDivergent( NodeList &path, Node** forks );
+    void merge();
+    void plot();
     bool resolveBackFork( Node** forks, NodeSet &delSet );
     bool resolveBackForkBypass( Node* fork, NodeSet &delSet );
     bool resolveBackForkDouble( Node* fork, NodeSet &delSet );
@@ -50,6 +67,7 @@ private:
     void resolveBackForks();
     
     string header_, seq_;
+    NodeRoll seed_;
     NodeList nodes_;
     int32_t validLimits_[2], ends_[2], tether_[2];
     int readCount_;

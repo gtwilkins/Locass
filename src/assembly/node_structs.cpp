@@ -21,17 +21,76 @@
 #include "node_structs.h"
 #include "node.h"
 #include <algorithm>
+#include <cassert>
 #include "shared_functions.h"
 
 extern struct Parameters params;
 
 using namespace std;
 
+void NodeScores::add( Node* node, int drxn, bool inclNode )
+{
+    for ( int d : { 0, 1 } ) if ( drxn == 2 || d == drxn ) for ( auto &np : node->hits_.pairs[d] ) append( np.first, np.second.count );
+    if ( inclNode ) append( node, node->hits_.count );
+}
+
+//void NodeScores::add( Nodes& fwd, Nodes& bck, bool drxn )
+//{
+//    
+//}
+
+void NodeScores::append( Node* node, int score )
+{
+    if ( !score ) return;
+    auto it = scores.insert( make_pair( node, score ) );
+    if ( !it.second ) it.first->second += score;
+}
+
+//void NodeScores::add2( Node* node, bool inclNode )
+//{
+//    for ( auto &np : node->pairs_ ) if ( inclNode || np.first != node ) add2( np );
+//}
+//
+//void NodeScores::add2( unordered_map<Node*, int> &pairs )
+//{
+//    for ( auto &np : pairs ) add2( np );
+//}
+//
+//void NodeScores::add2( const pair<Node*, int> score )
+//{
+//    auto it = scores.insert( score );
+//    if ( !it.second ) it.first->second += score.second;
+//}
+//
+//void NodeScores::add2( Node* node, int score )
+//{
+//    auto it = scores.insert( make_pair( node, score ) );
+//    if ( !it.second ) it.first->second += score;
+//}
+
+void NodeScores::clear()
+{
+    scores.clear();
+}
+
+void NodeScores::erase( Node* node )
+{
+    scores.erase( node );
+}
+
+int NodeScores::get( Node* node )
+{
+    auto it = scores.find( node );
+    if ( it != scores.end() ) return it->second;
+    return 0;
+}
+
 Coords::Coords( int32_t start, int32_t end, bool isRedundant )
-: redundant( isRedundant )
+: redundant( isRedundant ), ignore( false ), unpaired( false )
 {
     coords[0] = start;
     coords[1] = end;
+    coords[2] = 0;
 };
 
 void Coords::offset( int32_t offset )
@@ -43,6 +102,23 @@ void Coords::offset( int32_t offset )
 int32_t& Coords::operator []( bool i )
 {
     return coords[i];
+}
+
+NodeMark::NodeMark( ReadId id, int i, int j, Lib* lib, bool drxn )
+: id( id ), dist( lib->size )
+{
+    coords[0] = i;
+    coords[1] = j;
+    tar[0] = drxn ? coords[0] + lib->minDist : coords[1] - lib->maxDist;
+    tar[1] = drxn ? coords[0] + lib->maxDist : coords[1] - lib->minDist;
+}
+
+void NodeMark::offset( int32_t off )
+{
+    coords[0] += off;
+    coords[1] += off;
+    tar[0] += off;
+    tar[1] += off;
 }
 
 Score::Score()
@@ -299,8 +375,8 @@ void CloneScore::setCumul( Node* node, int prevScore, int prevMisses )
     }
 }
 
-ReadMark::ReadMark( SeqNum &readId, Coords &inCoords, Lib* lib, bool drxn )
-: id( readId ), mark( inCoords[!drxn] )
+ReadMark::ReadMark( ReadId id, Coords &inCoords, Lib* lib, bool drxn )
+: id( id ), mark( inCoords[!drxn] )
 {
     estimate = drxn ? inCoords[0] + lib->size : inCoords[1] - lib->size;
     coords[0] = mark + ( drxn ? (*lib).minDist : -(*lib).maxDist );
@@ -377,10 +453,157 @@ bool LoopVars::addLoopStart( Node* node, bool drxn )
     return true;
 }
 
-float Edge::getOverlapWeakness()
-{
-    return min( float(1), float( max( 0, params.readLen - overlap ) ) / float( max( 1, params.readLen ) ) ); 
-}
+//NodeBlock::NodeBlock( Node* node, int base, int ext, bool drxn )
+//: node( node )
+//{
+//    coords[0][drxn] = coords[1][drxn] = base + ( drxn ? ext : -ext );
+//    coords[0][!drxn] = coords[1][!drxn] = drxn ? coords[0][1] - node->size() : coords[0][0] + node->size();
+//    coords[0][2] = coords[1][2] = 0;
+//    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
+//}
+//
+//NodeBlock::NodeBlock( Edge& e, int ext, bool drxn )
+//: node( e.node )
+//{
+//    coords[0][!drxn] = coords[1][!drxn] = drxn ? ext - e.ol : e.ol - ext;
+//    coords[0][drxn] = coords[1][drxn] = drxn ? coords[0][0] + e.node->size() : coords[0][1] - e.node->size();
+//    coords[!drxn][2] = 0;
+//    coords[drxn][2] = coords[drxn][drxn];
+//    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
+//    assert( drxn ? coords[0][1] >= 0 : coords[1][0] <= 0 );
+//}
+//
+//NodeBlock::NodeBlock( NodeRoll& nodes, NodeBlock& l, NodeBlock& r )
+//{
+//    int ol = l.node->getOverlap( r.node, 1 );
+//    int lens[2]{ min( params.readLen, l.node->size() )-1, min( params.readLen, r.node->size() )-1 };
+//    string seq = l.node->getSeqEnd( lens[0], 1 ) + r.node->getSeqEnd( lens[1], 0 ).substr( ol );
+//    node = new Node( seq, l.node->ends_[1] - lens[0], l.node->drxn_ );
+//    coords[0][0] = coords[1][0] = l.coords[0][1] - lens[0];
+//    coords[0][1] = coords[1][1] = r.coords[0][0] + lens[1];
+//    coords[0][2] = coords[1][2] = 0;
+//    diffs[0] = diffs[1] = node->ends_[0] - coords[0][0];
+//    assert( coords[0][1] - coords[0][0] == node->size() );
+//    nodes += node;
+//    l.node->removeEdge( r.node, 1 );
+//    r.node->removeEdge( l.node, 0 );
+//    node->addEdge( l.node, lens[0], 0, false );
+//    node->addEdge( r.node, lens[1], 1, false );
+//}
+//
+//void NodeBlock::transfer( vector<NodeBlock>& tar, NodeRoll& nodes, NodeRoll& added, bool drxn )
+//{
+//    int32_t limits[2]{ node->ends_[0] + ( coords[0][2] - coords[0][0] )
+//                     , node->ends_[1] - ( coords[1][1] - coords[1][2] ) };
+//    for ( auto& read : node->reads_ )
+//    {
+//        int d = read.second[1] - limits[1] > limits[0] - read.second[0];
+//        int32_t coords[3]{ read.second[0] - diffs[d], read.second[1] - diffs[d], read.second[!d] - limits[d] };
+//        for ( int i = 1; i < tar.size(); i++ )
+//        {
+//            if ( !( tar[i].coords[d][0] <= coords[0] || coords[1] <= tar[i].coords[d][1] ) ) break;
+//            if ( drxn ? tar[i].coords[0][1] < coords[1] : coords[0] < tar[i].coords[1][0] ) continue;
+//            if ( drxn ? coords[0] < tar[i].coords[0][0] : tar[i].coords[1][1] < coords[1] )
+//            {
+//                tar.insert( tar.begin() + i, NodeBlock( nodes, tar[i-drxn], tar[i-!drxn] ) );
+//                added += tar[i].node;
+//            }
+//            coords[0] += tar[i].diffs[0];
+//            coords[1] += tar[i].diffs[1];
+//            coords[2] = d ? min( 0, coords[2] ) : max( 0, coords[2] );
+//            bool redundant = read.second.redundant || tar[i].node->isRedundant( coords[0], coords[1] );
+//            tar[i].node->add( read.first, coords[0], coords[1], redundant, coords[2] );
+//            break;
+//        }
+//    }
+//}
+
+//NodeLine::NodeLine( Node* node, bool drxn )
+//: seq( node->seq_ )
+//{
+//    coords[drxn] = 0;
+//    coords[!drxn] = drxn ? -node->size() : node->size();
+//    tar.push_back( NodeBlock( node, 0, 0, drxn ) );
+//}
+//
+//bool NodeLine::add( Edge& e, bool drxn )
+//{
+//    if ( !e.node ) return false;
+//    int ext = e.node->size() - e.ol;
+//    int base = tar.empty() ? 0 : tar.back().coords[!drxn][drxn];
+//    seq = drxn ? seq + e.node->getSeqEnd( ext, 1 ) : e.node->getSeqEnd( ext, 0 ) + seq;
+//    tar.push_back( NodeBlock( e.node, base, ext, drxn ) );
+//    return true;
+//}
+//
+//void NodeLine::edge( Node* node, NodeRoll& nodes, int32_t coord, int ol, bool drxn )
+//{
+//    for ( int i = 0; i < tar.size(); i++ )
+//    {
+//        int32_t split = tar[i].diffs[!drxn] + coord;
+//        if ( !tar[i].node->getNextReadCoord( split, !drxn, drxn ) ) continue;
+//        ol -= abs( split - ( tar[i].diffs[!drxn] + coord ) );
+//        for ( int d : { 0, 1 } ) tar[i].coords[0][d] = tar[i].coords[1][d] = tar[i].node->ends_[d] + tar[i].diffs[d];
+//        if ( tar[i].node->size() != tar[i].coords[0][1] - tar[i].coords[0][0] ) assert( false );
+//        Node* s = tar[i].node->splitNode( split, nodes, drxn );
+//        if ( s != tar[i].node )
+//        {
+//            tar[i].coords[0][drxn] = tar[i].coords[1][drxn] = tar[i].node->ends_[drxn] - tar[i].diffs[0];
+//            tar.insert( tar.begin()+i+1, NodeBlock( s, tar[i].coords[0][drxn], abs( s->ends_[drxn] - tar[i].node->ends_[drxn] ), drxn ) );
+//        }
+//        string seqs[2]{ node->getSeqEnd( ol, drxn ), s->getSeqEnd( ol, !drxn ) };
+//        node->addEdge( s, ol, drxn, false, node->getSeqEnd( ol, drxn ) != s->getSeqEnd( ol, !drxn ) );
+//        return;
+//    }
+//}
+//
+//void NodeLine::fold( NodeRoll& nodes, Nodesx& mapped, bool drxn )
+//{
+//    nodes.test();
+//    bool discard = false;
+//    NodeRoll added;
+//    for ( NodeBlock& nb : maps )
+//    {
+//        assert( drxn ? nb.coords[0][1] >= 0 : nb.coords[1][0] <= 0 );
+//        for ( Edge& e : nb.node->edges_[!drxn] )
+//        {
+//            if ( mapped.find( e.node ) ) continue;
+//            edges.push_back( make_tuple( e.node, nb.coords[!drxn][!drxn], e.ol ) );
+//        }
+//        if ( drxn ? tar.back().coords[0][1] < nb.coords[0][1] : nb.coords[1][0] < tar.back().coords[1][0] ) discard = true;
+//    }
+//    
+//    for ( NodeBlock& nb : maps )
+//    {
+//        if ( !discard ) nb.transfer( tar, nodes, added, drxn );
+//        nodes.erase( nb.node );
+//    }
+//    for ( Node* node : added.nodes ) node->recoil();
+//    for ( int i = 0; !discard && i < edges.size(); i++ ) edge( get<0>( edges[i] ), nodes, get<1>( edges[i] ), get<2>( edges[i] ), drxn );
+//    for ( NodeBlock& t : tar )
+//    {
+//        Nodesx fwd( t.node, drxn, false, false );
+//        assert( !fwd.find( t.node ) );
+//    }
+//    nodes.test();
+//}
+//
+//void NodeLine::map( Edge& e, Nodesx& mapped, int ext, int align, bool drxn )
+//{
+//    if ( !mapped.add( e.node ) || e.node->stop_[drxn] == BLUNT_END ) return;
+//    maps.push_back( NodeBlock( e, ext, drxn ) );
+//    if ( ext == align )
+//    {
+//        int i = -coords[!drxn], j = -maps.back().coords[!drxn][!drxn];
+//        for ( ; abs(i)+align < seq.size() && abs(j)+align < e.node->size() ; align++ )
+//        {
+//            if ( drxn ? seq[i+align] != e.node->seq_[j+align] : seq.end()[i-align-1] != e.node->seq_.end()[j-align-1] ) break;
+//        }
+//    }
+//    maps.back().coords[!drxn][2] = drxn ? align : -align;
+//    ext = abs( maps.back().coords[!drxn][drxn] );
+//    for ( Edge& f : e.node->edges_[drxn] ) map( f, mapped, ext, align, drxn );
+//}
 
 MapStruct::MapStruct( string &inSeq, int32_t inMinLen, int32_t inCoord, int32_t target, bool drxn )
 : seq( inSeq ), len( inSeq.length() ), coord( inCoord )
@@ -484,6 +707,49 @@ void MapNode::checkLoop()
         found = find( ids.begin()+i+1, ids.end(), ids[i] );
         assert( found == ids.end() );
     }
+}
+
+bool MapNode::checkRedundantOverlaps( NodeList &edges, vector<int32_t> edgeCoords[2], bool drxn )
+{
+    vector<int> bases;
+    for ( int i = 0; i < edges.size(); i++ )
+    {
+        if ( drxn ) bases.push_back( edges[i]->ends_[0] + edgeCoords[1][i] - edgeCoords[0][i] - seq.length() );
+        else bases.push_back( edges[i]->ends_[1] - ( edgeCoords[1][i] - edgeCoords[0][i] ) );
+    }
+    
+    bool didAdd = false;
+    for ( int i = 0; i < ids.size(); )
+    {
+        bool found = false;
+        for ( Node* node : edges ) if ( node->reads_.find( ids[i] ) != node->reads_.end() ) found = true;;
+        for ( int j = found * edges.size(); j < edges.size(); j++ )
+        {
+            if ( drxn ? bases[j] + coords[0][i] < edges[j]->ends_[0] : edges[j]->ends_[1] < bases[j] + coords[1][i] ) continue;
+            edges[j]->addRead( ids[i], bases[j] + coords[0][i], bases[j] + coords[1][i], true );
+            found = true;
+            didAdd = true;
+        }
+        if ( found )
+        {
+            ids.erase( ids.begin() + i );
+            coords[0].erase( coords[0].begin() + i );
+            coords[1].erase( coords[1].begin() + i );
+        }
+        else i++;
+    }
+    
+    int len = seq.length();
+    if ( didAdd )
+    {
+        for ( Node* node : edges )
+        {
+            node->updatePairs();
+            node->setCoverage();
+        }
+    }
+    
+    return didAdd;
 }
 
 void MapNode::collapse( vector<MapNode*> &mapNodes, vector<MapNode*> &mapEdges )
@@ -812,6 +1078,30 @@ void MapNode::setEdgeSeq()
     edgeOverlaps[1][0] = edgeCoords[1];
 }
 
+void MapNode::setRedundant()
+{
+    redundant.clear();
+    int limits[2]{0};
+    for ( int i = 0; i < ids.size(); i++ )
+    {
+        int iLen = coords[1][i] - coords[0][i];
+        bool isRedundant = iLen < limits[1] - limits[0] && coords[1][i] <= limits[1];
+        if ( coords[1][i] == limits[1] ) limits[0] = min( limits[0], coords[0][i] );
+        if ( limits[1] < coords[1][i] )
+        {
+            limits[1] = coords[1][i];
+            limits[0] = coords[0][i];
+        }
+        for ( int j = i+1; j < ids.size(); j++ )
+        {
+            if ( isRedundant ) break;
+            if ( coords[0][i] < coords[0][j] ) break;
+            if ( coords[1][i] < coords[1][j] ) isRedundant = true;
+        }
+        redundant.push_back( isRedundant );
+    }
+}
+
 void MapNode::setSecondSeq( bool drxn )
 {
     for ( int i = 0; i < ids.size(); i++ )
@@ -857,7 +1147,7 @@ bool NodeMapRead::checkDoubleHit()
             for ( Edge &e : nodes[0]->edges_[1] )
             {
                 if ( e.node == nodes[1] 
-                        && ( coords[1][1] - coords[1][0] > e.overlap || e.isLeap ) )
+                        && ( coords[1][1] - coords[1][0] > e.ol || e.leap ) )
                 {
                     doUnset = false;
                 }

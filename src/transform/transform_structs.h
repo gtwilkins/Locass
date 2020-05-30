@@ -28,12 +28,13 @@
 
 struct ReadFile
 {
-    ReadFile( string filename );
+    ReadFile( string filename, int baseReadLen, int minScore );
     bool getNext( string &seq );
     void setReadLen();
     void trimSeq( string &seq );
     ifstream fh;
-    uint8_t fileType, readLen;
+    string line;
+    uint8_t fileType, readLen, minPhred;
 };
 
 #endif /* TRANSFORM_STRUCTS_H */

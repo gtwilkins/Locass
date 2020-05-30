@@ -296,7 +296,7 @@ void Locus::getExportPathBridge( vector< pair<Node*, int> > &nodePath, Node* lft
     {
         if ( e.node == rght )
         {
-            nodePath.push_back( make_pair( lft, e.overlap ) );
+            nodePath.push_back( make_pair( lft, e.ol ) );
             return;
         }
     }
@@ -319,7 +319,7 @@ void Locus::getExportPathBridge( vector< pair<Node*, int> > &nodePath, Node* lft
             {
                 nxtHits = edgeHits;
                 nxt = e.node;
-                nxtOverlap = e.overlap;
+                nxtOverlap = e.ol;
             }
         }
         nodePath.push_back( make_pair( lft, nxtOverlap ) );

@@ -20,20 +20,35 @@
 
 #include "filenames.h"
 #include <iostream>
+#include <cassert>
+#include <sys/stat.h>
 
 Filenames::Filenames( string inPrefix )
 : prefix( inPrefix )
 {
+    string folder = inPrefix.substr( 0, inPrefix.find_last_of( '/' ) );
+    makeFolder( folder );
+    
     bin = prefix + "-bin.dat";
     bwt = prefix + "-bwt.dat";
     ids = prefix + "-ids.dat";
     idx = prefix + "-idx.dat";
+    mer = prefix + "-mer.dat";
 }
 
-FILE* Filenames::getReadPointer( string &filename, bool doEdit )
+bool Filenames::exists( string &filename )
+{
+    if ( filename.empty() ) return false;
+    ifstream ifs( filename );
+    bool result = ifs.good();
+    ifs.close();
+    return result;
+}
+
+FILE* Filenames::getReadPointer( string &filename, bool doEdit, bool allowFail )
 {
     FILE* fp = fopen( filename.c_str(), ( doEdit ? "rb+" : "rb" ) );
-    if ( fp == NULL )
+    if ( fp == NULL && !allowFail )
     {
         cerr << "Error opening file \"" << filename << "\"." << endl;
         exit( EXIT_FAILURE );
@@ -81,6 +96,30 @@ FILE* Filenames::getBinary( bool doRead, bool doEdit )
     return ( doRead ? getReadPointer( bin, doEdit ) : getWritePointer( bin )  );
 }
 
+bool Filenames::isFolder( string folder )
+{
+    struct stat st;
+    return ( stat( folder.c_str(), &st ) == 0 && ( S_ISDIR( st.st_mode ) ) );
+}
+
+void Filenames::makeFolder( string folder )
+{
+    if ( isFolder( folder ) ) return;
+    size_t it = folder.find_last_of( '/' );
+    if ( it != folder.npos )
+    {
+        string parent = folder.substr( 0, it );
+        if ( !isFolder( parent ) ) makeFolder( parent );
+    }
+    
+    const int dir_err = mkdir( folder.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH );
+    if ( dir_err == -1 )
+    {
+        cerr << "Error creating directory \"" << folder << "\"!" << endl;
+        exit(1);
+    }
+}
+
 void Filenames::removeFile( string &filename )
 {
     if ( remove( filename.c_str() ) )
@@ -89,14 +128,15 @@ void Filenames::removeFile( string &filename )
     }
 }
 
-void Filenames::setIndex( FILE* &inBin, FILE* &inBwt, FILE* &inIdx )
+void Filenames::setIndex( FILE* &inBin, FILE* &inBwt, FILE* &inIdx, FILE* &inMer )
 {
     inBin = getReadPointer( bin, false );
     inBwt = getReadPointer( bwt, false );
     inIdx = getReadPointer( idx, false );
+    inMer = getReadPointer( mer, false, true );
 }
 
-PreprocessFiles::PreprocessFiles( string inPrefix )
+PreprocessFiles::PreprocessFiles( string inPrefix, bool overwrite )
 : Filenames( inPrefix )
 {
     tmpSingles = prefix + "-tmpSingles.seq";
@@ -114,9 +154,9 @@ PreprocessFiles::PreprocessFiles( string inPrefix )
         }
     }
     
-    for ( string const &fn : { bwt, bin, ids, idx } )
+    for ( string const &fn : { bwt, bin, ids, idx, mer } )
     {
-        if ( ifstream( fn ) )
+        if ( ifstream( fn ) && !overwrite )
         {
             cerr << "Error: file \"" << fn << "\" already exists. Either remove it, rename it, or choose a different file prefix." << endl;
             exit( EXIT_FAILURE );
@@ -192,6 +232,7 @@ void PreprocessFiles::setCyclerFinal( FILE* &inBwt, FILE* &outBwt, FILE* &inEnd,
     
     inBwt = getReadPointer( tmpBwt[iIn], false );
     outBwt = getWritePointer( bwt );
+    inEnd = getReadPointer( tmpEnd[iIn], false );
     outEnd = getWritePointer( ids );
 }
 
@@ -223,4 +264,9 @@ void PreprocessFiles::setIndexWrite( FILE* &inBwt, FILE* &outIdx )
 {
     inBwt = getReadPointer( bwt, false );
     outIdx = getWritePointer( idx );
+}
+
+void PreprocessFiles::setMersWrite( FILE* &outMer )
+{
+    outMer = getWritePointer( mer );
 }

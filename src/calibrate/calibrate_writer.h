@@ -31,12 +31,14 @@ class CalibrateWriter
 {
 public:
     CalibrateWriter( Querier &bwt ): bwt_( bwt ){};
+    ~CalibrateWriter();
     
     void coverage();
     void pairing();
-    void write( Filenames* fns );
+    static void write( Filenames* fns );
     
     vector<string> seqs_;
+    NodeListList nodes_;
     Querier &bwt_;
 };
 

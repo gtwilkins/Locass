@@ -31,7 +31,7 @@ ReadEndMap::ReadEndMap( string seq, ReadMark &mark, Node* hit, int32_t* hitCoord
     ol = mapDrxn ? coords[2] - coords[1] : coords[1] - coords[0];
     edgeOl = 0;
     drxn = mark.estimate < mark.mark;
-    doMap = edged = false;
+    doMap = edged = redundant = false;
 }
 
 string ReadEndMap::getSeq( unordered_set<ReadId> &usedIds, bool drxn )
@@ -66,7 +66,7 @@ void ReadEndMap::setEdge( vector<ReadEndMap*> &reads, bool drxn )
 {
     for ( ReadEndMap* read : reads )
     {
-        if ( read == this || read->seq == seq || edgeOl == seq.length() ) continue;
+        if ( read == this || read->seq == seq || edgeOl == seq.length() || read->redundant ) continue;
         int readOl = mapSeqOverlap( ( drxn ? seq : read->seq ), ( drxn ? read->seq : seq ), max( ol + 1, edgeOl ) );
         if ( readOl )
         {
@@ -152,21 +152,28 @@ bool SeqPathReassemble::doMap( PathVars &pv )
                 int offset = nodes[j]->ends_[0]- ends[0] - nodeCoords[0][j];
                 if ( nodeCoords[0][j] <= read->coords[0] && read->coords[2] <= nodeCoords[1][j] )
                 {
-                    nodes[j]->addRead( read->id, readCoords[0] + offset, readCoords[1] + offset, redundant );
-                    added.insert( nodes[j] );
+                    if ( nodes[j]->addRead( read->id, readCoords[0] + offset, readCoords[1] + offset, redundant, redundant ) )
+                    {
+                        added.insert( nodes[j] );
+                        nodes[j]->readTest();
+                    }
                     break;
                 }
+                if ( read->coords[0] <= nodeCoords[0][j] && nodeCoords[1][j] <= read->coords[2] ) break;
                 if ( read->coords[2] <= nodeCoords[1][j] )
                 {
                     if ( nodeCoords[0][j] <= read->coords[0] )
                     {
-                        nodes[j]->addRead( read->id, max( nodes[j]->ends_[0], readCoords[0] )
-                                                   , min( nodes[j]->ends_[1], readCoords[1] ), redundant );
-                        added.insert( nodes[j] );
+                        if( nodes[j]->addRead( read->id, max( nodes[j]->ends_[0], readCoords[0] )
+                                                   , min( nodes[j]->ends_[1], readCoords[1] ), redundant, redundant ) )
+                        {
+                            added.insert( nodes[j] );
+                            nodes[j]->readTest();
+                        }
                     }
                     else if ( j > 0 )
                     {
-                        edgeNodes[j-1]->addRead( read->id, readCoords[0], readCoords[1], redundant );
+                        edgeNodes[j-1]->addRead( read->id, readCoords[0], readCoords[1], redundant, redundant );
                         edgeNodes[j-1]->ends_[0] = min( edgeNodes[j-1]->ends_[0], readCoords[0] );
                         edgeNodes[j-1]->ends_[1] = max( edgeNodes[j-1]->ends_[1], readCoords[1] );
                     }
@@ -205,6 +212,7 @@ bool SeqPathReassemble::doMap( PathVars &pv )
     
     for ( Node* node : added )
     {
+        node->readTest();
         node->setCoverage();
         node->updatePairs();
         didMap = true;
@@ -258,7 +266,6 @@ string SeqPathReassemble::getExtraSeq( ReadEndMap* read, int &ol, bool drxn )
         }
     }
     
-    assert( rSeq.length() < 85 );
     return rSeq;
 }
 
@@ -395,14 +402,12 @@ void SeqPathReassemble::setBridges( vector<SeqPathReassemble*> seqs, MapNode* mn
                 {
                     ReadEndMap* olReads[2] = { drxn ? read : path.back(), drxn ? path.back() : read };
                     SeqPathReassemble* hitSeqs[2] = { drxn ? s : this, drxn ? this : s };
-                    int seqOls[2]{ params.readLen - 1, params.readLen - 1 };
+                    int seqOls[2]{ min( params.readLen, hitSeqs[0]->getCoord( olReads[0] ) - olReads[0]->node->ends_[0] ) - 1
+                                 , min( params.readLen, olReads[1]->node->ends_[1] - hitSeqs[1]->getCoord( olReads[1] ) ) - 1 };
                     usedIds.clear();
                     mn->seq = hitSeqs[0]->getExtraSeq( olReads[0], seqOls[0], 0 );
-                    int nowLen = mn->seq.length();
                     mn->seq += hitRead->getSeq( usedIds, drxn );
-                    nowLen = mn->seq.length();
                     mn->seq += hitSeqs[1]->getExtraSeq( olReads[1], seqOls[1], 1 );
-                    nowLen = mn->seq.length();
                     for ( int i : { 0, 1 } )
                     {
                         mn->bridges[i].clear();
@@ -430,6 +435,13 @@ void SeqPathReassemble::setEdges()
             for ( ReadEndMap* r2 : reads[drxn] )
             {
                 if ( r1 == r2 ) continue;
+                if ( r1->seq.length() < r2->seq.length() && r2->seq.find( r1->seq ) != r2->seq.npos )
+                {
+                    r1->redundant = true;
+                    r1->edge = NULL;
+                    r2->edgeOl = 0;
+                    break;
+                }
                 if ( r1->seq == r2->seq && r1->id < r2->id )
                 {
                     if ( r2->edge && r2->edge->id > r1->id ) continue;
@@ -442,6 +454,7 @@ void SeqPathReassemble::setEdges()
         // Set edges
         for ( ReadEndMap* const &read : reads[drxn] )
         {
+            if ( read->redundant ) continue;
             read->setEdge( reads[drxn], drxn );
             if ( read->edge ) edged.insert( read->edge );
         }
@@ -491,6 +504,7 @@ void SeqPathReassemble::setEdges()
         }
         
         // Set path ends
+        int cutoff = 2 + params.cover / params.readLen;
         for ( ReadEndMap* r1 : reads[drxn] )
         {
             r1->edged = edged.find( r1 ) != edged.end();
@@ -499,7 +513,7 @@ void SeqPathReassemble::setEdges()
                 vector<ReadEndMap*> path = { r1 };
                 while ( path.back()->edge ) path.push_back( path.back()->edge );
                 for ( int i = path.size()-1; --i >= 0; ) path[i]->move( drxn );
-                if ( path.size() > 2 ) paths[drxn].push_back( path );
+                if ( path.size() > cutoff ) paths[drxn].push_back( path );
             }
         }
     }
@@ -519,7 +533,7 @@ void SeqPathReassemble::setHalves( MapNode* mn, unordered_set<ReadId> &usedIds, 
         
         if ( thisScore > bestScore )
         {
-            int seqOl = params.readLen - 1;
+            int seqOl = min( params.readLen, abs( getCoord( path.back() ) - path.back()->node->ends_[drxn] ) ) - 1;
             usedIds.clear();
             mn->seq = drxn ? "" : getExtraSeq( path.back(), seqOl, 0 );
             mn->seq += path[0]->getSeq( usedIds, drxn );
@@ -595,10 +609,10 @@ bool SeqPathMerge::doMerge( PathVars &pv, NodeSet &delSet, bool drxn )
                 for ( Edge &e : mergeNodes[!drxn]->edges_[!drxn] )
                 {
                     if ( find( nodes.begin(), nodes.end(), e.node ) == nodes.end() ) continue;
-                    if ( e.overlap > diff );
+                    if ( e.ol > diff );
                     mergeNodes[!drxn] = e.node;
                     splitCoords[!drxn] = e.node->ends_[drxn];
-                    ol -= ( diff - e.overlap );
+                    ol -= ( diff - e.ol );
                     didFind = true;
                 }
                 if ( !didFind ) return false;
@@ -632,7 +646,7 @@ bool SeqPathMerge::doMerge( PathVars &pv, NodeSet &delSet, bool drxn )
             bool didMerge = false;
             for ( Edge &e : mergeNodes[drxn]->edges_[drxn] )
             {
-                int diff = endDist - e.overlap;
+                int diff = endDist - e.ol;
                 if ( diff < 0 ) continue;
                 mergeNodes[!drxn]->addEdge( e.node, ol - diff, drxn );
                 didMerge = true;

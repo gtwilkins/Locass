@@ -61,7 +61,7 @@ void Node::exportNodeDump( ofstream &fh )
             {
                 fh << "_";
             }
-            fh << drxn << "_" << e.node->id_ << "_" << e.overlap << "_" << e.isLeap;
+            fh << drxn << "_" << e.node->id_ << "_" << e.ol << "_" << e.leap;
             first = false;
         }
     }

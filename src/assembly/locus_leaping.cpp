@@ -74,16 +74,12 @@ void Locus::leap()
     {
         for ( Path &path : paths_[drxn] )
         {
-            if ( !path.path.empty() && !finished_[drxn] && !stopCodes_[drxn] )
-            {
-                if ( leap( path, drxn ) )
-                {
-                    path.completed = false;
-                    completed_[drxn] = false;
-                    desperation_[drxn] = false;
-                    resetIslandVars( drxn );
-                }
-            }
+            if ( path.path.empty() || finished_[drxn] || stopCodes_[drxn] ) continue;
+            if ( !leap( path, drxn ) ) continue;
+            path.completed = false;
+            completed_[drxn] = false;
+            desperation_[drxn] = false;
+            resetIslandVars( drxn );
         }
     }
     leapTime_ += (double)( clock() - startTime ) / (double) CLOCKS_PER_SEC;
@@ -107,7 +103,7 @@ bool Locus::leap( Path &path, bool drxn )
         leapSetIslandSingles( *ivs_[drxn], peMarks, mpMarks, readIds, limits );
     }
     
-    if ( !leapReview( *ivs_[drxn] ) )
+    if ( !leapReview( *ivs_[drxn] ) || params.haploid )
     {
         return leapBridge( *ivs_[drxn] );
     }

@@ -20,8 +20,113 @@
 
 #include "query_state.h"
 #include <cassert>
+#include "constants.h"
 
 extern Parameters params;
+
+QState::QState( uint8_t i, CharId rank, CharId count, int ol, int gen, bool perfect )
+: ol( ol ), gen( gen ), rank( rank ), count( count ), perfect( perfect )
+{
+    q.push_back( i );
+}
+
+bool QState::advance( uint8_t i )
+{
+    if ( i > 3 || !counts[i] ) return false;
+    rank = ranks[i];
+    count = counts[i];
+    q.push_back( i );
+    ol++;
+    return true;
+}
+
+void QState::branch( int i, CharId minCount )
+{
+    count = 0;
+    for ( int j = 0; j < 4; j++ )
+    {
+        if ( counts[j] < minCount ) continue;
+        bool ePerfect = perfect && i==j;
+        edges.push_back( QState( j, ranks[j], counts[j], ol+1, gen + !ePerfect, ePerfect ) );
+    }
+}
+
+int QState::failure()
+{
+    if ( !ols.empty() && perfect ) return 0;
+    for ( QState& qs : edges ) if ( !qs.failure() ) return 0;
+    return edges.empty() && ols.empty() ? 1 : 3;
+}
+
+bool QState::record()
+{
+    if ( !counts.endCounts ) return false;
+    ols.push_back( QueryEnd( ranks.endCounts, counts.endCounts, ol ) );
+    return true;
+}
+
+int QueryState::setFirst()
+{
+    int base = 0;
+    int thisBase = 0;
+    bool isGood = q[0] < 4;
+    int bestLen = isGood ? 1 : -1;
+    int pos = 0;
+    while ( ++pos < params.readLen )
+    {
+        if ( q[pos] < 4 )
+        {
+            if ( !isGood )
+            {
+                thisBase = pos;
+                isGood = true;
+            }
+            else if ( pos - thisBase > bestLen )
+            {
+                base = thisBase;
+                bestLen = pos - thisBase;
+            }
+        }
+        else isGood = false;
+    }
+    if ( bestLen < 13 ) return -1;
+    
+    if ( base )
+    {
+        for ( int i = 0; i < params.readLen; i++ )
+        {
+            q[i] = i + base < params.readLen ? q[i + base] : 6;
+        }
+    }
+    
+    return base;
+}
+
+void QueryState::updateSeq( string &seq, int off, bool drxn )
+{
+    for ( int i = 0; i < seqLen - off; i++ )
+    {
+        if ( i > seq.length() && q[i] > 3 ) return;
+        char c = drxn ? ( q[i] == 0 ? 'T' : ( q[i] == 3 ? 'A' : ( q[i] == 1 ? 'G' : 'C' ) ) )
+                      : ( q[i] == 0 ? 'A' : ( q[i] == 3 ? 'T' : ( q[i] == 1 ? 'C' : 'G' ) ) );
+        
+        if ( seq.length() - off < i )
+        {
+            if ( drxn ) seq = c + seq;
+            else seq += c;
+            continue;
+        }
+        int j = drxn ? seq.length() - 1 - i - off : i + off;
+        if ( seq[j] == 'N' ) seq[j] = c;
+    }
+}
+
+QueryCorrectState::QueryCorrectState( uint8_t* query, int corrLength, int seqLength, int minOverlap )
+: q( query ), corrLen( corrLength ), seqLen( seqLength ), minOver( minOverlap ), fresh( true ), endCount( 0 )
+{
+    endCutoff = altCutoff = 0;
+}
+
 
 QuerySeedState::QuerySeedState( string &seq, MappedSeqs &ms, int errorRate )
 : len( seq.length() ), ms( ms )
@@ -54,7 +159,7 @@ QuerySeedState::QuerySeedState( string &seq, MappedSeqs &ms, int errorRate )
 
 void QuerySeedState::add( ReadStruct &read, bool drxn )
 {
-    if ( ms.usedIds.find( read.readId ) == ms.usedIds.end() )
+    if ( ms.usedIds.find( read.id ) == ms.usedIds.end() )
     {
         read.tether[0] = drxn ? len - min( i, iError ) : iBegin;
         read.tether[1] = drxn ? len - iBegin : min( i, iError );
@@ -77,7 +182,7 @@ void QuerySeedState::add( ReadStruct &read, bool drxn )
         }
         
         ms.reads.push_back( read );
-        ms.usedIds.insert( read.readId );
+        ms.usedIds.insert( read.id );
     }
 }
 
@@ -85,7 +190,7 @@ bool QuerySeedState::advance( int it, int k, int &thisErrors, bool drxn )
 {
     i = it + 1;
     
-    if ( i + 1 >= len )
+    if ( i >= len )
     {
         if ( !thisErrors ) iError = len;
         j = k;
@@ -114,7 +219,7 @@ bool QuerySeedState::advance( int it, int k, int &thisErrors, bool drxn )
     
     j = k;
     
-    return thisErrors <= thisMaxErrors && i < len - 1;
+    return thisErrors <= thisMaxErrors;
 }
 
 void QuerySeedState::countChunks( int &count, bool drxn )

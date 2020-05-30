@@ -286,7 +286,7 @@ void Node::loopWalkEdgesSet( LoopVars &lv, ExtVars &ev, NodeSet &usedEdges, vect
                 {
                     if ( ev.ante.find( clone ) == ev.ante.end() )
                     {
-                        addEdge( clone, e.overlap, drxn );
+                        addEdge( clone, e.ol, drxn );
                     }
                     break;
                 }
@@ -298,7 +298,7 @@ void Node::loopWalkEdgesSet( LoopVars &lv, ExtVars &ev, NodeSet &usedEdges, vect
         {
             assert( ev.cloneSet.find( e.node ) == ev.cloneSet.end() );
             Node* clone = new Node( e.node, ev, drxn );
-            addEdge( clone, e.overlap, drxn );
+            addEdge( clone, e.ol, drxn );
             ev.nodes.push_back( clone );
             lv.clones.insert( clone );
             lv.cloned.insert( clone );
@@ -309,7 +309,7 @@ void Node::loopWalkEdgesSet( LoopVars &lv, ExtVars &ev, NodeSet &usedEdges, vect
         // Contest for divergent branch
         else
         {
-            addEdge( e.node, e.overlap, drxn );
+            addEdge( e.node, e.ol, drxn );
             bool isFirst = true;
             while ( e.node->resolveBypass( ev, isFirst, drxn ) )
             {

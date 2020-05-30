@@ -44,7 +44,7 @@ bool Node::calibrateSeed( ExtVars &ev )
         NodeSet safeSet;
         if ( currSet.size() == 1 ) safeSet = currSet;
         
-        while ( !currSet.empty() )
+        while ( !currSet.empty() && currSet.size() < 15 )
         {
             NodeSet nxtSet;
             for ( Node* curr : currSet )
@@ -159,48 +159,43 @@ void Node::calibrate( NodeList &nodes, LocusLibraryCount &lib )
     
     for ( Node* n1 : nodes )
     {
-        if ( lib.ffPairs.size() >= 1000 || lib.frPairs.size() >= 1000 || lib.rfPairs.size() >= 1000 ) break;
         if ( n1->coverage_ > params.cover * 2 ) continue;
         for ( auto &read : n1->reads_ )
         {
+            if ( read.first & 0x1 ) continue;
             for ( int i ( 0 ); i < params.libs.size(); i++ )
             {
-                if ( read.first < params.libs[i].endCount )
+                if ( params.libs[i].endCount <= read.first ) continue;
+                bool isRight = read.first & 0x3;
+                ReadId pairId[2] = { read.first + ( isRight ? -2 : 2 )
+                                   , read.first + ( isRight ? -1 : 3 ) };
+                for ( Node* n2 : nodes )
                 {
-                    if ( !params.libs[i].size && !( read.first & 0x1 ) )
+                    auto it = n2->reads_.find( pairId[0] );
+                    if ( it != n2->reads_.end() )
                     {
-                        bool isRight = read.first & 0x3;
-                        ReadId pairId[2] = { read.first + ( isRight ? -2 : 2 )
-                                           , read.first + ( isRight ? -1 : 3 ) };
-                        for ( Node* n2 : nodes )
-                        {
-                            auto it = n2->reads_.find( pairId[0] );
-                            if ( it != n2->reads_.end() )
-                            {
-                                lib.ffPairs[i].push_back( max( abs( read.second[0] - it->second[1] ), abs( read.second[1] - it->second[0] ) ) );
-                                limits[i][0] = min( limits[i][0], min( it->second[0], read.second[0] ) );
-                                limits[i][1] = max( limits[i][1], max( it->second[1], read.second[1] ) );
-                                break;
-                            }
-                            it = n2->reads_.find( pairId[1] );
-                            if ( it != n2->reads_.end() )
-                            {
-                                if ( read.second[0] < it->second[0] && read.second[1] < it->second[1] )
-                                {
-                                    lib.frPairs[i].push_back( abs( read.second[0] - it->second[1] ) );
-                                }
-                                else if( it->second[0] < read.second[0] && it->second[1] < read.second[1] )
-                                {
-                                    lib.rfPairs[i].push_back( abs( it->second[0] - read.second[1] ) );
-                                }
-                                limits[i][0] = min( limits[i][0], min( it->second[0], read.second[0] ) );
-                                limits[i][1] = max( limits[i][1], max( it->second[1], read.second[1] ) );
-                                break;
-                            }
-                        }
+                        lib.ffPairs[i].push_back( max( abs( read.second[0] - it->second[1] ), abs( read.second[1] - it->second[0] ) ) );
+                        limits[i][0] = min( limits[i][0], min( it->second[0], read.second[0] ) );
+                        limits[i][1] = max( limits[i][1], max( it->second[1], read.second[1] ) );
+                        break;
                     }
-                    break;
+                    it = n2->reads_.find( pairId[1] );
+                    if ( it != n2->reads_.end() )
+                    {
+                        if ( read.second[0] < it->second[0] && read.second[1] < it->second[1] )
+                        {
+                            lib.frPairs[i].push_back( abs( read.second[0] - it->second[1] ) );
+                        }
+                        else if( it->second[0] < read.second[0] && it->second[1] < read.second[1] )
+                        {
+                            lib.rfPairs[i].push_back( abs( it->second[0] - read.second[1] ) );
+                        }
+                        limits[i][0] = min( limits[i][0], min( it->second[0], read.second[0] ) );
+                        limits[i][1] = max( limits[i][1], max( it->second[1], read.second[1] ) );
+                        break;
+                    }
                 }
+                break;
             }
         }
     }

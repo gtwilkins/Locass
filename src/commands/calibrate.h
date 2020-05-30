@@ -30,9 +30,12 @@ class Calibrate
 public:
     Calibrate( int argc, char** argv );
     
-private:
+    void forceCoverage( float cover );
+    void forcePaired( int i, int dist, uint8_t orient );
     
+private:
     void printUsage();
+    void write( Filenames* fns );
     
 };
 

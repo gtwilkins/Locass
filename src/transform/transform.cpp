@@ -32,7 +32,6 @@ void Transform::load( PreprocessFiles* fns, vector< vector<ReadFile*> >& libs, u
         return a.size() > b.size();
     } );
     
-    
     // Set base read length
     uint8_t readLen = 0;
     for ( vector<ReadFile*> &lib : libs )
@@ -42,11 +41,11 @@ void Transform::load( PreprocessFiles* fns, vector< vector<ReadFile*> >& libs, u
             readLen = max( readLen, readFile->readLen );
         }
     }
-    uint8_t minLen = readLen;
-    assert( readLen >= 80 && readLen <= 250 );
+    uint8_t minLen = 45;
+    assert( readLen >= 80 && readLen <= 255 );
     
-    cout << "\tRead length set to " << to_string( readLen ) << "." << endl;
-    cout << "\tMin length set to " << to_string( minLen ) << "." << endl;
+    cout << "    Read length set to " << to_string( readLen ) << "." << endl;
+    cout << "    Min length set to " << to_string( minLen ) << "." << endl;
 
     ofstream tmpSingles = fns->getWriteStream( fns->tmpSingles );
     ReadId readCount = 0, discardCount = 0;
@@ -98,13 +97,14 @@ void Transform::load( PreprocessFiles* fns, vector< vector<ReadFile*> >& libs, u
             {
                 fileCount += libs.size() - 1;
                 tmpSingles.close();
-                ReadFile* readFile = new ReadFile( fns->tmpSingles );
+                ReadFile* readFile = new ReadFile( fns->tmpSingles, readLen, 0 );
                 vector<ReadFile*> lib = { readFile };
                 libs.push_back( lib );
             }
             
             cout << "\tRead " << to_string( thisReadCount ) << " paired reads from library" << endl;
         }
+        
         // Process singleton libraries
         else if ( libs[0].size() == 1 )
         {
@@ -134,7 +134,7 @@ void Transform::load( PreprocessFiles* fns, vector< vector<ReadFile*> >& libs, u
     }
     binWrite->close();
     
-    cout << endl <<"Reading inputs files... completed!" << endl << endl;
+    cout << endl << "Reading inputs files... completed!" << endl << endl;
     cout << "Summary:" << endl;
     cout << "Read in " << to_string( readCount ) << " sequence reads and discarded " << to_string( discardCount ) << endl;
     cout << "Read from " << to_string( fileCount ) << " read files, including " << to_string( pairedLibCount ) << " paired libraries." << endl;
@@ -153,7 +153,7 @@ void Transform::run( PreprocessFiles* fns )
     while ( bin->cycle < bin->readLen )
     {
         double cycleStart = clock();
-        cout << "\tCycle " << to_string( bin->cycle ) << " of " << to_string( bin->readLen ) << "... " << flush;
+        cout << "    Cycle " << to_string( bin->cycle ) << " of " << to_string( bin->readLen ) << "... " << flush;
         
         bin->read();
         cycler->run( bin->chars, ( bin->anyEnds ? bin->ends : NULL ), bin->cycle );
@@ -163,7 +163,7 @@ void Transform::run( PreprocessFiles* fns )
     }
     
     double finalStart = clock();
-    cout << "\tCycle " << to_string( bin->cycle ) << " of " << to_string( bin->readLen ) << "... " << flush;
+    cout << "    Cycle " << to_string( bin->cycle ) << " of " << to_string( bin->readLen ) << "... " << flush;
     cycler->finish( bin->cycle + 1 );
     cout << " completed in " << getDuration( finalStart ) << endl;
     bin->finish();

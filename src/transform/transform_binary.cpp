@@ -27,6 +27,7 @@
 BinaryReader::BinaryReader( PreprocessFiles* filenames )
 : fns( filenames )
 {
+    endCount = 0;
     bin = fns->getReadPointer( fns->bin, false );
     fread( &seqsBegin, 1, 1, bin );
     fread( &id, 8, 1, bin );
@@ -36,7 +37,7 @@ BinaryReader::BinaryReader( PreprocessFiles* filenames )
     fread( &seqCount, 4, 1, bin );
     
     lineLen = 1 + ( readLen + 3 ) / 4;
-    fileSize = seqCount * lineLen;
+    fileSize = (CharId)seqCount * (CharId)lineLen;
     buffSize = 16777216 - ( 16777216 % lineLen );
     buff = new uint8_t[buffSize];
     chars = new uint8_t[ ( seqCount + 3 ) / 4 ];
@@ -76,6 +77,7 @@ void BinaryReader::finish()
 
 void BinaryReader::read()
 {
+    prevEndCount = endCount;
     if ( ++cycle == readLen )
     {
         delete[] chars;
@@ -108,6 +110,7 @@ void BinaryReader::read()
         {
             ends[readCount/8] ^= endBitArray[readCount % 8];
             anyEnds = true;
+            endCount++;
         }
         pFwd = 1 + ( buff[pBuff] - 1 - cycle ) / 4;
         iFwd = ( buff[pBuff] - 1 - cycle ) & 0x3;
@@ -130,7 +133,7 @@ void BinaryReader::update()
 }
 
 BinaryWriter::BinaryWriter( PreprocessFiles* filenames, uint8_t inLibCount, uint8_t inReadLen )
-: fns( filenames ), libCount( inLibCount ), readLen( inReadLen )
+: fns( filenames ), libCount( inLibCount ), readLen( inReadLen ), libCounts( NULL )
 {
     pBin = 0;
     seqCount = 0;
@@ -148,7 +151,7 @@ BinaryWriter::BinaryWriter( PreprocessFiles* filenames, uint8_t inLibCount, uint
     lineLen = 1 + ( readLen + 3 ) / 4;
     buffSize = 16777216 - ( 16777216 % lineLen );
     binBuff = new uint8_t[buffSize];
-    libCounts = new ReadId[libCount]{0};
+    if ( libCount ) libCounts = new ReadId[libCount]{0};
     seqsBegin = 21 + ( libCount * 12 );
     
     for ( int i ( 0 ); i < 4; i++ )
@@ -185,7 +188,7 @@ BinaryWriter::BinaryWriter( PreprocessFiles* filenames, uint8_t inLibCount, uint
 BinaryWriter::~BinaryWriter()
 {
     delete binBuff;
-    delete[] libCounts;
+    if ( libCount ) delete[] libCounts;
     for ( int i ( 0 ); i < 4; i++ )
     {
         for ( int j ( 0 ); j < 4; j++ )
@@ -259,8 +262,10 @@ void BinaryWriter::write( string &read )
     binBuff[pBin] = seqLen;
     if ( seqLen > readLen )
     {
-        cerr << "Error: Unexpectedly long read of length " << seqLen << " given set length of " << readLen << "." << endl;
-        exit( EXIT_FAILURE );
+        read = read.substr( 0, readLen );
+        seqLen = readLen;
+//        cerr << "Error: Unexpectedly long read of length " << to_string( seqLen ) << " given set length of " << to_string( readLen ) << "." << endl;
+//        exit( EXIT_FAILURE );
     }
     
     // Encode characters into 2 bits per byte
@@ -268,6 +273,7 @@ void BinaryWriter::write( string &read )
     uint8_t i = 0;
     for ( uint8_t j ( 0 ); j < seqLen; j++ )
     {
+        assert( read[j] != 'N' );
         write2Bit( binBuff, p, i, charToInt[ read[j] ] );
     }
     pBin += lineLen;

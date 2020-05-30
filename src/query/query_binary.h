@@ -32,8 +32,11 @@ public:
     QueryBinaries( Filenames* fns );
     ~QueryBinaries(){};
     
+//    void dumpSorted( Filenames* fns );
     vector<ReadId> getIds( CharId ranks, CharId counts );
+    vector<Overlap> getOverlaps( vector<uint8_t> &ols, vector<CharId> &ranks, vector<CharId> &counts, int minOl, int maxCount, bool drxn );
     void getOverlaps( vector<Overlap> &overlaps, CharId rank, CharId count, uint8_t overlap, bool drxn );
+    void getReads( vector<CorrectionRead> &reads, CharId rank, CharId count, int overlap, int seqLen, bool drxn );
     vector<ReadStruct> getReads( CharId rank, CharId count, bool drxn );
     string getSequence( ReadId id );
     

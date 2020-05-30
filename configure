@@ -1,12 +1,16 @@
 #!/bin/sh
 
 prefix=/usr/local/bin/
+debug=false
 
 for arg in "$@"; do
     case "$arg" in
     --prefix=*)
         prefix=`echo $arg | sed 's/--prefix=//'`
         ;;
+
+    --debug)
+        debug=true;;
 
     --help)
         echo 'usage: ./configure [options]'
@@ -19,5 +23,8 @@ done
 
 echo 'Creating makefile...'
 echo "PREFIX = $prefix" >Makefile
+if $debug; then
+    echo "DBG =-g" >>Makefile
+fi
 cat Makefile.in >>Makefile
 echo 'Makefile created, type "make" to build.'

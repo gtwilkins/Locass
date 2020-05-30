@@ -23,11 +23,13 @@
 #include <cassert>
 #include <string.h>
 #include <iostream>
+#include "constants.h"
 
 IndexReader::IndexReader( Filenames* fns )
 {
-    FILE* bin;
-    fns->setIndex( bin, bwt, idx );
+    FILE* bin,* idx,* mer;
+    assert( fns );
+    fns->setIndex( bin, bwt, idx, mer );
     CharId binId, bwtId, idxId;
     fseek( bin, 1, SEEK_SET );
     fread( &binId, 8, 1, bin );
@@ -91,6 +93,16 @@ IndexReader::IndexReader( Filenames* fns )
         setRank( i, baseCounts[0][i], ranks );
         memcpy( &midRanks[i][0], &ranks.counts, 32 );
     }
+    
+    if ( mer )
+    {
+        uint8_t kmer = 12;
+        kmerLen = kmer;
+        uint64_t merSize = pow( 4, kmer ) * 16;
+        mers = new uint8_t[merSize];
+        fread( mers, 1, merSize, mer );
+    }
+    else mers = NULL;
 }
 
 IndexReader::~IndexReader()
@@ -102,12 +114,126 @@ IndexReader::~IndexReader()
 
 void IndexReader::countRange( uint8_t i, CharId rank, CharId count, CharCount &ranks, CharCount &counts )
 {
+    if ( i > 3 )
+    {
+        ranks.clear();
+        counts.clear();
+        return;
+    }
     setRank( i, rank, ranks );
     setRank( i, rank + count, counts );
-    for ( int j ( 0 ); j < 5; j++ )
+//    counts -= ranks;
+    for ( int j ( 0 ); j < 4; j++ )
     {
         counts.counts[j] -= ranks.counts[j];
     }
+    counts.endCounts -= ranks.endCounts;
+}
+
+void IndexReader::countRange( uint8_t i, CharId rank, CharId edge, CharId count, CharCount &ranks, CharCount &edges, CharCount &counts )
+{
+    if ( !count )
+    {
+        ranks.clear();
+        edges.clear();
+        counts.clear();
+        return;
+    }
+    setRank( i, rank, ranks );
+    setRank( i, rank + edge, edges );
+    setRank( i, rank + edge + count, counts );
+    counts -= edges;
+    edges -= ranks;
+//    for ( int j ( 0 ); j < 4; j++ )
+//    {
+//        counts.counts[j] -= edges.counts[j];
+//        edges.counts[j] -= ranks.counts[j];
+//    }
+//    counts.endCounts -= edges.endCounts;
+//    edges.endCounts -= ranks.endCounts;
+}
+
+void IndexReader::createSeeds( string &fn, int mer )
+{
+    FILE* fp = fopen( fn.c_str(), "wb" );
+    assert( mer == 12 );
+    for ( int i = 0; i < 4; i++ )
+    {
+        for ( int j = 0; j < 4; j++ )
+        {
+            CharId rank, edge, count;
+            setBaseAll( i, j, rank, edge, count );
+            createSeeds( fp, j, 2, mer, rank, edge, count );
+        }
+    }
+    fclose( fp );
+}
+
+void IndexReader::createSeeds( FILE* fp, int i, int it, int limit, CharId rank, CharId edge, CharId count )
+{
+    if ( it >= limit )
+    {
+        ReadId outEdges = edge, outCount = count;
+        fwrite( &rank, 8, 1, fp );
+        fwrite( &outEdges, 4, 1, fp );
+        fwrite( &outCount, 4, 1, fp );
+        return;
+    }
+    
+    CharCount ranks, edges, counts;
+    countRange( i, rank, edge, count, ranks, edges, counts );
+    
+    for ( int j = 0; j < 4; j++ ) createSeeds( fp, j, it+1, limit, ranks[j], edges[j], counts[j] );
+}
+
+int IndexReader::primeOverlap( uint8_t* q, CharId &rank, CharId &count )
+{
+    if ( q[0] > 3 || q[1] > 3 )
+    {
+        rank = count = 0;
+        return 0;
+    }
+    assert( !mers );
+    int ol = mers ? 12 : 2;
+    rank = midRanks[ q[0] ][ q[1] ];
+    count = baseCounts[ q[0] + 1 ][ q[1] ] - rank;
+    return ol;
+}
+
+void IndexReader::primeOverlap( string &seq, vector<uint8_t> &q, CharId &rank, CharId &count, int &ol, bool drxn )
+{
+    ol = mers && seq.size() >= 12 ? 12 : 2;
+    if ( drxn ) for ( int i = 0; i++ < ol; ) q.push_back( charToInt[ seq.end()[-i] ] );
+    else for ( int i = 0; i < ol; i++ ) q.push_back( charToIntComp[ seq[i] ] );
+    
+    if ( mers )
+    {
+        assert( false );
+    }
+    else
+    {
+        rank = midRanks[ q[0] ][ q[1] ];
+        count = baseCounts[ q[0] + 1 ][ q[1] ] - rank;
+    }
+}
+
+int IndexReader::setBaseAll( vector<uint8_t> &q, CharId &rank, CharId &count )
+{
+    rank = count = 0;
+    if ( q.size() < 12 || !mers ) assert( false ); 
+    CharId p = 0;
+    for ( int i = 0; i < kmerLen; i++ )
+    {
+        assert( q[i] < 4 );
+        p += pow( 4, kmerLen - i - 1 ) * q[i] * 16;
+    }
+    ReadId inEdge, inCount;
+    memcpy( &rank, &mers[p], 8 );
+    memcpy( &inEdge, &mers[p+8], 4 );
+    memcpy( &inCount, &mers[p+12], 4 );
+    count = inEdge + inCount;
+    
+    return kmerLen;
 }
 
 void IndexReader::setBaseAll( uint8_t i, uint8_t j, CharId &rank, CharId &count )
@@ -116,10 +242,21 @@ void IndexReader::setBaseAll( uint8_t i, uint8_t j, CharId &rank, CharId &count 
     count = baseCounts[ i + 1 ][j] - rank;
 }
 
-void IndexReader::setBaseMap( uint8_t i, uint8_t j, CharId &rank, CharId &count )
+void IndexReader::setBaseAll( uint8_t i, uint8_t j, CharId &rank, CharId &edge, CharId &count )
 {
     rank = baseCounts[i][j];
+    edge = midRanks[i][j] - rank;
+    count = baseCounts[ i + 1 ][j] - edge - rank;
+}
+
+ReadId IndexReader::setBaseMap( uint8_t i, uint8_t j, CharId &rank, CharId &count )
+{
+    ReadId base = 0;
+    for ( int ii = 0; ii < i; ii++ ) base += baseCounts[0][ii];
+    for ( int jj = 0; jj < j; jj++ ) base += midRanks[i][jj] - baseCounts[i][jj];
+    rank = baseCounts[i][j];
     count = midRanks[i][j] - rank;
+    return base;
 }
 
 void IndexReader::setBaseOverlap( uint8_t i, uint8_t j, CharId &rank, CharId &count )
