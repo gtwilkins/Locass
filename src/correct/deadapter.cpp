@@ -204,6 +204,50 @@ bool Deadapter::getPair( string (&s)[2] )
     return true;
 }
 
+int Deadapter::getDifference( string (&s)[2], int len[2] )
+{
+    string a[2];
+    LocalAlignment la( s[0], s[1], false, false );
+    la.realign( a[0], a[1], false );
+    int diff = 0;
+    for ( int i = 0; i < a[0].size() && len[0] < s[0].size() && len[1] < s[1].size(); i++ )
+    {
+        if ( a[0][i] != a[1][i] ) diff++;
+        if ( a[0][i] != '-' ) len[0]++;
+        if ( a[1][i] != '-' ) len[1]++;
+    }
+    return diff;
+}
+
+bool Deadapter::isConnected( string &seq, string &phred )
+{
+    for ( string& q : connectors_ )
+    {
+        size_t it = seq.find( q );
+        if ( it != string::npos ) return setBlank( seq, phred, it );
+        if ( it = mapSeqOverlap( seq, q, 12 ) ) return setBlank( seq, phred, seq.size() - it );
+        if ( it = mapSeqOverlap( q, seq, 13 ) ) return setBlank( seq, phred, 0 );
+        if ( q.size() <= 13 ) continue;
+        if ( ( it = seq.find( q.substr( 0, 13 ) ) ) != string::npos )
+        {
+            string qq[2]{ q.substr( 13 ), seq.substr( it+13 ) };
+            int exact = 0, len[2]{0}, limit = 2 + min( qq[0].size(), qq[1].size() ) / 10;
+            while ( exact < min( qq[0].size(), qq[1].size() ) && qq[0][exact] == qq[1][exact] ) exact++;
+            if ( exact+13 >= q.size() / 2 || ( getDifference( qq, len ) < limit ) ) return setBlank( seq, phred, it );
+        }
+        if ( ( it = seq.find( q.substr( q.size()-13 ) ) ) != string::npos )
+        {
+            string qq[2]{ string( q.rbegin()+13, q.rend() ), string( seq.rbegin()+seq.size()-it, seq.rend() ) };
+            int exact = 0, len[2]{0}, limit = 2 + min( qq[0].size(), qq[1].size() ) / 10;
+            while ( exact < min( qq[0].size(), qq[1].size() ) && qq[0][exact] == qq[1][exact] ) exact++;
+            if ( getDifference( qq, len ) < limit ) return setBlank( seq, phred, it-len[1] );
+            if ( exact+13 >= q.size() / 2 ) return setBlank( seq, phred, it+13-( q.size()/2 ) );
+        }
+    }
+    
+    return false;
+}
+
 bool Deadapter::isOverlap( string &seq1, string &seq2, string &phred1, string &phred2, bool blank )
 {
     if ( seq1.size() < 24 || seq2.size() < 24 || adapter_[0].empty() || adapter_[1].empty()  ) return false;
@@ -241,7 +285,7 @@ bool Deadapter::isOverlap2( string &seq1, string &seq2, string &phred1, string &
     while ( ol < seq1.size() && it + ol < rev.size() && seq1[ol] == rev[it+ol] ) ol++;
     hits = ol;
     string s[2] = { seq1.substr( ol ), rev.substr( ol + it ) };
-    string p[2] = { phred1.substr( ol ), string( phred2.rbegin() + it + ol, phred2.rend() ) };
+    string p[2] = { phred1.size() > ol ? phred1.substr( ol ) : "", phred1.size() > it + ol ? string( phred2.rbegin() + it + ol, phred2.rend() ) : "" };
     ol += align( s, p, hits, miss, diff, 1 );
     bool confirmed = hits == seq1.size() && !miss;
     if ( ol * 2 - hits + ( miss / 10 ) > seq1.size() ) return false;
@@ -374,9 +418,10 @@ void Deadapter::setAdapters( uint32_t kmerLen )
     
     // Find the most common k-mer that is likely to be the start of the mate-pair adaptor
     vector<uint32_t> highKmers;
-    int listLimit = 4, minCutoff = pairCount / 10;
+    int listLimit = 4, minCutoff = pairCount / 10, maxKmerCount = 0;
     for ( uint32_t i = 0; i < kmerCount; i++ )
     {
+        maxKmerCount = max( maxKmerCount, (int)kmers[i] );
         if ( kmers[i] < minCutoff ) continue;
         if ( highKmers.size() == listLimit && kmers[i] <= kmers[ highKmers.back() ] ) continue;
         uint32_t q[2] = { i >> 2, ( i << 2 ) & kmerMask }, qBest[2]{0}, qTotal[2]{0}, qInc[2] = { (uint32_t)1 << ( ( kmerLen - 1 ) * 2 ), 1 };
@@ -391,10 +436,18 @@ void Deadapter::setAdapters( uint32_t kmerLen )
         }
         
         // This heuristic should remove k-mers that are part of repetitive elements or not the start of the connector
-        if ( qBest[0] > qTotal[0] / 2 ) continue;
+        if ( qBest[0] > qTotal[0] / 2 )
+        {
+            cout << "A   " << qBest[0] << "   " << qTotal[0] << endl;
+            continue;
+        }
         
         // This heuristic should remove k-mers that precede the start of the connector
-        if ( qBest[1] > kmers[i] ) continue;
+        if ( qBest[1] * 3 / 4 > kmers[i] )
+        {
+            cout << "B   " << qBest[1] << "   " << kmers[i] << endl;
+            continue;
+        }
         
         if ( highKmers.size() == listLimit ) highKmers.erase( highKmers.end()-1 );
         int j = 0;
@@ -421,13 +474,14 @@ void Deadapter::setAdapters( uint32_t kmerLen )
     if ( !connectors.empty() ) setConnectors( connectors );
 }
 
-void Deadapter::setBlank( string &seq, string &phred, int start )
+bool Deadapter::setBlank( string &seq, string &phred, int start )
 {
     for ( int i = start; i < seq.size(); i++ )
     {
         seq[i] = 'N';
         if ( i < phred.size() ) phred[i] = char( 35 );
     }
+    return true;
 }
 
 bool Deadapter::setConnectors( vector<string> &connectors )
@@ -463,14 +517,14 @@ bool Deadapter::setConnectors( vector<string> &connectors )
     
     for ( int i = 0; i < connectors.size(); i++ ) if ( !finished[i] ) consolidateEnd( ends[i], lens[i], connectors[i] );
     
-    string rev = revCompNew( connectors[0] );
-    for ( int i = 0; i < connectors.size(); i++ )
+    if ( !connectors.empty() )
     {
-        if ( rev != connectors[i] ) continue;
+        string rev = revCompNew( connectors[0] );
         connectors_.push_back( connectors[0] );
-        connectors_.push_back( connectors[1] );
-        return true;
+        bool doAdd = false;
+        if ( rev != connectors[0] ) for ( int i = 1; i < connectors.size(); i++ ) if ( doAdd = ( rev == connectors[i] ) ) break;
+        if ( doAdd ) connectors_.push_back( rev );
     }
     
-    return false;
+    return !connectors_.empty();
 }

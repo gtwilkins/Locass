@@ -39,18 +39,18 @@ bool BudPair::alignEnds( BudPair* bp, int i, int j, bool drxn )
 
 void Kmers::add( BudPair* bp )
 {
-    Kmer k;
+    KKmer k;
     k.bp_ = bp;
     k.off_ = 0;
     for ( ; k.off_+31 < bp->seq_.size(); k.off_++ )
     {
         string q = bp->seq_.substr( k.off_, 32 );
-        auto ins = kmers_.insert( make_pair( q, vector<Kmer>{ k } ) );
+        auto ins = kmers_.insert( make_pair( q, vector<KKmer>{ k } ) );
         if ( !ins.second ) ins.first->second.push_back( k );
     }
 }
 
-vector<Kmer>* Kmers::get( string& q )
+vector<KKmer>* Kmers::get( string& q )
 {
     auto it = kmers_.find( q );
     return it != kmers_.end() ? &it->second : NULL;
@@ -916,13 +916,13 @@ vector< pair<ReadId, int> > Bud::setAligned( BudAlign* ba, vector<Bud*>& buds, K
     string seq = drxn ? seq_.substr( 0, seq_.size() - off ) + ba->ext_ : ba->ext_ + seq_.substr( off );
     assert( ba->ext_.size() == ba->len_ );
     
-    vector<Kmer>* pk;
+    vector<KKmer>* pk;
     for ( int i = 0; i < ba->len_ - ba->base_; i++ )
     {
         for ( int j = 0; j < maps.size(); j++ ) if ( ba->len_ - i < maps[j].second ) maps.erase( maps.begin() + j-- );
         
         string q = drxn ? seq.substr( seq.size()-i-32, 32 ) : seq.substr( i, 32 );
-        if ( pk = kmers.get( q ) ) for ( Kmer& kmer : *pk )
+        if ( pk = kmers.get( q ) ) for ( KKmer& kmer : *pk )
         {
             bool bad = false;
             for ( pair<ReadId, int> m : maps ) if ( bad = ( m.first == kmer.bp_->id_ ) ) break;
@@ -1116,7 +1116,7 @@ void Bud::setIslands( Querier& bwt, vector<Bud*>& buds, bool drxn )
         budding.push_back( make_pair( b, diffs ) );
     }
     
-    vector<Kmer>* pk;
+    vector<KKmer>* pk;
     BudGraph bg;
     for ( BudPair* bp : added )
     {
@@ -1124,7 +1124,7 @@ void Bud::setIslands( Querier& bwt, vector<Bud*>& buds, bool drxn )
         assert( pk = kmers.get( q ) );
         BudNode* bn[2]{ NULL, NULL };
         vector< pair<BudPair*, pair<int, int> > > edges;
-        for ( Kmer& k : *pk ) if ( k.bp_ != bp )
+        for ( KKmer& k : *pk ) if ( k.bp_ != bp )
         {
             int32_t qq[2]{ drxn ? (int)bp->seq_.size() - 32 : 0, drxn ? (int)bp->seq_.size() : 32 }, tt[2]{ k.off_, k.off_+32 };
             edges.push_back( make_pair( k.bp_, make_pair( setMatch( bp->seq_, k.bp_->seq_, qq, tt ), drxn ? (int)k.bp_->seq_.size()-tt[1] : tt[0] ) ) );

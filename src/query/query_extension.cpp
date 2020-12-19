@@ -25,16 +25,22 @@
 extern Parameters params;
 
 Ext::Ext( string& seq, ReadId id, int ol, bool drxn )
-: seq_( seq ), ext_( drxn ? seq.substr( ol ) : seq.substr( 0, seq.size()-ol ) ), reads_{ ExtRead( id, seq.size()-ol, ol ) }, ol_( ol )
+: ext_( drxn ? seq.substr( ol ) : seq.substr( 0, seq.size()-ol ) ), reads_{ ExtRead( id, seq.size()-ol, ol ) }
 {}
 
 Ext::Ext( Ext* base, int skim, bool drxn )
-: seq_( base->seq_ ), ext_( base->ext_ ), exts_( base->exts_ ), reads_( base->reads_.begin()+skim, base->reads_.end() ), ol_( 0 )
+: ext_( base->ext_ ), exts_( base->exts_ ), reads_( base->reads_.begin()+skim, base->reads_.end() )
 {
     int ext = base->reads_[skim-1].ext_;
+    assert( skim < base->reads_.size() );
     base->reads_.erase( base->reads_.begin()+skim, base->reads_.end() );
     base->exts_.clear();
     base->ext_ = drxn ? base->ext_.substr( 0, ext ) : base->ext_.substr( base->ext_.size()-ext );
+    for ( int i = 0; i < base->redundant_.size(); i++)
+    {
+        if ( reads_[0].ol_ <= base->redundant_[i].ol_ ) redundant_.push_back( base->redundant_[i] );
+        if ( ext < base->redundant_[i].ext_ ) base->redundant_.erase( base->redundant_.begin()+i-- );
+    }
     shift( ext, drxn );
 }
 
@@ -46,43 +52,83 @@ Ext::~Ext()
 
 bool Ext::add( ReadId id, int ext, int ol, int ins )
 {
-    reads_.insert( reads_.begin()+ins, ExtRead( id, ext, ol ) );
-    ol_ = max( ol_, ol );
+    if ( ( ext <= reads_.back().ext_ ) && ( ( reads_.back().ext_+reads_.back().ol_ ) > ( ext+ol ) ) ) redundant_.push_back( ExtRead( id, ext, ol ) );
+    else reads_.insert( reads_.begin()+ins, ExtRead( id, ext, ol ) );
     return true;
+}
+
+int Ext::count( bool inclMp, int pairDrxn )
+{
+    count_ = 0;
+    for ( Ext* e : exts_ ) count_ = max( count_, e->count( inclMp, pairDrxn ) );
+    
+    Lib* lib;
+    for ( ExtRead& er : reads_ ) if ( ( lib = params.getLib( er.id_ ) ) 
+                                   && ( inclMp || lib->isPe ) 
+                                   && ( pairDrxn == 2 || lib->getDrxn( er.id_ ) == pairDrxn ) ) count_++;
+    
+    return count_;
+}
+
+void Ext::sanitise( int minOl )
+{
+    for ( int i = 0; i < exts_.size(); i++ ) if ( exts_[i]->reads_[0].ol_ < minOl )
+    {
+        delete exts_[i];
+        exts_.erase( exts_.begin() + i-- );
+    }
+    for ( Ext* ext : exts_ ) ext->sanitise( minOl );
+}
+
+void Ext::set( string& seq, bool drxn )
+{
+    seq_ = drxn ? seq.substr( seq.size()-reads_[0].ol_ ) + ext_ : ext_ + seq.substr( 0, reads_[0].ol_ );
+    for ( Ext* e : exts_ ) e->set( seq_, drxn );
 }
 
 void Ext::shift( int ext, bool drxn )
 {
+    assert( ext < ext_.size() );
     ext_ = drxn ? ext_.substr( ext ) : ext_.substr( 0, ext_.size()-ext );
-    ol_ = 0;
     for ( ExtRead& er : reads_ )
     {
         er.ext_ -= ext;
         er.ol_ += ext;
-        ol_ = max( ol_, er.ol_ );
     }
+    for ( ExtRead& er : redundant_ )
+    {
+        er.ext_ -= ext;
+        er.ol_ += ext;
+    }
+}
+
+Exts::Exts( string& base, int coord, bool drxn )
+: seq_( drxn ? base.substr( 0, coord ) : base.substr( base.size()-coord ) ), coord_( drxn ? coord : base.size() - coord )
+{
+    
 }
 
 Exts::~Exts()
 {
-    for ( Ext* e : exts_ ) assert( false );
     for ( Ext* e : exts_ ) delete e;
-    assert( false );
 }
 
 bool Exts::add( vector<Ext*>& exts, string seq, ReadId id, int ol, bool drxn )
 {
     int ext = seq.size()-ol;
-    vector<Ext*> hits;
+    bool added = false;
     for ( Ext* e : exts )
     {
         int i = 0, j = 0, limit = min( (int)e->ext_.size(), ext );
         while ( i < limit && ( drxn ? seq[i+ol] == e->ext_[i] : seq.end()[-i-ol-1] == e->ext_.end()[-i-1] ) ) i++;
         
+        // Perfect match
+        if ( i+ol == seq.size() && ( added = true ) && e->add( id, ext, ol, e->reads_.size() ) ) continue;
+        
+        // Matched and surpassed the existing ext seq
         if ( i == e->ext_.size() )
         {
-            assert( hits.empty() );
-            // Continue to pre-existing branch
+            // Continue to pre-existing branches
             if ( !e->exts_.empty() ) return add( e->exts_, seq, id, i+ol, drxn );
             
             // append unbranched extend
@@ -92,39 +138,81 @@ bool Exts::add( vector<Ext*>& exts, string seq, ReadId id, int ol, bool drxn )
         
         while ( j < e->reads_.size() && e->reads_[j].ext_ <= i ) j++;
         
-        if ( j )
+        // Fork after read
+        if ( j && i+ol < seq.size() )
         {
-            assert( hits.empty() );
-            // Add read between others
-            if ( i+ol == seq.size() ) e->add( id, ext, ol, j );
-            
-            // Fork after read
             Ext* alt = new Ext( e, j, drxn );
             e->exts_ = { alt, new Ext( seq, id, ol, drxn ) };
             e->exts_.back()->shift( e->ext_.size(), drxn );
-            assert( false );
+            assert( !e->exts_[0]->ext_.empty() && !e->exts_[1]->ext_.empty() );
             return true;
         }
-        
-        hits.push_back( e );
-    }
-    
-    // Add read to single branch
-    if ( hits.size() == 1 ) return hits[0]->add( id, ext, ol, 0 );
-    
-    // Fork multiple branches
-    for ( Ext* e : hits )
-    {
-        e->shift( ext, drxn );
-        exts.erase( remove( exts.begin(), exts.end(), e ), exts.end() );
     }
     
     // Create new branch
-    exts.push_back( new Ext( seq, id, ol, drxn ) );
-    exts.back()->exts_ = hits;
+    if ( !added ) exts.push_back( new Ext( seq, id, ol, drxn ) );
     
     return true;
 }
+
+//bool Exts::add( vector<Ext*>& exts, string seq, ReadId id, int ol, bool drxn )
+//{
+//    int ext = seq.size()-ol;
+//    vector<Ext*> hits;
+//    for ( Ext* e : exts )
+//    {
+//        int i = 0, j = 0, limit = min( (int)e->ext_.size(), ext );
+//        while ( i < limit && ( drxn ? seq[i+ol] == e->ext_[i] : seq.end()[-i-ol-1] == e->ext_.end()[-i-1] ) ) i++;
+//        
+//        // Equalled or surpassed the existing ext seq
+//        if ( i == e->ext_.size() )
+//        {
+//            assert( hits.empty() );
+//            // Continue to pre-existing branches
+//            if ( !e->exts_.empty() ) return add( e->exts_, seq, id, i+ol, drxn );
+//            
+//            // append unbranched extend
+//            e->ext_ = drxn ? seq.substr( ol ) : seq.substr( 0, seq.size()-ol );
+//            return e->add( id, ext, ol, e->reads_.size() );
+//        }
+//        
+//        while ( j < e->reads_.size() && e->reads_[j].ext_ <= i ) j++;
+//        
+//        // Fits within ext or splits it
+//        if ( j )
+//        {
+//            assert( hits.empty() );
+//            // Add read between others
+//            if ( i+ol == seq.size() ) return e->add( id, ext, ol, j );
+//            
+//            // Fork after read
+//            Ext* alt = new Ext( e, j, drxn );
+//            e->exts_ = { alt, new Ext( seq, id, ol, drxn ) };
+//            e->exts_.back()->shift( e->ext_.size(), drxn );
+//            assert( !e->exts_[0]->ext_.empty() && !e->exts_[1]->ext_.empty() );
+//            return true;
+//        }
+//        
+//        // Potentially a fork
+//        if ( i+ol == seq.size() ) hits.push_back( e );
+//    }
+//    
+//    // Add read to single branch
+//    if ( hits.size() == 1 ) return hits[0]->add( id, ext, ol, 0 );
+//    
+//    // Fork multiple branches
+//    for ( Ext* e : hits )
+//    {
+//        e->shift( ext, drxn );
+//        exts.erase( remove( exts.begin(), exts.end(), e ), exts.end() );
+//    }
+//    
+//    // Create new branch
+//    exts.push_back( new Ext( seq, id, ol, drxn ) );
+//    exts.back()->exts_ = hits;
+//    
+//    return true;
+//}
 
 void Overlap::offset( int offset, bool drxn )
 {

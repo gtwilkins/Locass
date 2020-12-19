@@ -92,7 +92,7 @@ Assemble::Assemble( int argc, char** argv )
     IndexReader* ir = new IndexReader( fns );
     QueryBinaries* qb = new QueryBinaries( fns );
     Querier bwt( ir, qb );
-    params.checkReady();
+//    params.checkReady();
     
     cout << "Performing seeded locus assembly" << endl << endl;
     cout << "Error rate set to " << to_string( errorCount ) << "%" << endl;
@@ -108,9 +108,10 @@ Assemble::Assemble( int argc, char** argv )
     {
         cout << "Assembling locus " << to_string( i + 1 ) << " of " << to_string( seqs.size() ) << endl;
         cout << "    Searching for target loci... " << endl;
-//        Seed seed( "", bwt );
+        Seed seed( "/home/glen/Genomes/HtDump/dump3", bwt );
+//        Seed seed( "/media/glen/ssd/dump14", bwt );
 //        Seed seed( "/home/glen/LocassDump/SpTrfDump", bwt );
-        Seed seed( "/home/glen/Genomes/LvDump/dump9", bwt );
+//        Seed seed( "/home/glen/Genomes/LvDump/dump9", bwt );
 //        Seed seed( headers[i], seqs[i], bwt, errorCount );
         seedCount++;
         if ( seed.warning() ) continue;
@@ -217,7 +218,7 @@ void Assemble::printUsage( bool failed )
     cout << endl << "Usage:" << endl;
     cout << "    locass assemble [args]" << endl;
     cout << endl << "Required arguments:" << endl;
-    cout << "    -p    Prefix for read data files." << endl;
+    cout << "    -p    Prefix for BWT data files." << endl;
     cout << "    -i    Seed sequence file containing one or more sequences." << endl;
     cout << endl << "Optional arguments:" << endl;
     cout << "    -o    Output file name (default: ./locass-out.fa)." << endl;

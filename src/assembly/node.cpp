@@ -475,14 +475,9 @@ void Node::addEdge( Edge edge, bool drxn, bool reciprocate )
 {
     assert( edge.node );
     stop( 0, drxn );
-    for ( Edge& e : edges_[drxn] )
-    {
-        if ( e.node != edge.node ) continue;
-        assert( e.ol == edge.ol );
-        e.ol = edge.ol;
-        return;
-    }
-    edges_[drxn].push_back( edge );
+    bool added = false;
+    for ( Edge& e : edges_[drxn] ) if ( e.node == edge.node && ( added = true ) ) e.ol = edge.ol;
+    if ( !added ) edges_[drxn].push_back( edge );
     if ( reciprocate ) edge.node->addEdge( Edge( this, edge.ol, edge.leap ), !drxn, false );
 }
 

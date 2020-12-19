@@ -164,7 +164,7 @@ int Node::countReads( bool notRedundant )
     
     int readCount = 0;
     for ( auto &read : reads_ ) if ( !read.second.redundant ) readCount++;
-    assert( readCount );
+//    assert( readCount );
     return readCount;
 }
 

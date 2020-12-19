@@ -30,6 +30,7 @@
 #include "commands/calibrate.h"
 #include "commands/assemble.h"
 #include "commands/correct.h"
+#include "commands/review.h"
 
 Parameters params;
 
@@ -70,6 +71,10 @@ int main( int argc, char** argv )
         else if ( !strcmp( argv[1], "correct" ) )
         {
             Correct( argc, argv );
+        }
+        else if ( !strcmp( argv[1], "review" ) )
+        {
+            Review( argc, argv );
         }
         else
         {

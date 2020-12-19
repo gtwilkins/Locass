@@ -38,6 +38,7 @@ public:
     bool warning();
     virtual ~Seed();
 private:
+    void map( vector<string> seqs );
     void cull( MappedSeqs& ms );
     void printExts( vector<string> exts[2], ofstream* ofs );
     void printSeeds( vector<string>& seqs, int errors, ofstream* ofs );

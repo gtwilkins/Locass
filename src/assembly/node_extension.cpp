@@ -400,7 +400,7 @@ void Node::appendNode( QueryNode* ext, bool drxn )
     readTest();
 }
 
-void Node::appendSeq( string &seq, bool drxn )
+void Node::appendSeq( string seq, bool drxn )
 {
     seq_ = drxn ? seq_ + seq : seq + seq_;
     ends_[drxn] += drxn ? seq.size() : -seq.size();

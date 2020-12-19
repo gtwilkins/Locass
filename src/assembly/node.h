@@ -265,7 +265,7 @@ private:
     void addSelfLoop( vector<MergeHit> &selfMerges, ExtVars &ev, bool drxn );
     void appendNode( Extension &ext, bool drxn );
     void appendNode( QueryNode* ext, bool drxn );
-    void appendSeq( string &seq, bool drxn );
+    void appendSeq( string seq, bool drxn );
     bool checkExtensionMerge( Extension &ext, MergeHit &merge );
     bool checkMerge( QueryNode* ext, MergeHit &merge, bool drxn );
     bool checkMergeRev( QueryNode* ext, MergeHit &merge, bool drxn );
@@ -295,6 +295,8 @@ public:
     void clearDupes();
     void clearReads();
     void fillReads( Querier &bwt, NodeSet &delSet );
+    static void fillEdges( Querier& bwt, NodeRoll& nodes );
+    void fillEdge( Querier& bwt, NodeRoll& nodes, Edge e );
     static void graphCover( string filename, NodeList &nodes );
     static void graphPairs( string filename, NodeList &nodes );
     void mapMates( Querier &bwt, int &count );
@@ -306,6 +308,7 @@ public:
     void recoil( int32_t diff, bool drxn );
     static void recoordinate( NodeRoll& nodes );
     void recoordinate( Nodes& tested, bool drxn );
+    static void refill( Querier& bwt, NodeRoll& nodes );
     static void remap( Querier& bwt, NodeRoll& nodes );
     bool remap( Querier &bwt );
     bool remap( NodeRoll& tar );

@@ -26,8 +26,8 @@
 
 struct ExtRead
 {
-    ExtRead( ReadId id, int ext, int ol ): id( id ), ext_( ext ), ol_( ol ){};
-    ReadId id;
+    ExtRead( ReadId id, int ext, int ol ): id_( id ), ext_( ext ), ol_( ol ){};
+    ReadId id_;
     int ext_, ol_;
 };
 
@@ -38,20 +38,25 @@ struct Ext
     ~Ext();
     static void add( vector<Ext>& exts, string seq, ReadId id, int ol, bool drxn );
     bool add( ReadId id, int ext, int ol, int ins );
+    int count( bool inclMp, int pairDrxn );
+    void sanitise( int minOl );
+    void set( string& seq, bool drxn );
     void shift( int ext, bool drxn );
-    int match( string& seq, ReadId id, int ol, bool drxn );
     
     vector<Ext*> exts_;
-    vector<ExtRead> reads_;
-    string seq_, ext_;
-    int ol_;
+    vector<ExtRead> reads_, redundant_;
+    string seq_, ext_, ol_;
+    int count_;
 };
 
 struct Exts
 {
+    Exts( string& base, int coord, bool drxn );
     ~Exts();
     bool add( vector<Ext*>& exts, string seq, ReadId id, int ol, bool drxn );
     vector<Ext*> exts_;
+    string seq_;
+    int coord_;
 };
 
 struct Overlap

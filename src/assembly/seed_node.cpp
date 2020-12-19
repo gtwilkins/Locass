@@ -229,5 +229,6 @@ bool SeedNode::seed( Querier& bwt, NodeRoll& nodes, string s, int lOl, int rOl, 
 //    if ( !lOl ) seeds.back().node_->extendFork( bwt, nodes, 1000, 10, 0 );
     nodes.verify( 1 );
     
+    
     return true;
 }

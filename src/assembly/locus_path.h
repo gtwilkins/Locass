@@ -57,5 +57,16 @@ public:
 };
 
 
+class Diploid
+{
+    void easyExtend( bool drxn );
+    vector<NodePath*> getEdges( bool i, bool drxn );
+    vector<NodePath*> alleles_[2];
+    bool homo_;
+public:
+    Diploid( NodePath* a, NodePath* b );
+    static void create( NodePath* a, NodePath* b, vector<NodePath*> alleles[2] );
+};
+
 #endif /* LOCUS_PATH_H */
 

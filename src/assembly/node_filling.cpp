@@ -56,6 +56,56 @@ void Node::clearReads()
     marks_[1].clear();
 }
 
+void Node::fillEdges( Querier& bwt, NodeRoll& nodes )
+{
+    for ( Node* node : vector<Node*>( nodes.nodes ) ) for ( Edge e : node->edges( 1 ) ) node->fillEdge( bwt, nodes, e );
+}
+
+void Node::fillEdge( Querier& bwt, NodeRoll& nodes, Edge e )
+{
+    if ( e.leap || e.ol < 1 ) return;
+    assert( params.readLen > 1 );
+    int len[2]{ min( (int)params.readLen-1, size() ), min( (int)params.readLen-1, e.node->size() ) };
+    string seq = seq_.substr( size()-len[0] ) + e.node->seq_.substr( e.ol, len[1]-e.ol );
+    vector<ReadId> ids;
+    vector<int> coords[2];
+    bwt.mapSequence( seq, ids, coords );
+    struct EdgeRead { ReadId id; int coords[2], len; bool redundant; };
+    EdgeRead read;
+    vector<EdgeRead> reads;
+    int cur[2]{0};
+    for ( int i = 0; i < ids.size(); i++ ) if ( coords[0][i] < len[0]-e.ol && len[0] < coords[1][i] )
+    {
+        read.id = ids[i];
+        read.coords[0] = coords[1][i] - len[0];
+        read.coords[1] = len[0]-e.ol - coords[0][i];
+        read.len = coords[1][i] - coords[0][i];
+        read.redundant = coords[1][i] == cur[1] ? cur[0] < coords[0][i] : coords[1][i] < cur[1];
+        if ( !read.redundant ) for ( int d : { 0, 1 } ) cur[d] = coords[d][i];
+        reads.push_back( read );
+    }
+    if ( reads.empty() ) return;
+    int exts[2]{0};
+    for ( int i : { 0, 1 } ) for ( EdgeRead er : reads ) exts[i] = max( exts[i], er.coords[i] );
+    if ( edges_[1].size() == 1 )
+    {
+        appendSeq( seq.substr( len[0], exts[1] ), 1 );
+        for ( EdgeRead er : reads ) add( er.id, ends_[1]-exts[1]+er.coords[1]-er.len, ends_[1]-exts[1]+er.coords[1], er.redundant );
+        addEdge( e.node, e.ol+exts[1], 1, false, false );
+    }
+    else if ( e.node->edges_[0].size() == 1 )
+    {
+        e.node->appendSeq( seq.substr( len[0]-e.ol-exts[0], exts[0] ), 0 );
+        for ( EdgeRead er : reads ) e.node->add( er.id, e.node->ends_[0]-exts[0]+er.coords[0], e.node->ends_[0]-exts[0]+er.coords[0]+er.len, er.redundant );
+        addEdge( e.node, e.ol+exts[0], 1, false, false );
+    }
+    else
+    {
+        // NYI
+        assert( false );
+    }
+}
+
 void Node::fillReads( Querier &bwt, NodeSet &delSet )
 {
     int32_t offsets[2] = { 0, 0 };
@@ -594,6 +644,7 @@ void Node::recoil()
         ends[0] = min( ends[0], read.second[0] );
         ends[1] = max( ends[1], read.second[1] );
     }
+    if ( ends[1] <= ends[0] ) return;
     ends[0] = ends[0] - ends_[0];
     ends[1] = ends_[1] - ends[1];
     if ( ends[0] ) recoil( ends[0], 0 );
@@ -645,16 +696,8 @@ void Node::recoordinate( Nodes& tested, bool drxn )
         {
             if ( e.node->bad_ ) continue;
             int32_t off = e.node->ends_[drxn] - ends_[!drxn] + ( drxn ? -e.ol : e.ol );
-            if ( off )
-            {
-                int x = 0;
-            }
             if ( !isset || ( drxn ? best < off : off < best ) ) best = off;
             isset = true;
-        }
-        if ( best )
-        {
-            int x = 0;
         }
         assert( isset );
         if ( best ) offset( best );
@@ -662,6 +705,28 @@ void Node::recoordinate( Nodes& tested, bool drxn )
         for ( Edge& e : edges_[drxn] ) e.node->recoordinate( tested, drxn );
     }
     else for ( int d : { 0, 1 } ) for ( Edge& e : edges_[d] ) e.node->recoordinate( tested, d );
+}
+
+void Node::refill( Querier& bwt, NodeRoll& nodes )
+{
+    // NYI removing existing reads
+    assert( false );
+    fillEdges( bwt, nodes );
+    remap( bwt, nodes );
+    vector<Node*> bads;
+    for ( Node* node : nodes.nodes )
+    {
+        if ( node->reads_.empty() ) bads.push_back( node );
+        else node->recoil();
+    }
+    for ( Node* node : bads )
+    {
+        if ( node->edges_[0].empty() || node->edges_[1].empty() ) nodes.erase( node );
+        else
+        {
+            int x = 0;
+        }
+    }
 }
 
 void Node::remap( Querier& bwt, NodeRoll& nodes )

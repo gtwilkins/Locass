@@ -343,7 +343,7 @@ void Node::prune( Querier& bwt, NodeRoll& nodes )
     prunePaths( bwt, nodes );
     recoordinate( nodes );
     pruneIslands( bwt, nodes );
-    Bubble::prune( nodes );
+//    Bubble::prune( nodes );
     remap( bwt, nodes );
     reverify( nodes );
 //    LocusFill::fill( bwt, nodes );

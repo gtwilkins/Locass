@@ -35,6 +35,7 @@ SRCS =  \
 	transform_binary.cpp \
 	parameters.cpp \
 	shared_functions \
+	kmer_graph.cpp \
 	leap.cpp \
 	local_alignment.cpp \
 	locus.cpp \
@@ -97,6 +98,7 @@ SRCS =  \
 	query_state.cpp \
 	query_structs.cpp \
 	review.cpp \
+	reviewer.cpp \
 	seed_fork.cpp \
 	seed_node.cpp
 	

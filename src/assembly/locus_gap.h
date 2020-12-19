@@ -37,7 +37,7 @@ struct BudPair
     bool unique_;
 };
 
-struct Kmer
+struct KKmer
 {
     BudPair* bp_;
     int off_;
@@ -46,8 +46,8 @@ struct Kmer
 struct Kmers
 {
     void add( BudPair* bp );
-    vector<Kmer>* get( string& q );
-    unordered_map<string, vector<Kmer> > kmers_;
+    vector<KKmer>* get( string& q );
+    unordered_map<string, vector<KKmer> > kmers_;
 };
 
 struct BudExt

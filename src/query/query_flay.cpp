@@ -35,8 +35,8 @@ QueryFlay::QueryFlay( string seq, IndexReader* ir, int minFlay, bool drxn )
     minLen_[1] = max( minLen_[0] / 2, 30 );
     
     assert( minFlay < seq.size() );
-    for ( int i = 0; i < seq.size(); i++ ) q_.push_back( drxn ? charToInt[ seq.end()[-i-1] ] : charToIntComp[ seq[i] ] );
-    for ( int i = 0; i < seq.size()-minFlay; i++ )
+    for ( int i = 0; i < seq.size(); i++ ) q_.push_back( drxn ? charToIntComp[ seq[i] ] : charToInt[ seq.end()[-i-1] ] );
+    for ( int i = 0; i < seq.size()-minLen_[1]; i++ )
     {
         CharId rank, count;
         ReadId base = ir->setBaseMap( q_[i], q_[i+1], rank, count );
@@ -48,7 +48,7 @@ void QueryFlay::add( ReadId base, ReadId count, int i, int len, uint8_t c )
 {
     if ( !ols_[c][i] && !( ols_[c][i] = ( len >= minLen_[0] ) ) ) return;
     int j = 0;
-    for ( ; j < flays_.size() && ( flays_[j].coord_ < i || ( i == flays_[j].coord_ && flays_[j].c_< c ) ); j++ );
+    for ( ; j < flays_.size() && ( flays_[j].coord_ < i || ( i == flays_[j].coord_ && flays_[j].c_<= c ) ); j++ );
     flays_.insert( flays_.begin()+j, Match( base, count, i, len, c ) );
 }
 
@@ -71,28 +71,18 @@ void QueryFlay::query( CharId rank, CharId count, ReadId base, int i, int len )
 vector<Exts*> QueryFlay::flay( string seq, QueryBinaries* qb, bool drxn )
 {
     vector<Exts*> exts;
-    int32_t coords[2];
-    for ( Match& m : flays_ )
-    {
-        for ( ReadId id : qb->getIds( m.rank_, m.count_ ) )
-        {
-            string s = qb->getSequence( id );
-            assert( mapSeqEnd( s, seq, m.len_, coords, !drxn ) && ( coords[1]-coords[0] == m.len_ ) );
-        }
-    }
     for ( int i = 0; i < flays_.size(); i++ )
     {
-        if ( !i || flays_[i].coord_ != flays_[i-1].coord_ || flays_[i].c_ != flays_[i-1].c_ ) exts.push_back( new Exts() );
-        for ( ReadId id : qb->getIds( flays_[i].rank_, flays_[i].count_ ) )
-        {
-            if ( !drxn ) id = params.getRevId( id );
-            string s = qb->getSequence( id );
-            assert( mapSeqEnd( s, seq, flays_[i].len_, coords, !drxn ) && ( coords[1]-coords[0] == flays_[i].len_ ) );
-            exts.back()->add( exts.back()->exts_, s, id, flays_[i].len_, drxn );
-        }
-        int x = 0;
+        if ( !i || flays_[i].coord_ != flays_[i-1].coord_ || flays_[i].c_ != flays_[i-1].c_ ) exts.push_back( new Exts( seq, flays_[i].coord_, drxn ) );
+        
+        vector<ReadId> ids;
+        for ( ReadId id : qb->getIds( flays_[i].rank_, flays_[i].count_ ) ) ids.push_back( drxn ? id : params.getRevId( id ) );
+        
+        for ( int j = ids.size(); j-- > 0; ) exts.back()->add( exts.back()->exts_, qb->getSequence( ids[j] ), ids[j], flays_[i].len_, drxn );
     }
-    assert( false );
+    
+    for ( Exts* es : exts ) for ( Ext* e : es->exts_ ) e->set( es->seq_, drxn );
+    
     return exts;
 }
 

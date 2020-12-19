@@ -173,3 +173,116 @@ vector<LocusPath*> LocusPath::create( vector<NodePath*>& paths )
 //    int x = 0;
     return loci;
 }
+
+Diploid::Diploid( NodePath* a, NodePath* b )
+: homo_( a == b )
+{
+    alleles_[0] = { a };
+    alleles_[1] = { b };
+}
+
+void Diploid::easyExtend( bool drxn )
+{
+    vector<NodePath*> paths[2];
+}
+
+vector<NodePath*> Diploid::getEdges( bool i, bool drxn )
+{
+    vector<NodePath*> edges;
+    if ( alleles_[i].empty() ) return edges;
+    for ( PathEdge* pe : ( drxn ? alleles_[i].back() : alleles_[i][0] )->edges_[drxn] ) edges.push_back( pe->edge[drxn] );
+    return edges;
+}
+
+void Diploid::create( NodePath* a, NodePath* b, vector<NodePath*> alleles[2] )
+{
+    for ( int i : { 0, 1 } ) alleles[i].clear();
+    vector<Diploid> diploid{ Diploid( a, b ) };
+    for ( int d : { 0, 1 } ) for ( int again = 1; again-- > 0; )
+    {
+        Diploid* dip = d ? &diploid.back() : &diploid[0];
+        vector<NodePath*> edges[2]{ dip->getEdges( 0, d ), dip->getEdges( 1, d ) };
+        assert( edges[0].empty() == edges[1].empty() );
+        assert( edges[0].size() < 3 && edges[1].size() < 3 );
+        for ( int i : { 0, 1 } ) if ( !again && ( again = edges[i].size() == 1 ) )
+        {
+            if ( edges[!i].size() == 1 ) diploid.insert( d ? diploid.end() : diploid.begin(), Diploid( edges[0][0], edges[1][0] ) );
+            else if ( edges[!i].size() == 2 )
+            {
+                int j = edges[!i][0] == edges[i][0];
+                assert( edges[!i][!j] == edges[i][0] );
+                dip->alleles_[i].insert( d ? dip->alleles_[i].end() : dip->alleles_[i].begin(), edges[i][0] );
+                dip->alleles_[!i].insert( d ? dip->alleles_[!i].end() : dip->alleles_[!i].begin(), edges[!i][j] );
+            }
+        }
+        if ( !again && ( again = ( edges[0].size() == 2 && edges[1].size() == 2 ) ) )
+        {
+            for ( int i : { 0, 1 } ) assert( edges[0][i] == edges[1][0] || edges[0][i] == edges[1][1] );
+            diploid.insert( d ? diploid.end() : diploid.begin(), Diploid( edges[0][0], edges[0][1] ) );
+        }
+    }
+    
+    struct DipPair{ Diploid* dip[2]; int net; };
+    vector<DipPair> pairs, conflicts;
+    for ( int i = 0; i < diploid.size(); i++ ) if ( !diploid[i].homo_ ) for ( int j = i+1; j < diploid.size(); j++ ) if ( !diploid[j].homo_ )
+    {
+        unordered_set<ReadId> ids[2];
+        for ( int ii: { 0, 1 } ) for ( int jj: { 0, 1 } ) for ( NodePath* l : diploid[i].alleles_[ii] ) for ( NodePath* r : diploid[j].alleles_[jj] )
+        {
+            for ( PathPairs* pp : l->paired_[1] ) if ( pp->node_[1] == r )
+            {
+                ids[ii == jj].insert( pp->ids_.begin(), pp->ids_.end() );
+                ids[ii == jj].insert( pp->mates_.begin(), pp->mates_.end() );
+                break;
+            }
+        }
+        DipPair paired;
+        paired.dip[0] = &diploid[i];
+        paired.dip[1] = &diploid[j];
+//        for ( int k : { 0, 1 } )for ( ReadId id : ids[k] ) if ( ids[!k].find( id ) == ids[!k].end() ) paired.net += k ? 1 : -1;
+        int scores[2]{0};
+        for ( int k : { 0, 1 } )for ( ReadId id : ids[k] ) if ( ids[!k].find( id ) == ids[!k].end() ) scores[k]++;
+        paired.net = scores[1] > scores[0] ? scores[1] - scores[0]*2 : scores[1]*2 - scores[0];
+        if ( max( scores[0], scores[1] ) > min( scores[0], scores[1] )*2 ) pairs.push_back( paired );
+    }
+    sort( pairs.begin(), pairs.end(), []( DipPair& a, DipPair& b ){ return abs( a.net ) > abs( b.net ); } );
+    unordered_map<Diploid*, bool> used;
+    while ( !pairs.empty() )
+    {
+        used.insert( make_pair( pairs[0].dip[0], 0 ) );
+        used.insert( make_pair( pairs[0].dip[1], pairs[0].net < 0 ) );
+        pairs.erase( pairs.begin() );
+        for ( int i = 0; i < pairs.size(); i++ )
+        {
+            int found[2]{ 2, 2 };
+            for ( int j : { 0, 1 } )
+            {
+                auto it = used.find( pairs[i].dip[j] );
+                if ( it != used.end() ) found[j] = it->second;
+            }
+            if ( found[0] == 2 && found[1] == 2 ) continue;
+            bool added = true;
+            if ( found[0] != 2 && found[1] != 2 )
+            {
+                if ( ( pairs[i].net > 0 ) != ( found[0] == found[1] ) )
+                {
+                    conflicts.push_back( pairs[i] );
+                }
+                added = false;
+            }
+            for ( int j : { 0, 1 } ) if ( found[j] == 2 ) used.insert( make_pair( pairs[i].dip[j], pairs[i].net > 0 ? found[!j] : !found[!j] ) );
+            pairs.erase( pairs.begin() + i-- );
+            if ( added ) i = -1;
+        }
+    }
+    
+    for ( int i = 0; i < diploid.size(); i++ )
+    {
+        bool flip = false;
+        auto it = used.find( &diploid[i] );
+        if ( it != used.end() ) flip = it->second;
+        alleles[0].insert( alleles[0].end(), diploid[i].alleles_[flip].begin(), diploid[i].alleles_[flip].end() );
+        alleles[1].insert( alleles[1].end(), diploid[i].alleles_[!flip].begin(), diploid[i].alleles_[!flip].end() );
+    }
+}
+

@@ -18,25 +18,18 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef TYPES_H
-#define TYPES_H
+#ifndef REVIEW_H
+#define REVIEW_H
 
-#include <string>
-#include <vector>
-#include <tuple>
-#include <unordered_map>
-#include <unordered_set>
-#include <cmath>
+#include "types.h"
 
-using namespace std;
+class Review
+{
+    void printUsage( string msg );
+    void printUsage( bool failed=false );
+public:
+    Review( int argc, char** argv );
+};
 
-#define LOCASS_VERSION "2.0"
-
-typedef uint32_t ReadId;
-typedef uint32_t SeqNum;
-typedef uint64_t CharId;
-typedef uint8_t Char;
-
-
-#endif /* TYPES_H */
+#endif /* REVIEW_H */
 

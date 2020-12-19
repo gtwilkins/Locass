@@ -1,8 +1,4 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
+
 
 #include "local_alignment.h"
 #include <algorithm>
@@ -167,16 +163,6 @@ void LocalAlignment::realign( std::string &a, std::string &b, bool conform, bool
         x.erase( x.end()-i, x.end() );
         y.erase( y.end()-i, y.end() );
     }
-//    if ( bluntEnd && ( a.back() == '-' || b.back() == '-' ) )
-//    {
-//        std::string &x = ( a.back() == '-' ? a : b ), &y = ( a.back() == '-' ? b : a );
-//        for ( int i = x.size()-1; i > 0 && x[i] == '-'; i--) if ( x[i-1] != '-' ) x.erase( x.begin() + i, x.end() );
-//        int gap = 0;
-//        for ( int i = x.size()-1; i >= 0 && y[i] == '-'; i-- ) gap++;
-//        gap = std::min( gap, (int)y.size() - (int)x.size() );
-//        if ( gap > 0 ) y.erase( y.begin() + (int)x.size() - gap, y.begin() + (int)x.size() );
-//        if ( y.size() > x.size() ) y.erase( y.begin() + x.size(), y.end() );
-//    }
 }
 
 int LocalAlignment::score( int i, int j, char &c, int* coords )
@@ -223,106 +209,6 @@ int LocalAlignment::score( int i, int j, char &c, int* coords )
     
     return best;
 }
-
-//void LocalAlignment::setAlign( std::string &a, std::string &b )
-//{
-//    int i = a_.size()-1, j = b_.size()-1, run[2];
-//    while ( i > i_ )
-//    {
-//        a += a_[i--];
-//        b += '-';
-//    }
-//    while ( j > j_ )
-//    {
-//        a += '-';
-//        b += b_[j--];
-//    }
-//    
-//    while ( i >= 0 && j >= 0 )
-//    {
-//        if ( m_[i+1][j+1] == m_[i][j] + ( a_[i] == b_[j] ? 1 : ( ( a_[i] == 'N' || b_[j] == 'N' ) ? 0 : -1 ) ) )
-//        {
-//            a += a_[i--];
-//            b += b_[j--];
-//        }
-//        else
-//        {
-//            int tmpRuns[2]{0};
-//            if ( freePolymer_ )
-//            {
-//                setRuns( run, i, j );
-//                tmpRuns[0] = run[0];
-//                tmpRuns[1] = run[1];
-//                if ( run[0] && m_[i+1][j+1] != m_[ i+1-run[0] ][j+1] ) run[0] = 0;
-//                if ( run[1] && m_[i+1][j+1] != m_[i+1][ j+1-run[1] ] ) run[1] = 0;
-//            }
-//            
-//            if ( !run[0] && !run[1] && m_[i+1][j+1] == m_[i][j+1] - 1 ) run[0] = 1;
-//            if ( !run[0] && !run[1] && m_[i+1][j+1] == m_[i+1][j] - 1 ) run[1] = 1;
-//            if ( run[0] && run[1] ) run[1] = 0;
-//            
-//            
-//            while( run[0]-- )
-//            {
-//                a += a_[i--];
-//                b += '-';
-//            }
-//            while( run[1]-- )
-//            {
-//                a += '-';
-//                b += b_[j--];
-//            }
-//        }
-//    }
-//    
-//    while ( i >= 0 )
-//    {
-//        a += a_[i--];
-//        b += '-';
-//    }
-//    while ( j >= 0 )
-//    {
-//        a += '-';
-//        b += b_[j--];
-//    }
-//    
-//    std::reverse( a.begin(), a.end() );
-//    std::reverse( b.begin(), b.end() );
-//}
-
-//int LocalAlignment::setCoords( int* coords )
-//{
-//    int i = i_, j = b_.size()-1, run[2];
-//    
-//    while ( i >= 0 && j >= 0 )
-//    {
-//        if ( m_[i+1][j+1] == m_[i][j] + ( a_[i] == b_[j] ? 1 : ( ( a_[i] == 'N' || b_[j] == 'N' ) ? 0 : -1 ) ) )
-//        {
-//            i--;
-//            j--;
-//        }
-//        else
-//        {
-//            if ( a_[i] != b_[j] ) setRuns( run, i, j );
-//            else run[0] = run[1] = 0;
-//            
-//            if ( run[0] && m_[i+1][j+1] != m_[ i+1-run[0] ][j+1] ) run[0] = 0;
-//            if ( run[1] && m_[i+1][j+1] != m_[i+1][ j+1-run[1] ] ) run[1] = 0;
-//            if ( !run[0] && !run[1] && m_[i+1][j+1] == m_[i][j+1] - 1 ) run[0] = 1;
-//            if ( !run[0] && !run[1] && m_[i+1][j+1] == m_[i+1][j] - 1 ) run[1] = 1;
-//            
-//            assert( ( run[0] || run[1] ) && !( run[0] && run[1] ) );
-//            
-//            while( run[0]-- ) i--;
-//            while( run[1]-- ) j--;
-//        }
-//    }
-//    
-//    coords[0] = i+1;
-//    coords[1] = i_+1;
-//    
-//    return m_[i_+1][j_+1];
-//}
 
 void LocalAlignment::setRuns( int* run, int i, int j )
 {

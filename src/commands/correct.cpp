@@ -22,6 +22,7 @@
 extern Parameters params;
 
 Correct::Correct( int argc, char** argv )
+: fileType_( 0 )
 {
     ir_ = NULL;
     da_ = NULL;
@@ -31,7 +32,7 @@ Correct::Correct( int argc, char** argv )
 //    PreprocessFiles* ppf = NULL;
     string oprefix;
     demate_ = deadapter_ = deamplify_ = false;
-    pairCount_ = trimCount_ = adpCount_ = discardCount_ = overlapCount_ = reoverlapCount_ = 0;
+    pairCount_ = trimCount_ = adpCount_ = discardCount_ = overlapCount_ = reoverlapCount_ = connectCount_ = connectPairCount_ = 0;
     cap_ = 0;
     
     for ( int i ( 2 ); i < argc; i++ )
@@ -69,10 +70,21 @@ Correct::Correct( int argc, char** argv )
 //        cout << getDuration( startTime );
 //        exit( 1 );
 //    }
-    if ( ifn_.empty() ) failure( "Input file not provided." );
+    if ( !ifn_.empty() )
+    {
+        ifstream ifs( ifn_ );
+        string line;
+        getline( ifs, line );
+        if ( line.empty() ) failure( "Couldn't read sequences from file." );
+        if ( line[0] == '>' ) fileType_ = 2;
+        else if ( line[0] == '@' ) fileType_ = 4;
+        else fileType_ = 1;
+        ifs.close();
+    }
+    else failure( "Input file not provided." );
     if ( !Filenames::exists( ifn_ ) ) failure( "Could not open input file." );
     if ( oprefix.empty() ) oprefix = ifn_.substr( 0, ifn_.find_last_of( '.' ) );
-    ofns_[0] = oprefix + "_corrected.fastq";
+    ofns_[0] = oprefix + "_corrected." + ( fileType_ == 4 ? "fastq" : ( fileType_ == 2 ? "fasta" : "seq") );
     ofns_[1] = oprefix + "_tmp_seqs.bin";
     ofns_[2] = oprefix + "_tmp_stat.bin";
     ofns_[3] = oprefix + "_tmp_kmer.bin";
@@ -101,6 +113,7 @@ Correct::Correct( int argc, char** argv )
     if ( discardCount_ ) cout << discardCount_ << " pairs were discarded as self-complements." << endl;
     if ( corrected && discardCount ) cout << ( pairCount_ - discardCount ) << " pairs remained undiscarded." << endl;
     if ( adpCount_ ) cout << adpCount_ << " pairs were consolidated and trimmed as self-compliments." << endl;
+    if ( connectCount_ ) cout << connectPairCount_ << " pairs contained connecting adapters. Consequently, " << connectCount_ << " reads were trimmed" << endl;
     if ( overlapCount_ ) cout << overlapCount_ << " paired-end reads overlapped, " << reoverlapCount_ << " of those reads were corrected " << endl;
     if ( trimCount_ ) cout << trimCount_ << " chimeric mated reads were trimmed." << endl;
     if ( CorrectAlign::nCorrectCount ) cout << CorrectAlign::nCorrectCount << " undetermined bases were corrected." << endl;
@@ -139,7 +152,7 @@ void Correct::correct()
     uint64_t id = 0, usedCount = 0;
     uint8_t idTable[8] = { 128, 64, 32, 16, 8, 4, 2, 1 };
     int baseLen = readLen_, cutoff = readLen_ * .9;
-    while ( readFastq( ifsReads, lines[0] ) && readFastq( ifsReads, lines[1] ) )
+    while ( readFile( ifsReads, lines[0] ) && readFile( ifsReads, lines[1] ) )
     {
         if ( cap_ ) for ( int i : { 0, 1 } ) for ( int j : { 1, 3 } ) if ( lines[i][j].size() > cap_ )
         {
@@ -147,10 +160,15 @@ void Correct::correct()
         }
         if ( df_ ) df_->overwrite( lines );
         bool used = used_ && ( used_[id/8] & ( idTable[id%8] ) );
-        bool adapter = !used && da_ && da_->isOverlap( lines[0][1], lines[1][1], lines[0][3], lines[1][3], !demate_ );
+        bool adapter = false, connector = false;
+        if ( !used && da_ )
+        {
+            adapter = da_->isOverlap( lines[0][1], lines[1][1], lines[0][3], lines[1][3], !demate_ );
+            for ( int d : { 0, 1 } ) if ( da_->isConnected( lines[d][1], lines[d][3] ) && ( connector = true ) ) connectCount_++;
+        }
         
         // Correct mated pair
-        if ( !used && !adapter && demate_ )
+        if ( !used && !adapter && !connector && demate_ )
         {
             bool trimmed[2]{ false, false };
             int lens[2]{0};
@@ -178,21 +196,26 @@ void Correct::correct()
         }
         if ( used ) usedCount++;
         if ( adapter ) ( demate_ || lines[0][1].empty() ? discardCount_ : adpCount_ )++;
+        if ( connector ) connectPairCount_++;
         
         if ( !demate_ && !adapter && overlapCorrect( lines[0][1], lines[1][1], lines[0][3], lines[1][3] ) ) overlapCount_++;
         
         if ( !used && ( !demate_ || !adapter ) && !lines[0][1].empty() )
         {
             // Silence verbose headers
-            lines[0][0] = "@";
-            lines[1][0] = "@";
+            lines[0][0] = fileType_ == 4 ? "@" : ">";
+            lines[1][0] = fileType_ == 4 ? "@" : ">";
             lines[0][2] = "+";
             lines[1][2] = "+";
             
             // Silence reverse pair if adapter found
             if ( adapter ) lines[1][1] = string( lines[0][1].size(), 'N' );
             if ( adapter ) lines[1][3] = string( lines[0][1].size(), 35 );
-            for ( int i = 0; i < 2; i++ ) for ( int j = 0; j < 4; j++ ) ofs_ << lines[i][j] << "\n";
+            for ( int i = 0; i < 2; i++ )
+            {
+                if ( fileType_ > 1 ) for ( int j = 0; j < fileType_; j++ ) ofs_ << lines[i][j] << "\n";
+                else if ( fileType_ == 1 ) ofs_ << lines[i][1] << "\n";
+            }
         }
         
         id++;
@@ -379,6 +402,7 @@ void Correct::deamplifyScrutinise()
 
 bool Correct::overlapCorrect( string &seq1, string &seq2, string &phred1, string &phred2 )
 {
+    return false;
     string rev = revCompNew( seq2 );
     for ( int i = seq1.size()/2; i+24 < seq1.size(); i+=24 )
     {
@@ -405,14 +429,14 @@ bool Correct::overlapCorrect( string &seq1, string &seq2, string &phred1, string
         for ( ; r < seq1.size() && r+off < rev.size(); r++ ) if ( seq1[r] != rev[r+off] && ( corrected = true ) )
         {
             seq1[r] = rev[r+off];
-            phred1[r] = 35;
+            if ( r < phred1.size() ) phred1[r] = 35;
         }
         
         for ( ; l-- > 0 && l+off >= 0; ) if ( seq1[l] != rev[l+off] && ( corrected = true ) )
         {
             assert( seq2.end()[-l-off-1] != getComp( seq1[l] ) );
             seq2.end()[-l-off-1] = getComp( seq1[l] );
-            phred2.end()[-l-off-1] = 35;
+            if ( l+off < phred2.size() ) phred2.end()[-l-off-1] = 35;
         }
         
         if ( corrected ) reoverlapCount_++;
@@ -427,6 +451,16 @@ bool Correct::overlapCorrect( string &seq1, string &seq2, string &phred1, string
 bool Correct::readFastq( ifstream &ifs, string (&lines)[4] )
 {
     if ( !ifs.good() || !getline( ifs, lines[0] ) || !getline( ifs, lines[1] ) || !getline( ifs, lines[2] ) || !getline( ifs, lines[3] ) ) return false;
+    return true;
+}
+
+bool Correct::readFile( ifstream &ifs, string (&lines)[4] )
+{
+    if ( !ifs.good() || !fileType_ ) return false;
+    if ( fileType_ > 1 && !getline( ifs, lines[0] ) ) return false;
+    if ( !getline( ifs, lines[1] ) ) return false;
+    if ( fileType_ == 4 && ( !getline( ifs, lines[2] ) || !getline( ifs, lines[3] ) ) ) return false;
+    if ( fileType_ != 4 ) lines[3] = lines[1].empty() ? "" : string( lines[1].size(), 63 );
     return true;
 }
 

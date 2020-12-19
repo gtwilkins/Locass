@@ -156,7 +156,7 @@ NodeList Node::importNodes( ifstream &fh )
             assert( data.size() % 3 == 0 );
             for ( int i ( 0 ); i < data.size(); i += 3 )
             {
-                node->addRead( stoull( data[i] ), stol( data[i+1] ), stol( data[i+2] ), false );
+//                node->addRead( stoull( data[i] ), stol( data[i+1] ), stol( data[i+2] ), false );
             }
         }
         else
@@ -179,7 +179,8 @@ NodeList Node::importNodes( ifstream &fh )
         {
             if ( i != j )
             {
-                nodeMap[i]->addClone( nodeMap[j] );
+//                nodeMap[i]->addClone( nodeMap[j] );
+                nodeMap[i]->addCloned( nodeMap[j] );
             }
         }
     }
@@ -214,11 +215,12 @@ NodeList Node::importNodes( ifstream &fh )
     
     for ( Node* n : nodes )
     {
-        n->setCoverage();
+//        n->setCoverage();
         if ( n->drxn_ == 2 )
         {
-            n->validLimits_[0] = n->validLimits_[1] = n->ends_[0];
-            n->validLimits_[2] = n->validLimits_[3] = n->ends_[1];
+            n->validLimits_[0] = n->validLimits_[1] = n->ends_.origin[0] = n->ends_[0];
+            n->validLimits_[2] = n->validLimits_[3] = n->ends_.origin[1] = n->ends_[1];
+            for ( int d : { 0, 1 } ) n->ends_.init( n->ends_[d], d );
         }
         
         n->stop_[0] = 0;

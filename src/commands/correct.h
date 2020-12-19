@@ -40,6 +40,7 @@ private:
     bool overlapCorrect( string &seq1, string &seq2, string &phred1, string &phred2 );
     
     bool readFastq( ifstream &ifs, string (&lines)[4] );
+    bool readFile( ifstream &ifs, string (&lines)[4] );
 //    void censorFiles( string fn, ofstream &ofsOut, bool paired, bool chim, bool pyro );
 //    void correct( Querier &bwt, string fn, bool paired, bool chim, bool pyro );
 //    bool readSequence( ifstream &ifs, MarksFile &mf, string* lines, vector<Interval*> &ils, bool chim, bool pyro );
@@ -52,13 +53,14 @@ private:
     DeamplifyFiles* df_;
     ofstream ofs_;
     uint8_t* used_;
-    int64_t pairCount_, trimCount_, adpCount_, discardCount_, overlapCount_, reoverlapCount_;
+    int64_t pairCount_, trimCount_, adpCount_, discardCount_, overlapCount_, reoverlapCount_, connectCount_, connectPairCount_;
     uint8_t readLen_;
     int32_t maxSeqMem_, cap_;
     string ifn_, ofns_[5], fnBase_, fnSeqs_, joiner_, ender_;
     ifstream ifsReads_;
     ofstream ofsIntervals_, ofsPairs_, ofsSingles_;
     uint64_t byteCount_, dontAddByte_;
+    int fileType_;
     bool demate_, deadapter_, deamplify_;
 };
 
